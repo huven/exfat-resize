@@ -59,7 +59,7 @@ if("@EXFAT_RESIZE_BUILD_CLI@")
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     if(NOT cli_result EQUAL 0 OR
-       NOT cli_output STREQUAL "exfat-resize @PROJECT_VERSION@")
+       NOT cli_output STREQUAL "exfat-resize @EXFAT_RESIZE_BUILD_VERSION@")
         message(FATAL_ERROR
             "Installed CLI version check failed:\n${cli_output}${cli_error}"
         )

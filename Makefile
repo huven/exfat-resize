@@ -2,8 +2,6 @@
 
 CMAKE ?= cmake
 CTEST ?= ctest
-HOSTCC ?= cc
-HOSTCFLAGS ?= -O2
 
 BUILD ?= build
 SANITIZE_BUILD ?= $(BUILD)/sanitize
@@ -68,8 +66,8 @@ cli-sanitize-test: sanitize-build
 release-test:
 	tests/package/release-package.sh
 
-dist: tools/make-dist.sh tools/print-version.c
-	@HOSTCC="$(HOSTCC)" HOSTCFLAGS="$(HOSTCFLAGS)" tools/make-dist.sh
+dist: VERSION tools/make-dist.sh tools/version.sh
+	@tools/make-dist.sh
 
 clean:
 	rm -rf "$(BUILD)" "$(SANITIZE_BUILD)" "$(SANITIZE_CONSUMER_BUILD)" dist

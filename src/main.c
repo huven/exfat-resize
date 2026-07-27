@@ -4,7 +4,6 @@
 
 #include "device.h"
 #include "exfat_resize.h"
-#include "version.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -14,6 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifndef EXFAT_RESIZE_BUILD_VERSION
+#error "EXFAT_RESIZE_BUILD_VERSION must be provided by the build system"
+#endif
 
 static void print_usage(FILE *stream)
 {
@@ -145,7 +148,7 @@ int main(int argc, char **argv)
 			print_help();
 			return EXIT_SUCCESS;
 		case 'V':
-			printf("exfat-resize %s\n", EXFAT_RESIZE_VERSION);
+			printf("exfat-resize %s\n", EXFAT_RESIZE_BUILD_VERSION);
 			return EXIT_SUCCESS;
 		default:
 			print_usage(stderr);

@@ -34,8 +34,8 @@ expect_version_rejected() {
 		echo "unsupported package version $requested_version was accepted" >&2
 		exit 1
 	fi
-	if ! grep -F "version: $version" "$log" >/dev/null; then
-		echo "package rejection did not identify installed version $version" >&2
+	if ! grep -F "version: $package_version" "$log" >/dev/null; then
+		echo "package rejection did not identify installed version $package_version" >&2
 		cat "$log" >&2
 		exit 1
 	fi
@@ -48,8 +48,9 @@ cd "$project_root"
 git status --short --untracked-files=all >"$temporary/status.before"
 "$make_command" dist
 
-version=$(build/dist/print-version)
-archive=dist/exfat-resize-$version.tar.gz
+package_version=$(cat build/dist/package-version)
+build_version=$(cat build/dist/build-version)
+archive=dist/exfat-resize-$build_version.tar.gz
 archive_name=${archive##*/}
 if [ ! -f "$archive" ] || [ ! -f "$archive.sha256" ]; then
 	echo "release archive or checksum is missing" >&2
@@ -64,8 +65,18 @@ cp "$archive" "$temporary/reference.tar.gz"
 cp "$archive.sha256" "$temporary/reference.tar.gz.sha256"
 
 git clone --quiet --no-local "$project_root" "$temporary/dirty-helper-repository"
-printf '%s\n' 'This uncommitted file is intentionally not valid C.' \
-	>"$temporary/dirty-helper-repository/tools/print-version.c"
+printf '%s\n' '' 'This uncommitted line is intentional.' \
+	>>"$temporary/dirty-helper-repository/README.md"
+"$cmake_command" -S "$temporary/dirty-helper-repository" \
+	-B "$temporary/dirty-cli" \
+	-DEXFAT_RESIZE_BUILD_CLI=ON \
+	-DEXFAT_RESIZE_BUILD_TESTS=OFF
+"$cmake_command" --build "$temporary/dirty-cli" --parallel --target exfat-resize
+dirty_cli_version=$("$temporary/dirty-cli/exfat-resize" --version)
+if [ "$dirty_cli_version" != "exfat-resize $build_version-dirty" ]; then
+	echo "dirty checkout CLI version does not identify the dirty tree" >&2
+	exit 1
+fi
 (
 	cd "$temporary/dirty-helper-repository"
 	"$make_command" dist
@@ -76,14 +87,22 @@ cmp "$temporary/reference.tar.gz.sha256" \
 	"$temporary/dirty-helper-repository/$archive.sha256"
 
 tar -xzf "$temporary/reference.tar.gz" -C "$temporary"
-source_tree=$temporary/exfat-resize-$version
+source_tree=$temporary/exfat-resize-$build_version
 if [ ! -d "$source_tree" ] || [ -e "$source_tree/.git" ]; then
 	echo "release archive did not produce a Git-free source tree" >&2
 	exit 1
 fi
-if ! grep -F "#define EXFAT_RESIZE_VERSION \"$version\"" \
-	"$source_tree/src/version.h" >/dev/null; then
-	echo "archive name and archived version header disagree" >&2
+if [ "$(cat "$source_tree/VERSION")" != "$package_version" ]; then
+	echo "archive and package version disagree" >&2
+	exit 1
+fi
+if [ "$(cat "$source_tree/.tarball-version")" != "$build_version" ]; then
+	echo "archive name and archived build version disagree" >&2
+	exit 1
+fi
+archive_commit=$(gzip -dc "$temporary/reference.tar.gz" | git get-tar-commit-id)
+if [ "$archive_commit" != "$(git rev-parse --verify 'HEAD^{commit}')" ]; then
+	echo "archive provenance does not identify the packaged commit" >&2
 	exit 1
 fi
 
@@ -93,7 +112,7 @@ fi
 	-DEXFAT_RESIZE_BUILD_TESTS=OFF
 "$cmake_command" --build "$temporary/archive-cli" --parallel --target exfat-resize
 archive_cli_version=$("$temporary/archive-cli/exfat-resize" --version)
-if [ "$archive_cli_version" != "exfat-resize $version" ]; then
+if [ "$archive_cli_version" != "exfat-resize $build_version" ]; then
 	echo "archive name and built CLI version disagree" >&2
 	exit 1
 fi
@@ -108,26 +127,26 @@ fi
 cmp "$source_tree/LICENSE" "$temporary/prefix/share/doc/exfat_resize/LICENSE"
 cmp "$source_tree/README.md" "$temporary/prefix/share/doc/exfat_resize/README.md"
 installed_cli_version=$("$temporary/prefix/bin/exfat-resize" --version)
-if [ "$installed_cli_version" != "exfat-resize $version" ]; then
-	echo "installed CLI version disagrees with package version" >&2
+if [ "$installed_cli_version" != "exfat-resize $build_version" ]; then
+	echo "installed CLI version disagrees with build version" >&2
 	exit 1
 fi
 
-compatible_version=${version%.*}
-major=${version%%.*}
-patch=${version##*.}
+compatible_version=${package_version%.*}
+major=${package_version%%.*}
+patch=${package_version##*.}
 incompatible_version=$((major + 1)).0.0
-future_version=${version%.*}.$((patch + 1))
+future_version=${package_version%.*}.$((patch + 1))
 
 build_consumer find-package-exact \
 	-DCMAKE_PREFIX_PATH="$temporary/prefix" \
-	-DEXFAT_RESIZE_FIND_VERSION="$version" \
+	-DEXFAT_RESIZE_FIND_VERSION="$package_version" \
 	-DEXFAT_RESIZE_FIND_EXACT=ON \
-	-DEXFAT_RESIZE_EXPECTED_VERSION="$version"
+	-DEXFAT_RESIZE_EXPECTED_VERSION="$package_version"
 build_consumer find-package-compatible \
 	-DCMAKE_PREFIX_PATH="$temporary/prefix" \
 	-DEXFAT_RESIZE_FIND_VERSION="$compatible_version" \
-	-DEXFAT_RESIZE_EXPECTED_VERSION="$version"
+	-DEXFAT_RESIZE_EXPECTED_VERSION="$package_version"
 expect_version_rejected "$incompatible_version" find-package-incompatible
 expect_version_rejected "$future_version" find-package-future
 
@@ -143,8 +162,8 @@ build_consumer add-subdirectory-consumer \
 "$cmake_command" --install "$temporary/relative-include-build"
 build_consumer relative-include-consumer \
 	-DCMAKE_PREFIX_PATH="$temporary/relative-prefix" \
-	-DEXFAT_RESIZE_FIND_VERSION="$version" \
-	-DEXFAT_RESIZE_EXPECTED_VERSION="$version"
+	-DEXFAT_RESIZE_FIND_VERSION="$package_version" \
+	-DEXFAT_RESIZE_EXPECTED_VERSION="$package_version"
 
 "$cmake_command" -S "$source_tree" -B "$temporary/absolute-include-build" \
 	-DEXFAT_RESIZE_BUILD_CLI=OFF \
@@ -155,8 +174,8 @@ build_consumer relative-include-consumer \
 "$cmake_command" --install "$temporary/absolute-include-build"
 build_consumer absolute-include-consumer \
 	-DCMAKE_PREFIX_PATH="$temporary/absolute-prefix" \
-	-DEXFAT_RESIZE_FIND_VERSION="$version" \
-	-DEXFAT_RESIZE_EXPECTED_VERSION="$version"
+	-DEXFAT_RESIZE_FIND_VERSION="$package_version" \
+	-DEXFAT_RESIZE_EXPECTED_VERSION="$package_version"
 
 git status --short --untracked-files=all >"$temporary/status.after"
 if ! cmp -s "$temporary/status.before" "$temporary/status.after"; then

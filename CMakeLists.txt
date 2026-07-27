@@ -6,25 +6,31 @@ if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
 
-file(
-    STRINGS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h"
-    EXFAT_RESIZE_VERSION_DEFINE
-    REGEX
-        "^#define EXFAT_RESIZE_VERSION \"[0-9]+\\.[0-9]+\\.[0-9]+\"$"
-    LIMIT_COUNT
-        1
+execute_process(
+    COMMAND
+        sh "${CMAKE_CURRENT_SOURCE_DIR}/tools/version.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE
+        EXFAT_RESIZE_VERSION_RESULT
+    OUTPUT_VARIABLE
+        EXFAT_RESIZE_VERSION_OUTPUT
+    ERROR_VARIABLE
+        EXFAT_RESIZE_VERSION_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-if(NOT EXFAT_RESIZE_VERSION_DEFINE)
-    message(FATAL_ERROR "Could not read EXFAT_RESIZE_VERSION from src/version.h")
+if(NOT EXFAT_RESIZE_VERSION_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Could not determine the exfat-resize version:\n"
+        "${EXFAT_RESIZE_VERSION_ERROR}"
+    )
 endif()
-string(
-    REGEX REPLACE
-        "^#define EXFAT_RESIZE_VERSION \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$"
-        "\\1"
-        EXFAT_RESIZE_VERSION
-        "${EXFAT_RESIZE_VERSION_DEFINE}"
-)
+string(REPLACE "\n" ";" EXFAT_RESIZE_VERSION_FIELDS "${EXFAT_RESIZE_VERSION_OUTPUT}")
+list(LENGTH EXFAT_RESIZE_VERSION_FIELDS EXFAT_RESIZE_VERSION_FIELD_COUNT)
+if(NOT EXFAT_RESIZE_VERSION_FIELD_COUNT EQUAL 2)
+    message(FATAL_ERROR "Version helper returned invalid output")
+endif()
+list(GET EXFAT_RESIZE_VERSION_FIELDS 0 EXFAT_RESIZE_VERSION)
+list(GET EXFAT_RESIZE_VERSION_FIELDS 1 EXFAT_RESIZE_BUILD_VERSION)
 
 project(exfat_resize VERSION ${EXFAT_RESIZE_VERSION} LANGUAGES C)
 
@@ -133,6 +139,12 @@ if(EXFAT_RESIZE_BUILD_CLI)
         exfat-resize
         PRIVATE
             ${PROJECT_SOURCE_DIR}/src
+    )
+
+    target_compile_definitions(
+        exfat-resize
+        PRIVATE
+            EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}"
     )
 
     target_link_libraries(

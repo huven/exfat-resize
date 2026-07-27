@@ -4,34 +4,25 @@
 set -eu
 set -f
 
-host_cc=${HOSTCC:-cc}
-host_cflags=${HOSTCFLAGS:--O2}
+project_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 dist_build=build/dist
 dist_output=dist
-source_tree=$dist_build/source
+
+cd "$project_root"
 commit=$(git rev-parse --verify "HEAD^{commit}")
+version_info=$(sh tools/version.sh --commit "$project_root" "$commit")
+package_version=$(printf '%s\n' "$version_info" | sed -n '1p')
+build_version=$(printf '%s\n' "$version_info" | sed -n '2p')
 
 rm -rf "$dist_build"
-mkdir -p "$source_tree" "$dist_output"
-git -c tar.umask=022 archive --format=tar "$commit" >"$dist_build/source.tar"
-tar -xf "$dist_build/source.tar" -C "$source_tree"
+mkdir -p "$dist_build" "$dist_output"
+printf '%s\n' "$package_version" >"$dist_build/package-version"
+printf '%s\n' "$build_version" >"$dist_build/build-version"
 
-# HOSTCC and HOSTCFLAGS conventionally contain shell-separated argument lists.
-# Globbing is disabled above so their intentional expansion cannot match paths.
-# shellcheck disable=SC2086
-$host_cc $host_cflags -I"$source_tree/src" \
-	-o "$dist_build/print-version" "$source_tree/tools/print-version.c"
-version=$("$dist_build/print-version")
-case $version in
-	""|*[!0-9A-Za-z.-]*)
-		echo "invalid version: $version" >&2
-		exit 1
-		;;
-esac
-
-package=exfat-resize-$version
+package=exfat-resize-$build_version
 archive=$package.tar.gz
-git -c tar.umask=022 archive --format=tar --prefix="$package/" "$commit" \
+git -c tar.umask=022 archive --format=tar --prefix="$package/" \
+	--add-virtual-file="$package/.tarball-version:$build_version" "$commit" \
 	>"$dist_build/$package.tar"
 gzip -n -9 -c <"$dist_build/$package.tar" >"$dist_build/$archive"
 mv "$dist_build/$archive" "$dist_output/$archive"
