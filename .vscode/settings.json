@@ -1,0 +1,10 @@
+{
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/cmake/compile_commands.json",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/lib",
+        "${workspaceFolder}/src"
+    ],
+    "cmake.buildDirectory": "${workspaceFolder}/build/cmake"
+}

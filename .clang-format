@@ -1,0 +1,13 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: ForIndentation
+ColumnLimit: 100
+BreakBeforeBraces: Linux
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignEscapedNewlines: DontAlign
+BinPackParameters: false
+AllowShortFunctionsOnASingleLine: None
+Cpp11BracedListStyle: false

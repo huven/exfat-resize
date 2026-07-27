@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: MIT
+
+set(install_prefix "@CMAKE_CURRENT_BINARY_DIR@/install-tree")
+set(installed_library
+    "${install_prefix}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@exfat_resize@CMAKE_STATIC_LIBRARY_SUFFIX@"
+)
+set(installed_header "${install_prefix}/@CMAKE_INSTALL_INCLUDEDIR@/exfat_resize.h")
+set(installed_cli
+    "${install_prefix}/@CMAKE_INSTALL_BINDIR@/exfat-resize@CMAKE_EXECUTABLE_SUFFIX@"
+)
+set(installed_config
+    "${install_prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/exfat_resize/exfat_resizeConfig.cmake"
+)
+set(installed_version_config
+    "${install_prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/exfat_resize/exfat_resizeConfigVersion.cmake"
+)
+set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
+set(readme "${documentation_dir}/README.md")
+set(license "${documentation_dir}/LICENSE")
+set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
+
+file(REMOVE_RECURSE "${install_prefix}")
+execute_process(
+    COMMAND
+        "@CMAKE_COMMAND@" --install "@PROJECT_BINARY_DIR@" --prefix "${install_prefix}"
+    RESULT_VARIABLE
+        install_result
+    OUTPUT_VARIABLE
+        install_output
+    ERROR_VARIABLE
+        install_error
+)
+if(NOT install_result EQUAL 0)
+    message(FATAL_ERROR "Installation failed:\n${install_output}${install_error}")
+endif()
+foreach(required_file
+        "${installed_library}"
+        "${installed_header}"
+        "${installed_config}"
+        "${installed_version_config}"
+        "${readme}"
+        "${license}"
+        "${transaction_document}"
+)
+    if(NOT EXISTS "${required_file}")
+        message(FATAL_ERROR "Installed package file not found at ${required_file}")
+    endif()
+endforeach()
+
+if("@EXFAT_RESIZE_BUILD_CLI@")
+    if(NOT EXISTS "${installed_cli}")
+        message(FATAL_ERROR "Installed CLI not found at ${installed_cli}")
+    endif()
+    execute_process(
+        COMMAND "${installed_cli}" --version
+        RESULT_VARIABLE cli_result
+        OUTPUT_VARIABLE cli_output
+        ERROR_VARIABLE cli_error
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT cli_result EQUAL 0 OR
+       NOT cli_output STREQUAL "exfat-resize @PROJECT_VERSION@")
+        message(FATAL_ERROR
+            "Installed CLI version check failed:\n${cli_output}${cli_error}"
+        )
+    endif()
+endif()
+
+file(READ "${readme}" readme_contents)
+foreach(required_text
+        "## Safety"
+        "Make and verify a backup"
+        "run an appropriate exFAT filesystem checker"
+        "ensure the check completes successfully"
+        "is not a general filesystem checker"
+        "terminates without printing stage-specific recovery guidance"
+        "Do not retry the resize"
+        "restore the verified backup"
+        "## Filesystem compatibility"
+)
+    string(FIND "${readme_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR "Installed README does not contain: ${required_text}")
+    endif()
+endforeach()
+
+string(REGEX MATCHALL "\\[[^]]*\\]\\([^)]+\\)" readme_links "${readme_contents}")
+foreach(readme_link IN LISTS readme_links)
+    string(REGEX REPLACE "^.*\\(([^)]+)\\)$" "\\1" link_target "${readme_link}")
+    if(link_target MATCHES "^(#|[A-Za-z][A-Za-z0-9+.-]*:|/)")
+        continue()
+    endif()
+    string(REGEX REPLACE "#.*$" "" link_path "${link_target}")
+    if(NOT EXISTS "${documentation_dir}/${link_path}")
+        message(FATAL_ERROR
+            "Installed README link does not resolve: ${link_target}"
+        )
+    endif()
+endforeach()
+
+file(READ "${transaction_document}" transaction_contents)
+foreach(required_text
+        "# Resize transaction"
+        "## Transaction sequence"
+        "does not promise automatic resume or rollback"
+        "before the caller receives a stage"
+        "must not retry the resize"
+        "requires the verified backup"
+)
+    string(FIND "${transaction_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Installed transaction document does not contain: ${required_text}"
+        )
+    endif()
+endforeach()
+
+file(READ "${installed_header}" header_contents)
+foreach(required_text
+        "read the operational safety requirements"
+        "https://github.com/huven/exfat-resize#safety"
+)
+    string(FIND "${header_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR "Installed header does not contain: ${required_text}")
+    endif()
+endforeach()
+
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" -E compare_files "@PROJECT_SOURCE_DIR@/LICENSE" "${license}"
+    RESULT_VARIABLE license_comparison
+)
+if(NOT license_comparison EQUAL 0)
+    message(FATAL_ERROR "Installed LICENSE differs from the repository LICENSE")
+endif()

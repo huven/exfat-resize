@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: MIT
+
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (x86-64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install build and exFAT tools
+        run: sudo apt-get update && sudo apt-get install --yes cmake exfatprogs exfat-fuse
+
+      - name: Build and test
+        run: make test
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build and test
+        run: make test
+
+  linux-big-endian:
+    name: Linux (s390x, big endian)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install s390x compiler and emulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake gcc-s390x-linux-gnu qemu-user
+
+      - name: Build and test library
+        run: |
+          cmake -S . -B build/s390x \
+            -DEXFAT_RESIZE_BUILD_CLI=OFF \
+            -DEXFAT_RESIZE_BUILD_TESTS=ON \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=s390x \
+            -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
+            "-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x;-L;/usr/s390x-linux-gnu"
+          cmake --build build/s390x --parallel
+          ctest --test-dir build/s390x --output-on-failure
+
+  sanitizers:
+    name: Linux (Clang, ASan/UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Clang and exFAT tools
+        run: sudo apt-get update && sudo apt-get install --yes clang cmake exfatprogs exfat-fuse
+
+      - name: Build and test with sanitizers
+        run: CC=clang CXX=clang++ make sanitize-test
+
+  release-package:
+    name: Release package consumers (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: macOS
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes cmake g++
+
+      - name: Build and test the release package
+        run: CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} make release-test
