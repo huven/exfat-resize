@@ -139,7 +139,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 			(void)close(fd);
 			return -1;
 		}
-		if (blocks > UINT64_MAX / sector_size) {
+		if (sector_size > 0 && blocks > UINT64_MAX / sector_size) {
 			(void)snprintf(error, error_size, "%s: device is too large", path);
 			(void)close(fd);
 			return -1;
