@@ -85,7 +85,7 @@ regular-file locks remain advisory as described above.
 Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
 to use all available space:
 
-    truncate -s 2G image.exfat
+    truncate -s +2G image.exfat
     exfat-resize image.exfat
 
 Grow the exFAT filesystem on an unmounted raw device to use all available space:

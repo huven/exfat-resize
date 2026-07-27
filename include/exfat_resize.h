@@ -11,6 +11,16 @@ extern "C" {
 #endif
 
 /*
+ * Library-owned namespace
+ *
+ * By contract with this library, applications must not introduce file-scope C
+ * identifiers or macro names beginning with exfat_resize_ or EXFAT_RESIZE_.
+ * Only functions, types, and constants documented by this header are public
+ * API; other identifiers in these namespaces may change or disappear without
+ * notice.
+ */
+
+/*
  * Before calling exfat_resize(), read the operational safety requirements and
  * supported filesystem subset in README.md, distributed with the library and
  * available at:
