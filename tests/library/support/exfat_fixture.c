@@ -45,8 +45,7 @@ static uint32_t boot_checksum_byte(uint32_t checksum, unsigned char value)
 
 static uint16_t entry_checksum_byte(uint16_t checksum, unsigned char value)
 {
-	uint16_t rotated =
-	    (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
+	uint16_t rotated = (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
 
 	return (uint16_t)(rotated + value);
 }

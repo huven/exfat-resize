@@ -235,8 +235,7 @@ static size_t sector_operation_count(
 
 static uint16_t entry_checksum_byte(uint16_t checksum, unsigned char value)
 {
-	uint16_t rotated =
-	    (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
+	uint16_t rotated = (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
 
 	return (uint16_t)(rotated + value);
 }
@@ -539,8 +538,7 @@ static void test_entry_checksum_unsigned_wrap(void)
 	}
 	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	error = exfat_fixture_resize(
-	    &fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
+	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
 		exfat_fixture_destroy(&fixture);
@@ -549,13 +547,12 @@ static void test_entry_checksum_unsigned_wrap(void)
 
 	error = exfat_resize_map_growth_cluster(&fixture.geometry, &target, 6, &mapped_child);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(exfat_fixture_read_sector(
-	          &fixture, exfat_fixture_cluster_sector(&target, mapped_child), child, sizeof(child)) ==
-	    0);
+	CHECK(exfat_fixture_read_sector(&fixture, exfat_fixture_cluster_sector(&target, mapped_child),
+	          child, sizeof(child)) == 0);
 	CHECK(child[1] == 3);
 	CHECK(child[32 * 3] == ENTRY_VENDOR_EXTENSION);
-	CHECK(exfat_resize_load_le16(child, sizeof(child), 2, &stored_checksum) ==
-	    EXFAT_RESIZE_SUCCESS);
+	CHECK(
+	    exfat_resize_load_le16(child, sizeof(child), 2, &stored_checksum) == EXFAT_RESIZE_SUCCESS);
 	CHECK(stored_checksum == entry_set_checksum_count(child, 4));
 	exfat_fixture_destroy(&fixture);
 }
