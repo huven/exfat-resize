@@ -289,10 +289,6 @@ static int boot_regions_are_consistent(
 	const struct exfat_resize_geometry *right = &backup->geometry;
 
 	return main->checksum == backup->checksum &&
-	    main->filesystem_revision == backup->filesystem_revision &&
-	    main->bytes_per_sector_shift == backup->bytes_per_sector_shift &&
-	    main->sectors_per_cluster_shift == backup->sectors_per_cluster_shift &&
-	    main->number_of_fats == backup->number_of_fats &&
 	    left->volume_sector_count == right->volume_sector_count &&
 	    left->sectors_per_cluster == right->sectors_per_cluster &&
 	    left->fat_offset == right->fat_offset && left->fat_length == right->fat_length &&

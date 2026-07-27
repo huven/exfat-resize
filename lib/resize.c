@@ -116,7 +116,6 @@ struct resize_context {
 	unsigned char *work_buffer;
 	unsigned char *copy_buffer;
 	uint32_t copy_sector_capacity;
-	size_t work_buffer_size;
 	size_t sector_size;
 	/* Cluster size in bytes. */
 	uint64_t cluster_size;
@@ -943,7 +942,6 @@ static enum exfat_resize_error scan_bitmap_entry(struct resize_context *context,
 	    EXFAT_BITMAP_FIRST_CLUSTER_OFFSET, EXFAT_BITMAP_DATA_LENGTH_OFFSET, &context->old_bitmap);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	context->old_bitmap.no_fat_chain = 0;
 	required_length = ((uint64_t)context->source.cluster_count + 7) / 8;
 	if (context->old_bitmap.data_length < required_length)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
@@ -1206,25 +1204,29 @@ static enum exfat_resize_error remove_old_bitmap_from_model(struct resize_contex
 	error = stream_cluster_count(context, &context->old_bitmap, &cluster_count);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	cluster = context->old_bitmap.first_cluster;
+	error = map_cluster(context, context->old_bitmap.first_cluster, &cluster);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	for (index = 0; index < cluster_count; ++index) {
 		uint32_t *model_entry;
 
-		error = model_entry_for_source_cluster(context, cluster, &model_entry);
-		if (error != EXFAT_RESIZE_SUCCESS)
-			return error;
+		if (!cluster_is_valid(&context->target, cluster))
+			return EXFAT_RESIZE_INTERNAL_ERROR;
+		model_entry = &context->allocation_model[cluster - 2];
 		if (*model_entry == 0 || *model_entry == EXFAT_MODEL_NO_FAT_CHAIN ||
 		    *model_entry == EXFAT_FAT_BAD_CLUSTER)
 			return EXFAT_RESIZE_INTERNAL_ERROR;
+		/*
+		 * claim_allocation_stream() has already validated the source FAT
+		 * chain and stored its mapped links as the canonical model chain.
+		 */
+		next = *model_entry;
 		*model_entry = 0;
 
-		error = fat_get(context, &context->source, cluster, &context->caches[0], &next);
-		if (error != EXFAT_RESIZE_SUCCESS)
-			return error;
 		if (index + 1 == cluster_count)
-			return fat_value_is_end_of_chain(next) ? EXFAT_RESIZE_SUCCESS
-			                                       : EXFAT_RESIZE_INTERNAL_ERROR;
-		if (!cluster_is_valid(&context->source, next))
+			return next == EXFAT_FAT_END_OF_CHAIN ? EXFAT_RESIZE_SUCCESS
+			                                      : EXFAT_RESIZE_INTERNAL_ERROR;
+		if (!cluster_is_valid(&context->target, next))
 			return EXFAT_RESIZE_INTERNAL_ERROR;
 		cluster = next;
 	}
@@ -1467,14 +1469,13 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	memset(context, 0, sizeof(*context));
 	context->allocator = options->allocator;
 	context->stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
-	context->work_buffer_size = EXFAT_WORK_BUFFER_SIZE;
 	context->work_buffer =
-	    context->allocator.allocate(context->allocator.context, context->work_buffer_size);
+	    context->allocator.allocate(context->allocator.context, EXFAT_WORK_BUFFER_SIZE);
 	if (context->work_buffer == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
 
 	error = exfat_resize_probe_sector_size(
-	    device, context->work_buffer, context->work_buffer_size, &filesystem_sector_size);
+	    device, context->work_buffer, EXFAT_WORK_BUFFER_SIZE, &filesystem_sector_size);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error =
@@ -1491,10 +1492,10 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	context->caches[1].data = context->work_buffer + context->sector_size;
 	context->copy_buffer = context->work_buffer + context->sector_size * 2;
 	context->copy_sector_capacity =
-	    (uint32_t)((context->work_buffer_size - context->sector_size * 2) / context->sector_size);
+	    (uint32_t)((EXFAT_WORK_BUFFER_SIZE - context->sector_size * 2) / context->sector_size);
 
 	error = exfat_resize_read_boot_regions(
-	    context->device, context->work_buffer, context->work_buffer_size, &context->source);
+	    context->device, context->work_buffer, EXFAT_WORK_BUFFER_SIZE, &context->source);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error = validate_reserved_fat_entries(context);
@@ -1581,7 +1582,7 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	invalidate_caches(context);
 	context->stage = EXFAT_RESIZE_STAGE_PREPARING;
 	error = exfat_resize_set_volume_dirty(
-	    context->device, context->work_buffer, context->work_buffer_size, 1);
+	    context->device, context->work_buffer, EXFAT_WORK_BUFFER_SIZE, 1);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
@@ -1616,13 +1617,13 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 		return error;
 
 	error = exfat_resize_write_boot_regions(context->device, &context->target,
-	    context->used_cluster_count, context->work_buffer, context->work_buffer_size);
+	    context->used_cluster_count, context->work_buffer, EXFAT_WORK_BUFFER_SIZE);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
 	context->stage = EXFAT_RESIZE_STAGE_FINALIZING;
 	error = exfat_resize_set_volume_dirty(
-	    context->device, context->work_buffer, context->work_buffer_size, 0);
+	    context->device, context->work_buffer, EXFAT_WORK_BUFFER_SIZE, 0);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
@@ -1644,7 +1645,7 @@ static void release_context(struct resize_context *context)
 	}
 	if (context->work_buffer != NULL) {
 		context->allocator.deallocate(
-		    context->allocator.context, context->work_buffer, context->work_buffer_size);
+		    context->allocator.context, context->work_buffer, EXFAT_WORK_BUFFER_SIZE);
 		context->work_buffer = NULL;
 	}
 }

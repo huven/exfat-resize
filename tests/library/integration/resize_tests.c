@@ -827,6 +827,54 @@ static void test_bitmap_entry_rejections(void)
 	}
 }
 
+static void test_malformed_bitmap_fat_chain_is_rejected(void)
+{
+	enum bitmap_chain_mutation {
+		BITMAP_CHAIN_ENDS_EARLY,
+		BITMAP_CHAIN_LINK_OUT_OF_RANGE,
+		BITMAP_CHAIN_MISSING_END_OF_CHAIN
+	};
+	static const enum bitmap_chain_mutation mutations[] = {
+		BITMAP_CHAIN_ENDS_EARLY,
+		BITMAP_CHAIN_LINK_OUT_OF_RANGE,
+		BITMAP_CHAIN_MISSING_END_OF_CHAIN,
+	};
+	struct exfat_resize_options options = resize_options();
+	size_t index;
+
+	for (index = 0; index < sizeof(mutations) / sizeof(mutations[0]); ++index) {
+		struct exfat_fixture fixture;
+		enum exfat_resize_error error;
+		enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+		uint32_t cluster;
+		uint32_t next;
+
+		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+		switch (mutations[index]) {
+		case BITMAP_CHAIN_ENDS_EARLY:
+			cluster = fixture.bitmap_clusters[0];
+			next = UINT32_C(0xffffffff);
+			break;
+		case BITMAP_CHAIN_LINK_OUT_OF_RANGE:
+			cluster = fixture.bitmap_clusters[0];
+			next = fixture.geometry.cluster_count + 2;
+			break;
+		case BITMAP_CHAIN_MISSING_END_OF_CHAIN:
+			cluster = fixture.bitmap_clusters[fixture.bitmap_cluster_count - 1];
+			next = 9;
+			break;
+		}
+		CHECK(store_fat_entry(&fixture, &fixture.geometry, cluster, next) == 0);
+		memory_block_device_clear_operations(&fixture.memory);
+
+		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, &stage);
+		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
+		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+		check_operations_are_read_only(&fixture);
+		exfat_fixture_destroy(&fixture);
+	}
+}
+
 static void test_unallocated_benign_entries_are_preserved(void)
 {
 	struct exfat_resize_options options = resize_options();
@@ -1902,6 +1950,7 @@ int main(void)
 	test_unsupported_directory_entries();
 	test_insufficient_growth_is_rejected();
 	test_bitmap_entry_rejections();
+	test_malformed_bitmap_fat_chain_is_rejected();
 	test_unallocated_benign_entries_are_preserved();
 	test_malformed_fat_streams_are_rejected();
 	test_misplaced_system_entry_is_rejected();
