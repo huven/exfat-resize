@@ -628,7 +628,8 @@ static enum exfat_resize_error write_directory_entry(struct resize_context *cont
 
 static uint16_t update_entry_checksum(uint16_t checksum, unsigned char value)
 {
-	return (uint16_t)(((checksum << 15) | (checksum >> 1)) + value);
+	uint16_t rotated = (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
+	return (uint16_t)(rotated + value);
 }
 
 static uint16_t checksum_entry(

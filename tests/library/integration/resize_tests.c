@@ -21,6 +21,7 @@ enum {
 	ENTRY_FILE = 0x85,
 	ENTRY_STREAM = 0xc0,
 	ENTRY_FILE_NAME = 0xc1,
+	ENTRY_VENDOR_EXTENSION = 0xe0,
 	ENTRY_VENDOR_ALLOCATION = 0xe1,
 	ALLOCATION_POSSIBLE = 0x01,
 	NO_FAT_CHAIN = 0x02
@@ -232,21 +233,62 @@ static size_t sector_operation_count(
 	return count;
 }
 
-static uint16_t entry_set_checksum_count(const unsigned char *entries, size_t entry_count)
+static uint16_t entry_checksum_byte(uint16_t checksum, unsigned char value)
+{
+	uint16_t rotated =
+	    (uint16_t)(((uint32_t)checksum << 15) | ((uint32_t)checksum >> 1));
+
+	return (uint16_t)(rotated + value);
+}
+
+static uint16_t entry_set_checksum_bytes(const unsigned char *entries, size_t byte_count)
 {
 	uint16_t checksum = 0;
 	size_t index;
 
-	for (index = 0; index < 32 * entry_count; ++index) {
+	for (index = 0; index < byte_count; ++index) {
 		if (index != 2 && index != 3)
-			checksum = (uint16_t)(((checksum << 15) | (checksum >> 1)) + entries[index]);
+			checksum = entry_checksum_byte(checksum, entries[index]);
 	}
 	return checksum;
+}
+
+static uint16_t entry_set_checksum_count(const unsigned char *entries, size_t entry_count)
+{
+	return entry_set_checksum_bytes(entries, 32 * entry_count);
 }
 
 static uint16_t entry_set_checksum(const unsigned char entries[32 * 3])
 {
 	return entry_set_checksum_count(entries, 3);
+}
+
+static int configure_checksum_wrap_entry_set(struct exfat_fixture *fixture)
+{
+	static const unsigned char wrap_prefix[] = { 1, 83, 255, 255, 255, 255 };
+	unsigned char child[SECTOR_SIZE];
+	unsigned char *vendor;
+	uint64_t child_sector = exfat_fixture_cluster_sector(&fixture->geometry, 6);
+	uint16_t checksum;
+
+	if (exfat_fixture_read_sector(fixture, child_sector, child, sizeof(child)) != 0)
+		return -1;
+	child[1] = 3;
+	vendor = child + 32 * 3;
+	memset(vendor, 0, 32);
+	vendor[0] = ENTRY_VENDOR_EXTENSION;
+	memcpy(vendor + 2, wrap_prefix, sizeof(wrap_prefix));
+	vendor[2 + sizeof(wrap_prefix)] = 1;
+	if (entry_set_checksum_bytes(child, 32 * 3 + 2 + sizeof(wrap_prefix)) != UINT16_MAX)
+		return -1;
+
+	checksum = entry_set_checksum_count(child, 4);
+	if (exfat_resize_store_le16(child, 32, 2, checksum) != EXFAT_RESIZE_SUCCESS)
+		return -1;
+	if (fixture->memory.device.write(fixture->memory.device.context, child_sector, 1, child) != 0)
+		return -1;
+	memory_block_device_clear_operations(&fixture->memory);
+	return 0;
 }
 
 static int configure_crossing_file_entry_set(
@@ -476,6 +518,45 @@ static void test_resize(void)
 	CHECK(bitmap_cluster_is_set(&fixture, &target, bitmap_cluster, bitmap_cluster));
 	CHECK(load_fat_entry(&fixture, &target, bitmap_cluster) != 0);
 
+	exfat_fixture_destroy(&fixture);
+}
+
+static void test_entry_checksum_unsigned_wrap(void)
+{
+	struct exfat_resize_geometry target;
+	struct exfat_resize_options options = resize_options();
+	struct exfat_fixture fixture;
+	unsigned char child[SECTOR_SIZE];
+	enum exfat_resize_error error;
+	uint16_t stored_checksum = 0;
+	uint32_t mapped_child = 0;
+
+	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT + 1) == 0);
+	if (configure_checksum_wrap_entry_set(&fixture) != 0) {
+		CHECK(0);
+		exfat_fixture_destroy(&fixture);
+		return;
+	}
+	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	error = exfat_fixture_resize(
+	    &fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS) {
+		exfat_fixture_destroy(&fixture);
+		return;
+	}
+
+	error = exfat_resize_map_growth_cluster(&fixture.geometry, &target, 6, &mapped_child);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_fixture_read_sector(
+	          &fixture, exfat_fixture_cluster_sector(&target, mapped_child), child, sizeof(child)) ==
+	    0);
+	CHECK(child[1] == 3);
+	CHECK(child[32 * 3] == ENTRY_VENDOR_EXTENSION);
+	CHECK(exfat_resize_load_le16(child, sizeof(child), 2, &stored_checksum) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(stored_checksum == entry_set_checksum_count(child, 4));
 	exfat_fixture_destroy(&fixture);
 }
 
@@ -1813,6 +1894,7 @@ static void test_multi_sector_cluster_copy(void)
 int main(void)
 {
 	test_resize();
+	test_entry_checksum_unsigned_wrap();
 	test_fat_boundary_geometry();
 	test_fat_padding_is_not_written();
 	test_preflight_is_read_only();
