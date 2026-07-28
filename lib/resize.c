@@ -1139,7 +1139,6 @@ struct bitmap_reader {
 	struct stream_cursor cursor;
 	unsigned char current_byte;
 	unsigned int bit_in_byte;
-	int have_byte;
 };
 
 /* Allocation model */
@@ -1157,19 +1156,16 @@ static enum exfat_resize_error read_old_bitmap_bit(
 {
 	enum exfat_resize_error error;
 
-	if (!reader->have_byte) {
+	if (reader->bit_in_byte == 0) {
 		error = read_stream(context, &reader->cursor, &reader->current_byte, 1);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-		reader->have_byte = 1;
 	}
 
 	*allocated = (reader->current_byte & (1u << reader->bit_in_byte)) != 0;
 	++reader->bit_in_byte;
-	if (reader->bit_in_byte == 8) {
+	if (reader->bit_in_byte == 8)
 		reader->bit_in_byte = 0;
-		reader->have_byte = 0;
-	}
 	return EXFAT_RESIZE_SUCCESS;
 }
 

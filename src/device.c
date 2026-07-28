@@ -105,16 +105,14 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	}
 	if (fstat(fd, &st) != 0) {
 		set_error(error, error_size, path);
-		(void)close(fd);
-		return -1;
+		goto fail_after_open;
 	}
 #if defined(__linux__)
 	if (st.st_dev != path_st.st_dev || st.st_ino != path_st.st_ino ||
 	    S_ISREG(st.st_mode) != S_ISREG(path_st.st_mode) ||
 	    S_ISBLK(st.st_mode) != S_ISBLK(path_st.st_mode)) {
 		(void)snprintf(error, error_size, "%s: changed while opening", path);
-		(void)close(fd);
-		return -1;
+		goto fail_after_open;
 	}
 #endif
 
@@ -125,8 +123,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 				set_in_use_error(error, error_size, path);
 			else
 				set_error(error, error_size, path);
-			(void)close(fd);
-			return -1;
+			goto fail_after_open;
 		}
 #endif
 		bytes = (uint64_t)st.st_size;
@@ -136,13 +133,11 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		if (ioctl(fd, DKIOCGETBLOCKSIZE, &sector_size) != 0 ||
 		    ioctl(fd, DKIOCGETBLOCKCOUNT, &blocks) != 0) {
 			set_error(error, error_size, path);
-			(void)close(fd);
-			return -1;
+			goto fail_after_open;
 		}
 		if (sector_size > 0 && blocks > UINT64_MAX / sector_size) {
 			(void)snprintf(error, error_size, "%s: device is too large", path);
-			(void)close(fd);
-			return -1;
+			goto fail_after_open;
 		}
 		bytes = blocks * (uint64_t)sector_size;
 #else
@@ -150,8 +145,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		if (ioctl(fd, BLKSSZGET, &logical_size) != 0 || logical_size <= 0 ||
 		    ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
 			set_error(error, error_size, path);
-			(void)close(fd);
-			return -1;
+			goto fail_after_open;
 		}
 		sector_size = (uint32_t)logical_size;
 #endif
@@ -160,13 +154,11 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	if (sector_size < 512 || sector_size > 4096 || (sector_size & (sector_size - 1)) != 0) {
 		(void)snprintf(
 		    error, error_size, "%s: unsupported logical sector size %" PRIu32, path, sector_size);
-		(void)close(fd);
-		return -1;
+		goto fail_after_open;
 	}
 	if (bytes < sector_size) {
 		(void)snprintf(error, error_size, "%s: device is too small", path);
-		(void)close(fd);
-		return -1;
+		goto fail_after_open;
 	}
 
 	device->fd = fd;
@@ -180,6 +172,10 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	device->block_device.write = block_device_write;
 	device->block_device.sync = block_device_sync;
 	return 0;
+
+fail_after_open:
+	(void)close(fd);
+	return -1;
 }
 
 void device_close(struct device *device)
