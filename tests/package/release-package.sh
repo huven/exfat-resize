@@ -131,6 +131,12 @@ if [ "$installed_cli_version" != "exfat-resize $build_version" ]; then
 	echo "installed CLI version disagrees with build version" >&2
 	exit 1
 fi
+installed_manpage=$temporary/prefix/share/man/man8/exfat-resize.8
+if [ ! -f "$installed_manpage" ] ||
+	! grep -F "exfat-resize $build_version" "$installed_manpage" >/dev/null; then
+	echo "installed manual page is missing or has the wrong version" >&2
+	exit 1
+fi
 
 compatible_version=${package_version%.*}
 major=${package_version%%.*}

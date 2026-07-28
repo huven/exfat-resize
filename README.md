@@ -45,6 +45,9 @@ Only filesystems meeting the
     exfat-resize -h | --help
     exfat-resize -V | --version
 
+After installation, `man exfat-resize` provides the complete command-line
+reference, including operational safety and recovery guidance.
+
 With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of
 bytes. It is rounded down to a whole filesystem sector. Shrinking is not
@@ -165,8 +168,9 @@ failure guarantees.
 
 Downstream CMake projects can use `add_subdirectory()` and link
 `exfat_resize::exfat_resize`. The install target also provides the header,
-static library, CLI executable, and CMake package files. This README and the
-exact MIT license are installed under CMake's `CMAKE_INSTALL_DOCDIR`.
+static library, CLI executable, manual page, and CMake package files. This
+README and the exact MIT license are installed under CMake's
+`CMAKE_INSTALL_DOCDIR`.
 Installed CMake packages use same-major version compatibility, so consumers
 can require a compatible 1.x release:
 

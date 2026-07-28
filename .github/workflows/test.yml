@@ -21,10 +21,13 @@ jobs:
           persist-credentials: false
 
       - name: Install build and exFAT tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake exfatprogs exfat-fuse
+        run: sudo apt-get update && sudo apt-get install --yes cmake exfatprogs exfat-fuse mandoc
 
       - name: Build and test
         run: make test
+
+      - name: Lint manual page
+        run: mandoc -T lint build/exfat-resize.8
 
   macos:
     name: macOS
@@ -38,6 +41,9 @@ jobs:
 
       - name: Build and test
         run: make test
+
+      - name: Lint manual page
+        run: mandoc -T lint build/exfat-resize.8
 
   linux-big-endian:
     name: Linux (s390x, big endian)

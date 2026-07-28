@@ -43,6 +43,7 @@ static void print_help(void)
 	       "  Make and verify a backup before using this tool.\n"
 	       "\n"
 	       "Documentation:\n"
+	       "  See exfat-resize(8).\n"
 	       "  Read the safety requirements, supported-filesystem limitations, and\n"
 	       "  recovery instructions in README.md distributed with exfat-resize or at:\n"
 	       "    https://github.com/huven/exfat-resize#safety\n");

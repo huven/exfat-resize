@@ -154,6 +154,12 @@ if(EXFAT_RESIZE_BUILD_CLI)
     )
 
     exfat_resize_configure_target(exfat-resize)
+
+    configure_file(
+        docs/exfat-resize.8.in
+        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+        @ONLY
+    )
 endif()
 
 configure_package_config_file(
@@ -186,6 +192,12 @@ if(EXFAT_RESIZE_BUILD_CLI)
             exfat-resize
         RUNTIME DESTINATION
             ${CMAKE_INSTALL_BINDIR}
+    )
+    install(
+        FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+        DESTINATION
+            ${CMAKE_INSTALL_MANDIR}/man8
     )
 endif()
 
