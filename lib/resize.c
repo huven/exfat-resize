@@ -95,6 +95,11 @@ struct directory_location {
 	size_t offset;
 };
 
+struct buffered_directory_entry {
+	unsigned char data[EXFAT_DIRECTORY_ENTRY_SIZE];
+	struct directory_location location;
+};
+
 struct directory_worklist {
 	struct allocation_stream *items;
 	size_t count;
@@ -644,6 +649,40 @@ static uint16_t checksum_entry(
 	return checksum;
 }
 
+static enum exfat_resize_error read_and_validate_file_entry_set(struct resize_context *context,
+    struct stream_cursor *cursor,
+    const unsigned char primary[EXFAT_DIRECTORY_ENTRY_SIZE],
+    uint8_t secondary_count,
+    struct buffered_directory_entry **secondary_entries)
+{
+	struct buffered_directory_entry *entries =
+	    (struct buffered_directory_entry *)context->copy_buffer;
+	enum exfat_resize_error error;
+	uint16_t calculated_checksum;
+	uint16_t stored_checksum;
+	uint32_t index;
+
+	if ((size_t)secondary_count * sizeof(*entries) >
+	    (size_t)context->copy_sector_capacity * context->sector_size)
+		return EXFAT_RESIZE_INTERNAL_ERROR;
+	error = exfat_resize_load_le16(
+	    primary, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_FILE_CHECKSUM_OFFSET, &stored_checksum);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	calculated_checksum = checksum_entry(0, primary, 1);
+	for (index = 0; index < secondary_count; ++index) {
+		error =
+		    read_directory_entry(context, cursor, entries[index].data, &entries[index].location);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
+		calculated_checksum = checksum_entry(calculated_checksum, entries[index].data, 0);
+	}
+	if (calculated_checksum != stored_checksum)
+		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	*secondary_entries = entries;
+	return EXFAT_RESIZE_SUCCESS;
+}
+
 static int mapping_changes_cluster_numbers(const struct resize_context *context)
 {
 	return context->displaced_cluster_count != 0 &&
@@ -806,35 +845,32 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 {
 	struct allocation_stream source_stream;
 	struct allocation_stream target_stream;
-	struct directory_location location;
-	unsigned char secondary[EXFAT_DIRECTORY_ENTRY_SIZE];
+	struct buffered_directory_entry *secondary_entries;
+	unsigned char *secondary;
 	enum exfat_resize_error error;
 	uint64_t valid_data_length;
 	uint16_t attributes;
 	uint16_t calculated_checksum;
-	uint16_t stored_checksum;
 	uint8_t secondary_count;
 	uint32_t index;
 	int is_directory;
 
-	error = exfat_resize_load_le16(
-	    primary, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_FILE_CHECKSUM_OFFSET, &stored_checksum);
-	if (error != EXFAT_RESIZE_SUCCESS)
+	secondary_count = primary[EXFAT_FILE_SECONDARY_COUNT_OFFSET];
+	if (secondary_count < 2)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	error = read_and_validate_file_entry_set(
+	    context, cursor, primary, secondary_count, &secondary_entries);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = exfat_resize_load_le16(
 	    primary, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_FILE_ATTRIBUTES_OFFSET, &attributes);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	is_directory = (attributes & EXFAT_DIRECTORY_ATTRIBUTE) != 0;
-	secondary_count = primary[EXFAT_FILE_SECONDARY_COUNT_OFFSET];
-	if (secondary_count < 2)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	calculated_checksum = checksum_entry(0, primary, 1);
 
 	for (index = 0; index < secondary_count; ++index) {
-		error = read_directory_entry(context, cursor, secondary, &location);
-		if (error != EXFAT_RESIZE_SUCCESS)
-			return error;
+		secondary = secondary_entries[index].data;
 		if ((secondary[0] & (EXFAT_ENTRY_IN_USE | EXFAT_ENTRY_SECONDARY)) !=
 		    (EXFAT_ENTRY_IN_USE | EXFAT_ENTRY_SECONDARY))
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
@@ -886,16 +922,14 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 			}
 		}
 
-		calculated_checksum = checksum_entry(calculated_checksum, secondary, 0);
 		if (mode == DIRECTORY_SCAN_REWRITE) {
-			error = write_directory_entry(context, &location, secondary);
+			calculated_checksum = checksum_entry(calculated_checksum, secondary, 0);
+			error = write_directory_entry(context, &secondary_entries[index].location, secondary);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 		}
 	}
 
-	if (mode != DIRECTORY_SCAN_REWRITE && calculated_checksum != stored_checksum)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	if (mode == DIRECTORY_SCAN_REWRITE) {
 		error = exfat_resize_store_le16(
 		    primary, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_FILE_CHECKSUM_OFFSET, calculated_checksum);

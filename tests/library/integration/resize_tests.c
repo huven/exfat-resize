@@ -659,6 +659,42 @@ static void test_preflight_is_read_only(void)
 	exfat_fixture_destroy(&fixture);
 }
 
+static void test_invalid_entry_checksum_does_not_direct_fat_reads(void)
+{
+	const uint32_t untrusted_cluster = 200;
+	struct exfat_resize_options options = resize_options();
+	struct exfat_fixture fixture;
+	unsigned char root[SECTOR_SIZE];
+	unsigned char *entry_set = root + 32 * 2;
+	unsigned char *stream = entry_set + 32;
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	uint64_t root_sector;
+	uint64_t untrusted_fat_sector;
+	uint16_t stored_checksum = 0;
+
+	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+	root_sector = exfat_fixture_cluster_sector(&fixture.geometry, 2);
+	untrusted_fat_sector =
+	    fixture.geometry.fat_offset + (uint64_t)untrusted_cluster * 4 / SECTOR_SIZE;
+	CHECK(exfat_fixture_read_sector(&fixture, root_sector, root, sizeof(root)) == 0);
+	stream[1] = ALLOCATION_POSSIBLE;
+	CHECK(exfat_resize_store_le32(stream, 32, 20, untrusted_cluster) == EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_resize_load_le16(entry_set, 32, 2, &stored_checksum) == EXFAT_RESIZE_SUCCESS);
+	CHECK(stored_checksum != entry_set_checksum(entry_set));
+	CHECK(fixture.memory.device.write(fixture.memory.device.context, root_sector, 1, root) == 0);
+	CHECK(
+	    store_fat_entry(&fixture, &fixture.geometry, untrusted_cluster, UINT32_C(0xffffffff)) == 0);
+	memory_block_device_clear_operations(&fixture.memory);
+
+	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, &stage);
+	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
+	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+	check_operations_are_read_only(&fixture);
+	check_sector_is_not_read(&fixture, untrusted_fat_sector);
+	exfat_fixture_destroy(&fixture);
+}
+
 static void test_stream_extension_structure_is_validated(void)
 {
 	static const struct {
@@ -1943,6 +1979,7 @@ int main(void)
 	test_fat_boundary_geometry();
 	test_fat_padding_is_not_written();
 	test_preflight_is_read_only();
+	test_invalid_entry_checksum_does_not_direct_fat_reads();
 	test_stream_extension_structure_is_validated();
 	test_unsupported_directory_entries();
 	test_insufficient_growth_is_rejected();
