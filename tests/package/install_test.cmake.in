@@ -76,6 +76,7 @@ if("@EXFAT_RESIZE_BUILD_CLI@")
             "RECOVERY AFTER FAILURE"
             "restore the verified backup"
             "README.md"
+            "Enlarge a regular image by 2 GiB"
     )
         string(FIND "${manpage_contents}" "${required_text}" required_text_offset)
         if(required_text_offset EQUAL -1)

@@ -124,7 +124,7 @@ heap.
 Memory use includes a 1 MiB I/O work buffer, four bytes per target cluster, and
 a directory worklist that grows with the filesystem's directory structure.
 .SH EXAMPLES
-Enlarge a regular image to 2 GiB, then grow its filesystem to use all available
+Enlarge a regular image by 2 GiB, then grow its filesystem to use all available
 space:
 .PP
 .RS
