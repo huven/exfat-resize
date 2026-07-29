@@ -145,12 +145,9 @@ error = exfat_resize(&device, target_size, &options, &stage);
 ```
 
 Before writing, the library rebuilds and validates an in-memory allocation
-model covering the target cluster heap. Through the allocator, it requests a
-1 MiB I/O work buffer, four bytes per target cluster for the model, and an
-allocator-backed directory worklist that grows during preflight and is retained
-for the rewrite pass. A caller that does not want to reserve that memory
-anonymously can provide file-backed storage, for example by mapping suitably
-sized temporary files.
+model covering the target cluster heap. See the transaction document's
+[memory requirements](docs/TRANSACTION.md#memory-requirements) for
+allocator-backed working-memory sizes, lifetimes, and backing options.
 
 When an error is returned, `stage` describes the recovery boundary reached:
 

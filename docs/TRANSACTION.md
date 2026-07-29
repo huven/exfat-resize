@@ -59,20 +59,21 @@ issued since the preceding synchronization.
 ## Memory requirements
 
 The library requests a 1 MiB I/O work buffer through the caller's allocator.
-It uses that buffer for:
+It uses that buffer for boot-region I/O, cluster relocation, batched FAT and
+bitmap output, and buffering directory entry sets.
 
-- one sector for old-layout reads and general metadata caching;
-- one sector for simultaneous target-layout output.
-
-The remainder supports larger cluster-copy and metadata-output transfers.
-Directory entry sets are checksummed and rewritten one 32-byte entry at a time.
+It separately requests a cache block containing seven filesystem sectors.
+Dedicated caches retain source directory data, source directory FAT entries,
+source bitmap data, source bitmap FAT entries, source allocation-model FAT
+entries, target directory data, and target directory FAT entries. Directory
+entry sets are checksummed and rewritten one 32-byte entry at a time.
 
 In addition, `exfat_resize()` requests a writable allocation model containing
 one 32-bit value per target cluster. The model distinguishes free clusters,
 bad clusters, `NoFatChain` allocations, and target FAT links. It is completely
 built and checked against the source bitmap before the dirty flag is set, then
 used to generate both the target FAT and target bitmap. The caller controls
-how this storage is backed through the allocator callbacks; anonymous memory
+how this memory is backed through the allocator callbacks; anonymous memory
 and a memory-mapped temporary file are both possible.
 
 Directory traversal uses an additional allocator-backed worklist. It may grow

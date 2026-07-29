@@ -152,7 +152,7 @@ struct exfat_resize_allocator {
 };
 
 struct exfat_resize_options {
-	/* Allocator used for all temporary storage owned by the call. */
+	/* Allocator used for all working memory owned by the call. */
 	struct exfat_resize_allocator allocator;
 };
 
@@ -165,9 +165,9 @@ struct exfat_resize_options {
  * callback-reentrant calls must use different backing devices, and any shared
  * callback state must support that use.
  *
- * Through the allocator, the library requests a 1 MiB I/O work buffer, an
- * allocation model requiring four bytes per target cluster, and additional
- * storage for directory traversal grown entirely during preflight.
+ * Working-memory sizes and lifetimes requested through options->allocator
+ * are documented in the "Memory requirements" section of docs/TRANSACTION.md
+ * distributed with exfat-resize.
  *
  * If stage is not NULL, it must remain writable until the function returns.
  * It receives the resize stage reached even when the function returns an
@@ -177,7 +177,7 @@ struct exfat_resize_options {
  *
  * device supplies the sector-addressed backing-device view and callbacks;
  * target_size is the requested filesystem length in bytes and is rounded down
- * to a whole filesystem sector; options supplies temporary-storage allocation;
+ * to a whole filesystem sector; options supplies working-memory allocation;
  * and stage optionally receives the recovery boundary reached.
  *
  * Returns an exfat_resize_error describing success or the reason for failure.

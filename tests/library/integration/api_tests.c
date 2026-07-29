@@ -146,6 +146,7 @@ static void test_invalid_targets(void)
 		enum exfat_resize_error error;
 		enum exfat_resize_error expected = EXFAT_RESIZE_INTERNAL_ERROR;
 		enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+		size_t expected_allocations = 2;
 		uint64_t target = 0;
 
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
@@ -161,13 +162,14 @@ static void test_invalid_targets(void)
 		case OVERSIZED_TARGET:
 			target = fixture.memory.device.sector_count + 1;
 			expected = EXFAT_RESIZE_OUT_OF_BOUNDS;
+			expected_allocations = 1;
 			break;
 		}
 
 		error = exfat_fixture_resize(&fixture.memory.device, target, &options, &stage);
 		CHECK(error == expected);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-		CHECK(allocator.allocation_attempts == 1);
+		CHECK(allocator.allocation_attempts == expected_allocations);
 		CHECK(allocator.deallocation_calls == allocator.successful_allocations);
 		CHECK(test_allocator_is_clean(&allocator));
 		for (size_t operation = 0; operation < fixture.memory.operation_count; ++operation)

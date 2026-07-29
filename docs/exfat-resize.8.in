@@ -121,8 +121,9 @@ Before writing,
 .B exfat-resize
 constructs and validates an in-memory allocation model for the target cluster
 heap.
-Memory use includes a 1 MiB I/O work buffer, four bytes per target cluster, and
-a directory worklist that grows with the filesystem's directory structure.
+Detailed allocator-backed working-memory requirements are documented in
+.I docs/TRANSACTION.md
+distributed with exfat-resize.
 .SH EXAMPLES
 Enlarge a regular image by 2 GiB, then grow its filesystem to use all available
 space:
