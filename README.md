@@ -1,7 +1,8 @@
 # exfat-resize
 
-exfat-resize grows an existing exFAT filesystem in a regular file or raw block
-device. The backing object must be enlarged before the filesystem is resized.
+exfat-resize provides a portable C11 library and command-line tool for growing
+an existing exFAT filesystem in a regular file or raw block device. The backing
+object must be enlarged before the filesystem is resized.
 
 ## Safety
 
