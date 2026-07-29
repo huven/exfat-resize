@@ -4,22 +4,16 @@
 
 #include "support/exfat_fixture.h"
 #include "support/memory_block_device.h"
+#include "support/test_allocator.h"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 enum { TARGET_SECTOR_COUNT = 65536 };
 
 static int failure_count;
-
-struct allocator_state {
-	size_t allocation_count;
-	size_t deallocation_count;
-	size_t live_size;
-};
 
 #define CHECK(expression) \
 	do { \
@@ -28,39 +22,6 @@ struct allocator_state {
 			++failure_count; \
 		} \
 	} while (0)
-
-static void *tracked_allocate(void *context, size_t size)
-{
-	struct allocator_state *state = context;
-	void *memory = malloc(size);
-
-	++state->allocation_count;
-	if (memory != NULL)
-		state->live_size += size;
-	return memory;
-}
-
-static void tracked_deallocate(void *context, void *memory, size_t size)
-{
-	struct allocator_state *state = context;
-
-	CHECK(memory != NULL);
-	CHECK(size <= state->live_size);
-	if (size <= state->live_size)
-		state->live_size -= size;
-	++state->deallocation_count;
-	free(memory);
-}
-
-static struct exfat_resize_options resize_options(struct allocator_state *allocator)
-{
-	struct exfat_resize_options options;
-
-	options.allocator.context = allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
-	return options;
-}
 
 static void test_invalid_devices(void)
 {
@@ -83,8 +44,8 @@ static void test_invalid_devices(void)
 	size_t index;
 
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
-		struct allocator_state allocator = { 0 };
-		struct exfat_resize_options options = resize_options(&allocator);
+		struct test_allocator allocator = { 0 };
+		struct exfat_resize_options options = test_allocator_options(&allocator);
 		struct memory_block_device memory;
 		struct exfat_resize_block_device invalid;
 		const struct exfat_resize_block_device *device;
@@ -118,9 +79,9 @@ static void test_invalid_devices(void)
 		error = exfat_fixture_resize(device, TARGET_SECTOR_COUNT, &options, &stage);
 		CHECK(error == EXFAT_RESIZE_INVALID_DEVICE);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-		CHECK(allocator.allocation_count == 0);
-		CHECK(allocator.deallocation_count == 0);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.allocation_attempts == 0);
+		CHECK(allocator.deallocation_calls == 0);
+		CHECK(test_allocator_is_clean(&allocator));
 		CHECK(memory.operation_count == 0);
 		memory_block_device_destroy(&memory);
 	}
@@ -137,8 +98,8 @@ static void test_invalid_options(void)
 	size_t index;
 
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
-		struct allocator_state allocator = { 0 };
-		struct exfat_resize_options options = resize_options(&allocator);
+		struct test_allocator allocator = { 0 };
+		struct exfat_resize_options options = test_allocator_options(&allocator);
 		struct memory_block_device memory;
 		const struct exfat_resize_options *selected_options = &options;
 		enum exfat_resize_error error;
@@ -160,9 +121,9 @@ static void test_invalid_options(void)
 		error = exfat_fixture_resize(&memory.device, TARGET_SECTOR_COUNT, selected_options, &stage);
 		CHECK(error == EXFAT_RESIZE_INVALID_ARGUMENT);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-		CHECK(allocator.allocation_count == 0);
-		CHECK(allocator.deallocation_count == 0);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.allocation_attempts == 0);
+		CHECK(allocator.deallocation_calls == 0);
+		CHECK(test_allocator_is_clean(&allocator));
 		CHECK(memory.operation_count == 0);
 		memory_block_device_destroy(&memory);
 	}
@@ -179,8 +140,8 @@ static void test_invalid_targets(void)
 	size_t index;
 
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
-		struct allocator_state allocator = { 0 };
-		struct exfat_resize_options options = resize_options(&allocator);
+		struct test_allocator allocator = { 0 };
+		struct exfat_resize_options options = test_allocator_options(&allocator);
 		struct exfat_fixture fixture;
 		enum exfat_resize_error error;
 		enum exfat_resize_error expected = EXFAT_RESIZE_INTERNAL_ERROR;
@@ -206,9 +167,9 @@ static void test_invalid_targets(void)
 		error = exfat_fixture_resize(&fixture.memory.device, target, &options, &stage);
 		CHECK(error == expected);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-		CHECK(allocator.allocation_count == 1);
-		CHECK(allocator.deallocation_count == allocator.allocation_count);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.allocation_attempts == 1);
+		CHECK(allocator.deallocation_calls == allocator.successful_allocations);
+		CHECK(test_allocator_is_clean(&allocator));
 		for (size_t operation = 0; operation < fixture.memory.operation_count; ++operation)
 			CHECK(fixture.memory.operations[operation].kind == MEMORY_OPERATION_READ);
 		exfat_fixture_destroy(&fixture);
@@ -217,8 +178,8 @@ static void test_invalid_targets(void)
 
 static void test_preflight_io_error(void)
 {
-	struct allocator_state allocator = { 0 };
-	struct exfat_resize_options options = resize_options(&allocator);
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_options options = test_allocator_options(&allocator);
 	struct exfat_fixture fixture;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
@@ -228,9 +189,9 @@ static void test_preflight_io_error(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, &stage);
 	CHECK(error == EXFAT_RESIZE_IO_ERROR);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-	CHECK(allocator.allocation_count == 1);
-	CHECK(allocator.deallocation_count == 1);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.allocation_attempts == 1);
+	CHECK(allocator.deallocation_calls == 1);
+	CHECK(test_allocator_is_clean(&allocator));
 	CHECK(fixture.memory.operation_count == 1);
 	CHECK(fixture.memory.operations[0].kind == MEMORY_OPERATION_READ);
 	exfat_fixture_destroy(&fixture);
@@ -238,8 +199,8 @@ static void test_preflight_io_error(void)
 
 static void test_unsupported_sector_mapping(void)
 {
-	struct allocator_state allocator = { 0 };
-	struct exfat_resize_options options = resize_options(&allocator);
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_options options = test_allocator_options(&allocator);
 	struct memory_block_device memory;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
@@ -260,9 +221,9 @@ static void test_unsupported_sector_mapping(void)
 	    &memory.device, memory.device.sector_count * memory.device.sector_size, &options, &stage);
 	CHECK(error == EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
-	CHECK(allocator.allocation_count == 1);
-	CHECK(allocator.deallocation_count == 1);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.allocation_attempts == 1);
+	CHECK(allocator.deallocation_calls == 1);
+	CHECK(test_allocator_is_clean(&allocator));
 	CHECK(memory.operation_count == 1);
 	CHECK(memory.operations[0].kind == MEMORY_OPERATION_READ);
 	memory_block_device_destroy(&memory);

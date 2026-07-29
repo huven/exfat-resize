@@ -6,6 +6,7 @@
 #include "endian.h"
 #include "geometry.h"
 #include "support/exfat_fixture.h"
+#include "support/test_allocator.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -33,12 +34,8 @@ enum {
 static int failure_count;
 
 struct allocator_state {
+	struct test_allocator tracker;
 	struct memory_block_device *device;
-	size_t allocation_count;
-	size_t deallocation_count;
-	size_t largest_allocation_size;
-	size_t live_size;
-	size_t fail_on_allocation;
 	int allocation_after_write;
 };
 
@@ -89,38 +86,32 @@ static enum exfat_resize_error plan_fixture_growth(struct exfat_fixture *fixture
 static void *tracked_allocate(void *context, size_t size)
 {
 	struct allocator_state *state = context;
-	void *memory;
 	size_t index;
 
-	CHECK(size != 0);
-	++state->allocation_count;
-	if (size > state->largest_allocation_size)
-		state->largest_allocation_size = size;
 	if (state->device != NULL) {
 		for (index = 0; index < state->device->operation_count; ++index) {
 			if (state->device->operations[index].kind == MEMORY_OPERATION_WRITE)
 				state->allocation_after_write = 1;
 		}
 	}
-	if (state->allocation_count == state->fail_on_allocation)
-		return NULL;
-	memory = malloc(size);
-	if (memory != NULL)
-		state->live_size += size;
-	return memory;
+	return test_allocator_allocate(&state->tracker, size);
 }
 
 static void tracked_deallocate(void *context, void *memory, size_t size)
 {
 	struct allocator_state *state = context;
 
-	CHECK(memory != NULL);
-	CHECK(size != 0);
-	CHECK(size <= state->live_size);
-	if (size <= state->live_size)
-		state->live_size -= size;
-	++state->deallocation_count;
-	free(memory);
+	test_allocator_deallocate(&state->tracker, memory, size);
+}
+
+static struct exfat_resize_options tracked_resize_options(struct allocator_state *allocator)
+{
+	struct exfat_resize_options options;
+
+	options.allocator.context = allocator;
+	options.allocator.allocate = tracked_allocate;
+	options.allocator.deallocate = tracked_deallocate;
+	return options;
 }
 
 static uint32_t load_fat_entry(
@@ -430,17 +421,14 @@ static void test_resize(void)
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(target.cluster_heap_offset > fixture.geometry.cluster_heap_offset);
 
-	options = resize_options();
-	options.allocator.context = &allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
+	options = tracked_resize_options(&allocator);
 	error = exfat_resize(&fixture.memory.device,
 	    exfat_fixture_target_size(TARGET_SECTOR_COUNT) + SECTOR_SIZE - 1, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(allocator.allocation_count == 3);
-	CHECK(allocator.deallocation_count == 3);
-	CHECK(allocator.largest_allocation_size == WORK_BUFFER_SIZE);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.tracker.allocation_attempts == 3);
+	CHECK(allocator.tracker.deallocation_calls == 3);
+	CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
+	CHECK(test_allocator_is_clean(&allocator.tracker));
 	if (error != EXFAT_RESIZE_SUCCESS) {
 		exfat_fixture_destroy(&fixture);
 		return;
@@ -1247,16 +1235,13 @@ static void test_allocation_model_validates_bitmap(void)
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(set_bitmap_cluster(&fixture, 5, 0) == 0);
 	memory_block_device_clear_operations(&fixture.memory);
-	options = resize_options();
-	options.allocator.context = &allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
+	options = tracked_resize_options(&allocator);
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
-	CHECK(allocator.allocation_count == 3);
-	CHECK(allocator.deallocation_count == 3);
-	CHECK(allocator.largest_allocation_size == WORK_BUFFER_SIZE);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.tracker.allocation_attempts == 3);
+	CHECK(allocator.tracker.deallocation_calls == 3);
+	CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
+	CHECK(test_allocator_is_clean(&allocator.tracker));
 	check_operations_are_read_only(&fixture);
 	exfat_fixture_destroy(&fixture);
 
@@ -1336,16 +1321,13 @@ static void test_displaced_bad_cluster_is_rejected(void)
 		CHECK(mark_bad_cluster(&fixture, cases[index].bad_cluster) == 0);
 		memory_block_device_clear_operations(&fixture.memory);
 
-		options = resize_options();
-		options.allocator.context = &allocator;
-		options.allocator.allocate = tracked_allocate;
-		options.allocator.deallocate = tracked_deallocate;
+		options = tracked_resize_options(&allocator);
 		error = exfat_fixture_resize(
 		    &fixture.memory.device, cases[index].target_sector_count, &options, NULL);
 		CHECK(error == EXFAT_RESIZE_BAD_CLUSTER_CONFLICT);
-		CHECK(allocator.allocation_count == 3);
-		CHECK(allocator.deallocation_count == 3);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.tracker.allocation_attempts == 3);
+		CHECK(allocator.tracker.deallocation_calls == 3);
+		CHECK(test_allocator_is_clean(&allocator.tracker));
 		CHECK(exfat_fixture_read_sector(&fixture, 0, boot_sector, sizeof(boot_sector)) == 0);
 		CHECK(exfat_resize_load_le16(boot_sector, sizeof(boot_sector), VOLUME_FLAGS_OFFSET,
 		          &volume_flags) == EXFAT_RESIZE_SUCCESS);
@@ -1405,22 +1387,20 @@ static void test_allocator_failure_is_read_only(void)
 	size_t failing_allocation;
 
 	for (failing_allocation = 1; failing_allocation <= 2; ++failing_allocation) {
-		struct allocator_state allocator = { .fail_on_allocation = failing_allocation };
+		struct allocator_state allocator = { 0 };
 		struct exfat_resize_options options;
 		struct exfat_fixture fixture;
 		enum exfat_resize_error error;
 
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
-		options = resize_options();
-		options.allocator.context = &allocator;
-		options.allocator.allocate = tracked_allocate;
-		options.allocator.deallocate = tracked_deallocate;
+		test_allocator_set_fail_on_attempt(&allocator.tracker, failing_allocation);
+		options = tracked_resize_options(&allocator);
 		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 		CHECK(error == EXFAT_RESIZE_OUT_OF_MEMORY);
-		CHECK(allocator.allocation_count == failing_allocation);
-		CHECK(allocator.deallocation_count + 1 == failing_allocation);
-		CHECK(allocator.largest_allocation_size == WORK_BUFFER_SIZE);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.tracker.allocation_attempts == failing_allocation);
+		CHECK(allocator.tracker.deallocation_calls + 1 == failing_allocation);
+		CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
+		CHECK(test_allocator_is_clean(&allocator.tracker));
 		check_operations_are_read_only(&fixture);
 		exfat_fixture_destroy(&fixture);
 	}
@@ -1437,15 +1417,12 @@ static void test_directory_worklist_growth(void)
 	CHECK(exfat_fixture_add_child_directories(&fixture, 500, 4) == 0);
 	memory_block_device_clear_operations(&fixture.memory);
 	allocator.device = &fixture.memory;
-	options = resize_options();
-	options.allocator.context = &allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
+	options = tracked_resize_options(&allocator);
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(allocator.allocation_count > 3);
-	CHECK(allocator.deallocation_count == allocator.allocation_count);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.tracker.allocation_attempts > 3);
+	CHECK(allocator.tracker.deallocation_calls == allocator.tracker.successful_allocations);
+	CHECK(test_allocator_is_clean(&allocator.tracker));
 	CHECK(!allocator.allocation_after_write);
 	exfat_fixture_destroy(&fixture);
 }
@@ -1455,7 +1432,7 @@ static void test_directory_worklist_allocation_failure(void)
 	size_t failing_allocation;
 
 	for (failing_allocation = 3; failing_allocation <= 5; ++failing_allocation) {
-		struct allocator_state allocator = { .fail_on_allocation = failing_allocation };
+		struct allocator_state allocator = { 0 };
 		struct exfat_resize_options options;
 		struct exfat_fixture fixture;
 		enum exfat_resize_error error;
@@ -1464,15 +1441,13 @@ static void test_directory_worklist_allocation_failure(void)
 		CHECK(exfat_fixture_add_child_directories(&fixture, 500, 4) == 0);
 		memory_block_device_clear_operations(&fixture.memory);
 		allocator.device = &fixture.memory;
-		options = resize_options();
-		options.allocator.context = &allocator;
-		options.allocator.allocate = tracked_allocate;
-		options.allocator.deallocate = tracked_deallocate;
+		test_allocator_set_fail_on_attempt(&allocator.tracker, failing_allocation);
+		options = tracked_resize_options(&allocator);
 		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 		CHECK(error == EXFAT_RESIZE_OUT_OF_MEMORY);
-		CHECK(allocator.allocation_count == failing_allocation);
-		CHECK(allocator.deallocation_count + 1 == failing_allocation);
-		CHECK(allocator.live_size == 0);
+		CHECK(allocator.tracker.allocation_attempts == failing_allocation);
+		CHECK(allocator.tracker.deallocation_calls + 1 == failing_allocation);
+		CHECK(test_allocator_is_clean(&allocator.tracker));
 		CHECK(!allocator.allocation_after_write);
 		check_operations_are_read_only(&fixture);
 		exfat_fixture_destroy(&fixture);
@@ -1925,14 +1900,11 @@ static void test_multi_sector_cluster_copy(void)
 	memory_block_device_clear_operations(&fixture.memory);
 
 	allocator.device = &fixture.memory;
-	options = resize_options();
-	options.allocator.context = &allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
+	options = tracked_resize_options(&allocator);
 	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(allocator.largest_allocation_size == WORK_BUFFER_SIZE);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
+	CHECK(test_allocator_is_clean(&allocator.tracker));
 
 	error = exfat_resize_map_growth_cluster(
 	    &fixture.geometry, &target, fixture.geometry.root_directory_cluster, &mapped_root);

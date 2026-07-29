@@ -5,6 +5,7 @@
 #include "endian.h"
 #include "sector_adapter.h"
 #include "support/memory_block_device.h"
+#include "support/test_allocator.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -57,6 +58,88 @@ static void test_checked_math(void)
 
 	error = exfat_resize_checked_add_u64(1, 2, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_ARGUMENT);
+}
+
+static void test_allocator_tracking(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_options options = test_allocator_options(&allocator);
+	void *first;
+	void *second;
+
+	first = options.allocator.allocate(options.allocator.context, 7);
+	second = options.allocator.allocate(options.allocator.context, 11);
+	CHECK(first != NULL);
+	CHECK(second != NULL);
+	CHECK(allocator.allocation_attempts == 2);
+	CHECK(allocator.successful_allocations == 2);
+	CHECK(allocator.largest_requested_size == 11);
+	CHECK(test_allocator_live_count(&allocator) == 2);
+	CHECK(test_allocator_live_bytes(&allocator) == 18);
+
+	options.allocator.deallocate(options.allocator.context, first, 7);
+	CHECK(test_allocator_live_count(&allocator) == 1);
+	CHECK(test_allocator_live_bytes(&allocator) == 11);
+	options.allocator.deallocate(options.allocator.context, second, 11);
+	CHECK(allocator.deallocation_calls == 2);
+	CHECK(test_allocator_is_clean(&allocator));
+}
+
+static void test_allocator_failure_injection(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_options options = test_allocator_options(&allocator);
+	void *memory;
+
+	test_allocator_set_fail_on_attempt(&allocator, 2);
+	memory = options.allocator.allocate(options.allocator.context, 7);
+	CHECK(memory != NULL);
+	CHECK(options.allocator.allocate(options.allocator.context, 11) == NULL);
+	CHECK(allocator.allocation_attempts == 2);
+	CHECK(allocator.successful_allocations == 1);
+	CHECK(allocator.largest_requested_size == 11);
+	options.allocator.deallocate(options.allocator.context, memory, 7);
+	CHECK(test_allocator_is_clean(&allocator));
+}
+
+static void test_allocator_contract_errors(void)
+{
+	struct test_allocator mismatch = { 0 };
+	struct test_allocator unknown = { 0 };
+	int foreign;
+	void *memory;
+
+	memory = test_allocator_allocate(&mismatch, 7);
+	CHECK(memory != NULL);
+	test_allocator_deallocate(&mismatch, memory, 11);
+	CHECK(mismatch.error == TEST_ALLOCATOR_SIZE_MISMATCH);
+	CHECK(test_allocator_live_count(&mismatch) == 1);
+	CHECK(test_allocator_live_bytes(&mismatch) == 7);
+	test_allocator_deallocate(&mismatch, memory, 7);
+	CHECK(test_allocator_live_count(&mismatch) == 0);
+	CHECK(mismatch.error == TEST_ALLOCATOR_SIZE_MISMATCH);
+
+	test_allocator_deallocate(&unknown, &foreign, sizeof(foreign));
+	CHECK(unknown.error == TEST_ALLOCATOR_UNKNOWN_POINTER);
+	CHECK(test_allocator_live_count(&unknown) == 0);
+}
+
+static void test_allocator_registry_capacity(void)
+{
+	struct test_allocator allocator = { 0 };
+	void *allocations[TEST_ALLOCATOR_CAPACITY];
+	size_t index;
+
+	for (index = 0; index < TEST_ALLOCATOR_CAPACITY; ++index) {
+		allocations[index] = test_allocator_allocate(&allocator, index + 1);
+		CHECK(allocations[index] != NULL);
+	}
+	CHECK(test_allocator_live_count(&allocator) == TEST_ALLOCATOR_CAPACITY);
+	CHECK(test_allocator_allocate(&allocator, 1) == NULL);
+	CHECK(allocator.error == TEST_ALLOCATOR_REGISTRY_FULL);
+	for (index = 0; index < TEST_ALLOCATOR_CAPACITY; ++index)
+		test_allocator_deallocate(&allocator, allocations[index], index + 1);
+	CHECK(test_allocator_live_count(&allocator) == 0);
 }
 
 static void test_endian_access(void)
@@ -374,6 +457,10 @@ static void test_sparse_large_device(void)
 int main(void)
 {
 	test_checked_math();
+	test_allocator_tracking();
+	test_allocator_failure_injection();
+	test_allocator_contract_errors();
+	test_allocator_registry_capacity();
 	test_endian_access();
 	test_device_geometry();
 	test_memory_block_device();

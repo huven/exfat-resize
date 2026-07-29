@@ -28,6 +28,7 @@ exfat_resize_add_library_test(
     exfat_resize_foundation_tests
     library.foundation
     support/memory_block_device.c
+    support/test_allocator.c
     unit/foundation_tests.c
 )
 
@@ -49,6 +50,7 @@ exfat_resize_add_library_test(
     library.resize
     support/exfat_fixture.c
     support/memory_block_device.c
+    support/test_allocator.c
     integration/resize_tests.c
 )
 
@@ -57,6 +59,7 @@ exfat_resize_add_library_test(
     library.api
     support/exfat_fixture.c
     support/memory_block_device.c
+    support/test_allocator.c
     integration/api_tests.c
 )
 
@@ -65,6 +68,7 @@ exfat_resize_add_library_test(
     library.transaction
     support/exfat_fixture.c
     support/memory_block_device.c
+    support/test_allocator.c
     integration/transaction_tests.c
 )
 

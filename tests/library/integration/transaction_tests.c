@@ -6,6 +6,7 @@
 #include "geometry.h"
 #include "support/exfat_fixture.h"
 #include "support/memory_block_device.h"
+#include "support/test_allocator.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -24,12 +25,6 @@ static int failure_count;
 static int saw_multi_sector_read;
 static int saw_multi_sector_write;
 
-struct allocator_state {
-	size_t allocation_count;
-	size_t deallocation_count;
-	size_t live_size;
-};
-
 struct boot_state {
 	uint64_t volume_sector_count;
 	uint16_t volume_flags;
@@ -42,39 +37,6 @@ struct boot_state {
 			++failure_count; \
 		} \
 	} while (0)
-
-static void *tracked_allocate(void *context, size_t size)
-{
-	struct allocator_state *state = context;
-	void *memory = malloc(size);
-
-	++state->allocation_count;
-	if (memory != NULL)
-		state->live_size += size;
-	return memory;
-}
-
-static void tracked_deallocate(void *context, void *memory, size_t size)
-{
-	struct allocator_state *state = context;
-
-	CHECK(memory != NULL);
-	CHECK(size <= state->live_size);
-	if (size <= state->live_size)
-		state->live_size -= size;
-	++state->deallocation_count;
-	free(memory);
-}
-
-static struct exfat_resize_options resize_options(struct allocator_state *allocator)
-{
-	struct exfat_resize_options options;
-
-	options.allocator.context = allocator;
-	options.allocator.allocate = tracked_allocate;
-	options.allocator.deallocate = tracked_deallocate;
-	return options;
-}
 
 static enum exfat_resize_error plan_growth(const struct exfat_fixture *fixture,
     uint64_t target_sector_count,
@@ -253,8 +215,8 @@ static void run_fault_case(const struct memory_operation *baseline,
     uint64_t target_sector_count,
     const struct exfat_resize_geometry *target)
 {
-	struct allocator_state allocator = { 0 };
-	struct exfat_resize_options options = resize_options(&allocator);
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_options options = test_allocator_options(&allocator);
 	struct exfat_fixture fixture;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
@@ -272,8 +234,8 @@ static void run_fault_case(const struct memory_operation *baseline,
 	CHECK(stage ==
 	    expected_stage(baseline, operation_index, first_transaction_operation, first_fat_write));
 	CHECK(fixture.memory.operation_count == operation_index + 1);
-	CHECK(allocator.allocation_count == allocator.deallocation_count);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.successful_allocations == allocator.deallocation_calls);
+	CHECK(test_allocator_is_clean(&allocator));
 
 	if (baseline[operation_index].kind == MEMORY_OPERATION_SYNC && fail_after)
 		++completed_sync_count;
@@ -284,9 +246,9 @@ static void run_fault_case(const struct memory_operation *baseline,
 
 static void test_transaction_failures(uint64_t target_sector_count)
 {
-	struct allocator_state allocator = { 0 };
+	struct test_allocator allocator = { 0 };
 	struct exfat_resize_geometry target;
-	struct exfat_resize_options options = resize_options(&allocator);
+	struct exfat_resize_options options = test_allocator_options(&allocator);
 	struct exfat_fixture fixture;
 	struct memory_operation *baseline = NULL;
 	enum exfat_resize_error error;
@@ -307,8 +269,8 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &options, &stage);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
-	CHECK(allocator.allocation_count == allocator.deallocation_count);
-	CHECK(allocator.live_size == 0);
+	CHECK(allocator.successful_allocations == allocator.deallocation_calls);
+	CHECK(test_allocator_is_clean(&allocator));
 	operation_count = fixture.memory.operation_count;
 	if (operation_count != 0) {
 		baseline = malloc(operation_count * sizeof(*baseline));
