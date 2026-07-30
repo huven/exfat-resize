@@ -16,7 +16,10 @@ require_test_tools() {
 			done
 			;;
 		Linux)
-			for tool in mkfs.exfat fsck.exfat losetup mount.exfat-fuse umount; do
+			# Administrative tools are not always in an unprivileged user's PATH.
+			PATH=$PATH:/usr/local/sbin:/usr/sbin:/sbin
+			export PATH
+			for tool in mkfs.exfat fsck.exfat losetup mount.exfat-fuse sudo umount; do
 				command -v "$tool" >/dev/null || {
 					echo "missing $tool" >&2
 					exit 77
