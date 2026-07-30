@@ -125,6 +125,11 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 				set_error(error, error_size, path);
 			goto fail_after_open;
 		}
+		/* The file size may have changed between the initial fstat() and flock(). */
+		if (fstat(fd, &st) != 0) {
+			set_error(error, error_size, path);
+			goto fail_after_open;
+		}
 #endif
 		bytes = (uint64_t)st.st_size;
 	} else {

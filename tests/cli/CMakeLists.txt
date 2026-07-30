@@ -43,6 +43,18 @@ exfat_resize_add_device_test(
     device-lock.c
     cli.device-lock
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    exfat_resize_add_device_test(
+        exfat_resize_device_lock_size_test
+        device-lock-size.c
+        cli.device-lock-size
+    )
+    target_link_options(
+        exfat_resize_device_lock_size_test
+        PRIVATE
+            "LINKER:--wrap=flock"
+    )
+endif()
 
 set(
     EXFAT_RESIZE_CLI_TEST_SCRIPTS
