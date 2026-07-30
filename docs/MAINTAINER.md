@@ -20,8 +20,10 @@ CMake passes the resolved identity to the CLI target as the private
 `EXFAT_RESIZE_BUILD_VERSION` compile definition. Do not add another manually
 maintained version constant.
 
-`make dist` packages the committed source at `HEAD`; uncommitted changes are
-deliberately excluded. At a matching `vX.Y.Z` tag, the archive and CLI use
-`X.Y.Z`. Otherwise, their identity includes the `git describe` distance and
-commit abbreviation. The archive records that identity in `.tarball-version`
-and retains the packaged commit ID in Git's tar metadata.
+`make dist` packages committed `HEAD`, excluding uncommitted changes, and
+writes the source archive and its SHA-256 checksum to `dist/`. At an exact
+matching `vX.Y.Z` tag, the archive and CLI use `X.Y.Z`, and repeated archive
+builds produce byte-identical output. Untagged archives are development
+snapshots whose `git describe` identity also depends on the repository's `v*`
+tag namespace. The archive stores that identity in `.tarball-version` and the
+packaged commit ID in Git's tar metadata.

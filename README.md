@@ -209,11 +209,3 @@ using both `find_package()` and `add_subdirectory()`.
 For a custom installation prefix:
 
     cmake --install build --prefix /your/prefix
-
-To create a self-contained source archive:
-
-    make dist
-
-The archive and its SHA-256 checksum are written to `dist/`. The archive is
-created from the committed source at `HEAD`; uncommitted changes are not
-included. Repeated builds of the same commit produce byte-identical archives.
