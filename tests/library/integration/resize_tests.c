@@ -1023,8 +1023,8 @@ static void test_malformed_bitmap_fat_chain_is_rejected(void)
 		struct exfat_fixture fixture;
 		enum exfat_resize_error error;
 		enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
-		uint32_t cluster;
-		uint32_t next;
+		uint32_t cluster = 0;
+		uint32_t next = 0;
 
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 		switch (mutations[index]) {
