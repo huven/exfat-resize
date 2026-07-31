@@ -25,8 +25,7 @@ to determine the committed version packaged by `make dist`.
 
 `make dist` packages committed `HEAD`, excluding uncommitted changes, and
 writes the source archive and its SHA-256 checksum to `dist/`. At an exact
-matching `vX.Y.Z` tag, the archive and CLI use `X.Y.Z`, and repeated archive
-builds produce byte-identical output. Untagged archives are development
-snapshots whose `git describe` identity also depends on the repository's `v*`
-tag namespace. The archive stores that identity in `.tarball-version` and the
-packaged commit ID in Git's tar metadata.
+matching `vX.Y.Z` tag, the archive and CLI use `X.Y.Z`. Untagged archives are
+development snapshots whose `git describe` identity also depends on the
+repository's `v*` tag namespace. The archive stores that identity in
+`.tarball-version` and the packaged commit ID in Git's tar metadata.
