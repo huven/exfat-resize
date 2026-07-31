@@ -3,6 +3,12 @@
 name: Source release dry run
 
 on:
+  # Temporary branch-only trigger; remove before merging into main.
+  push:
+    branches:
+      - improve-release-and-packaging
+    paths:
+      - .github/workflows/source-release.yml
   workflow_dispatch:
     inputs:
       release_ref:
@@ -15,9 +21,11 @@ permissions:
 
 jobs:
   source-release:
-    name: Source release (${{ inputs.release_ref }})
+    name: Source release (${{ github.event.inputs.release_ref || 'v1.0.1' }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RELEASE_REF: ${{ github.event.inputs.release_ref || 'v1.0.1' }}
 
     steps:
       - name: Check out release tooling
@@ -29,7 +37,7 @@ jobs:
       - name: Check out release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_ref }}
+          ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
           fetch-tags: true
           path: release-source
@@ -39,8 +47,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes cmake g++
 
       - name: Validate release tag and commit
-        env:
-          RELEASE_REF: ${{ inputs.release_ref }}
         run: |
           set -euo pipefail
           release_commit=$(git -C release-source rev-parse --verify 'HEAD^{commit}')
@@ -55,8 +61,6 @@ jobs:
 
       - name: Verify source artifacts
         id: artifacts
-        env:
-          RELEASE_REF: ${{ inputs.release_ref }}
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
@@ -72,7 +76,7 @@ jobs:
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: source-release-${{ inputs.release_ref }}
+          name: source-release-${{ env.RELEASE_REF }}
           path: |
             ${{ steps.artifacts.outputs.archive }}
             ${{ steps.artifacts.outputs.checksum }}
