@@ -4,6 +4,19 @@ exfat-resize provides a portable C11 library and command-line tool for growing
 an existing exFAT filesystem in a regular file or raw block device. The backing
 object must be enlarged before the filesystem is resized.
 
+## Quick install
+
+Building requires CMake 3.20 or newer and a C11 compiler.
+
+    git clone https://github.com/huven/exfat-resize.git
+    cd exfat-resize
+    make
+    cmake --install build
+
+The install command may require elevated privileges depending on the destination
+prefix. Run `exfat-resize --help` for a usage summary or `man exfat-resize` for
+the complete command-line reference.
+
 ## Safety
 
 > [!WARNING]
@@ -39,20 +52,29 @@ that destructive metadata updates may have started. Do not retry the resize;
 restore the verified backup. Follow a less conservative checker-and-retry path
 only when the command explicitly reports that it is safe.
 
-Only filesystems meeting the
-[compatibility requirements](#filesystem-compatibility) below are supported.
+## Usage
 
     exfat-resize device [ size ]
     exfat-resize -h | --help
     exfat-resize -V | --version
 
-After installation, `man exfat-resize` provides the complete command-line
-reference, including operational safety and recovery guidance.
-
 With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of
 bytes. It is rounded down to a whole filesystem sector. Shrinking is not
 supported.
+
+Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
+to use all available space:
+
+    truncate -s +2G image.exfat
+    exfat-resize image.exfat
+
+Grow the exFAT filesystem on an unmounted raw device to use all available space:
+
+    exfat-resize /dev/your-exfat-device
+
+Only filesystems meeting the
+[compatibility requirements](#filesystem-compatibility) below are supported.
 
 ## Filesystem compatibility
 
@@ -83,18 +105,6 @@ device honoring their flush requests.
 On macOS, platform mechanisms reject known mounted or otherwise busy backing
 objects. The CLI retains its requested locks for the complete operation;
 regular-file locks remain advisory as described above.
-
-## Examples
-
-Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
-to use all available space:
-
-    truncate -s +2G image.exfat
-    exfat-resize image.exfat
-
-Grow the exFAT filesystem on an unmounted raw device to use all available space:
-
-    exfat-resize /dev/your-exfat-device
 
 ## C library
 
