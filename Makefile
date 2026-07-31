@@ -64,6 +64,7 @@ cli-sanitize-test: sanitize-build
 	$(CTEST) --test-dir "$(SANITIZE_BUILD)" -L cli --output-on-failure
 
 release-test:
+	tests/package/release-check.sh
 	tests/package/release-package.sh
 
 dist: VERSION cmake/ExfatResizeVersion.cmake tools/make-dist.sh tools/version.cmake
