@@ -184,6 +184,11 @@ static void test_device_geometry(void)
 	enum exfat_resize_error error;
 	size_t index;
 
+	for (index = 0; index < sizeof(valid_sizes) / sizeof(valid_sizes[0]); ++index)
+		CHECK(exfat_resize_sector_size_is_supported(valid_sizes[index]));
+	for (index = 0; index < sizeof(invalid_sizes) / sizeof(invalid_sizes[0]); ++index)
+		CHECK(!exfat_resize_sector_size_is_supported(invalid_sizes[index]));
+
 	memory_block_device_init(&memory, 512, 128);
 	device = memory.device;
 	for (index = 0; index < sizeof(valid_sizes) / sizeof(valid_sizes[0]); ++index) {
@@ -383,11 +388,13 @@ static void test_memory_block_device_durability(void)
 	unsigned char original[1024];
 	unsigned char replacement[1024];
 	unsigned char read_back[1024];
+	unsigned char added[512];
 
 	memset(original, 0x11, 512);
 	memset(original + 512, 0x22, 512);
 	memset(replacement, 0x33, 512);
 	memset(replacement + 512, 0x44, 512);
+	memset(added, 0x55, sizeof(added));
 
 	memory_block_device_init(&memory, 512, 4);
 	error = exfat_resize_block_device_write(&memory.device, 0, 2, original, sizeof(original));
@@ -408,6 +415,11 @@ static void test_memory_block_device_durability(void)
 	error = exfat_resize_block_device_read(&memory.device, 0, 2, read_back, sizeof(read_back));
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(memcmp(read_back, original, sizeof(read_back)) == 0);
+	error = exfat_resize_block_device_write(&memory.device, 2, 1, added, sizeof(added));
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	error = exfat_resize_block_device_read(&memory.device, 2, 1, read_back, sizeof(added));
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK(memcmp(read_back, added, sizeof(added)) == 0);
 
 	memory_block_device_clear_operations(&memory);
 	error = exfat_resize_block_device_write(&memory.device, 0, 2, replacement, sizeof(replacement));

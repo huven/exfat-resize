@@ -114,8 +114,7 @@ static int copy_sectors(const struct memory_sector *source,
     size_t source_count,
     size_t sector_size,
     struct memory_sector **destination,
-    size_t *destination_count,
-    size_t *destination_capacity)
+    size_t *destination_count)
 {
 	struct memory_sector *copy = NULL;
 	size_t index;
@@ -140,7 +139,6 @@ static int copy_sectors(const struct memory_sector *source,
 	free_sectors(*destination, *destination_count);
 	*destination = copy;
 	*destination_count = source_count;
-	*destination_capacity = source_count;
 	return 0;
 }
 
@@ -291,12 +289,15 @@ void memory_block_device_clear_failure(struct memory_block_device *memory)
 int memory_block_device_make_durable(struct memory_block_device *memory)
 {
 	return copy_sectors(memory->sectors, memory->sector_count, memory->device.sector_size,
-	    &memory->durable_sectors, &memory->durable_sector_count, &memory->durable_sector_capacity);
+	    &memory->durable_sectors, &memory->durable_sector_count);
 }
 
 int memory_block_device_crash(struct memory_block_device *memory)
 {
-	return copy_sectors(memory->durable_sectors, memory->durable_sector_count,
-	    memory->device.sector_size, &memory->sectors, &memory->sector_count,
-	    &memory->sector_capacity);
+	int error = copy_sectors(memory->durable_sectors, memory->durable_sector_count,
+	    memory->device.sector_size, &memory->sectors, &memory->sector_count);
+
+	if (error == 0)
+		memory->sector_capacity = memory->sector_count;
+	return error;
 }

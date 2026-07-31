@@ -41,6 +41,23 @@ validate_build_version() {
 	esac
 }
 
+validate_exact_tag() {
+	if [ -n "$1" ] && [ "$1" != "v$2" ]; then
+		fail "tag $1 does not match package version $2"
+	fi
+}
+
+format_description() {
+	case $1 in
+	v*)
+		printf '%s\n' "${1#v}"
+		;;
+	*)
+		printf '%s\n' "$2-g$1"
+		;;
+	esac
+}
+
 describe_checkout() {
 	source_dir=$1
 	package_version=$2
@@ -53,21 +70,12 @@ describe_checkout() {
 		    --match "v[0-9]*" 2>/dev/null); then
 			exact_tag=$candidate
 		fi
-		if [ -n "$exact_tag" ] && [ "$exact_tag" != "v$package_version" ]; then
-			fail "tag $exact_tag does not match package version $package_version"
-		fi
+		validate_exact_tag "$exact_tag" "$package_version"
 		if ! description=$(git -C "$source_dir" describe --tags \
 		    --match "v[0-9]*" --always --dirty 2>/dev/null); then
 			fail "could not describe Git checkout"
 		fi
-		case $description in
-		v*)
-			build_version=${description#v}
-			;;
-		*)
-			build_version=$package_version-g$description
-			;;
-		esac
+		build_version=$(format_description "$description" "$package_version")
 	else
 		build_version=$package_version-unknown
 	fi
@@ -85,21 +93,12 @@ describe_commit() {
 	    --match "v[0-9]*" "$commit" 2>/dev/null); then
 		exact_tag=$candidate
 	fi
-	if [ -n "$exact_tag" ] && [ "$exact_tag" != "v$package_version" ]; then
-		fail "tag $exact_tag does not match package version $package_version"
-	fi
+	validate_exact_tag "$exact_tag" "$package_version"
 	if ! description=$(git -C "$source_dir" describe --tags \
 	    --match "v[0-9]*" --always "$commit" 2>/dev/null); then
 		fail "could not describe commit $commit"
 	fi
-	case $description in
-	v*)
-		build_version=${description#v}
-		;;
-	*)
-		build_version=$package_version-g$description
-		;;
-	esac
+	build_version=$(format_description "$description" "$package_version")
 
 	printf '%s\n' "$build_version"
 }

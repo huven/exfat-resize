@@ -119,13 +119,12 @@ enum exfat_resize_error exfat_resize_map_growth_cluster(const struct exfat_resiz
 
 	remaining_cluster_count = source->cluster_count - displaced_cluster_count;
 	source_index = source_cluster - 2;
+	/* Both branches produce a cluster in [2, source->cluster_count + 1]. */
 	if (source_index < displaced_cluster_count)
 		mapped_cluster = remaining_cluster_count + 2 + source_index;
 	else
 		mapped_cluster = 2 + source_index - displaced_cluster_count;
 
-	if (mapped_cluster > target->cluster_count + UINT32_C(1))
-		return EXFAT_RESIZE_OUT_OF_BOUNDS;
 	*target_cluster = mapped_cluster;
 	return EXFAT_RESIZE_SUCCESS;
 }

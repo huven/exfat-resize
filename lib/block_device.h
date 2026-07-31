@@ -13,6 +13,8 @@ struct exfat_resize_device_geometry {
 	uint64_t sector_count;
 };
 
+int exfat_resize_sector_size_is_supported(uint32_t size);
+
 enum exfat_resize_error exfat_resize_validate_block_device(
     const struct exfat_resize_block_device *device);
 

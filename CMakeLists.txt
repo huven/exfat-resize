@@ -138,6 +138,7 @@ if(EXFAT_RESIZE_BUILD_CLI)
     target_include_directories(
         exfat-resize
         PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
             ${PROJECT_SOURCE_DIR}/src
     )
 

@@ -6,6 +6,8 @@
 
 #include "device.h"
 
+#include "block_device.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -156,7 +158,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 #endif
 	}
 
-	if (sector_size < 512 || sector_size > 4096 || (sector_size & (sector_size - 1)) != 0) {
+	if (!exfat_resize_sector_size_is_supported(sector_size)) {
 		(void)snprintf(
 		    error, error_size, "%s: unsupported logical sector size %" PRIu32, path, sector_size);
 		goto fail_after_open;
