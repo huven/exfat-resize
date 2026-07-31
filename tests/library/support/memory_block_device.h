@@ -31,7 +31,6 @@ struct memory_block_device {
 
 	struct memory_sector *durable_sectors;
 	size_t durable_sector_count;
-	size_t durable_sector_capacity;
 
 	struct memory_operation *operations;
 	size_t operation_count;

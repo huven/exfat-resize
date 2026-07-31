@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static int supported_sector_size(uint32_t size)
+int exfat_resize_sector_size_is_supported(uint32_t size)
 {
 	return size >= 512 && size <= 4096 && (size & (size - 1)) == 0;
 }
@@ -15,7 +15,7 @@ enum exfat_resize_error exfat_resize_validate_block_device(
 {
 	if (device == NULL || device->read == NULL || device->write == NULL || device->sync == NULL)
 		return EXFAT_RESIZE_INVALID_DEVICE;
-	if (!supported_sector_size(device->sector_size) || device->sector_count == 0)
+	if (!exfat_resize_sector_size_is_supported(device->sector_size) || device->sector_count == 0)
 		return EXFAT_RESIZE_INVALID_DEVICE;
 	return EXFAT_RESIZE_SUCCESS;
 }

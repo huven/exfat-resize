@@ -2,13 +2,10 @@
 
 #include "sector_adapter.h"
 
+#include "block_device.h"
+
 #include <stddef.h>
 #include <stdint.h>
-
-static int supported_sector_size(uint32_t size)
-{
-	return size >= 512 && size <= 4096 && (size & (size - 1)) == 0;
-}
 
 static int adapt_transfer(const struct exfat_resize_sector_adapter *adapter,
     uint64_t first_sector,
@@ -68,7 +65,7 @@ enum exfat_resize_error exfat_resize_adapt_block_device(
 
 	if (adapter == NULL)
 		return EXFAT_RESIZE_INVALID_ARGUMENT;
-	if (!supported_sector_size(filesystem_sector_size) ||
+	if (!exfat_resize_sector_size_is_supported(filesystem_sector_size) ||
 	    filesystem_sector_size < source->sector_size ||
 	    filesystem_sector_size % source->sector_size != 0)
 		return EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING;

@@ -10,6 +10,7 @@ function(exfat_resize_add_device_test target source test_name)
     target_include_directories(
         ${target}
         PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
             ${PROJECT_SOURCE_DIR}/src
     )
 
