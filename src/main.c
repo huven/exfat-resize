@@ -23,6 +23,13 @@ static void print_usage(FILE *stream)
 	fprintf(stream, "Usage: exfat-resize DEVICE [SIZE]\n");
 }
 
+static void print_no_write_guidance(void)
+{
+	fprintf(stderr,
+	    "exfat-resize: no filesystem write was attempted; correct the error and retry when "
+	    "appropriate\n");
+}
+
 static void print_help(void)
 {
 	printf("Usage: exfat-resize DEVICE [SIZE]\n"
@@ -153,6 +160,7 @@ int main(int argc, char **argv)
 			return EXIT_SUCCESS;
 		default:
 			print_usage(stderr);
+			print_no_write_guidance();
 			return EXIT_FAILURE;
 		}
 	}
@@ -160,14 +168,17 @@ int main(int argc, char **argv)
 	argv += optind;
 	if (argc < 1 || argc > 2) {
 		print_usage(stderr);
+		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
 	if (argc == 2 && parse_size(argv[1], &target) != 0) {
 		fprintf(stderr, "exfat-resize: invalid size: %s\n", argv[1]);
+		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
 	if (device_open(&device, argv[0], error, sizeof(error)) != 0) {
 		fprintf(stderr, "exfat-resize: %s\n", error);
+		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
 	if (argc != 2) {
@@ -186,9 +197,7 @@ int main(int argc, char **argv)
 		}
 		switch (stage) {
 		case EXFAT_RESIZE_STAGE_PREFLIGHT:
-			fprintf(stderr,
-			    "exfat-resize: the filesystem was not modified; correct the error and "
-			    "retry\n");
+			print_no_write_guidance();
 			break;
 		case EXFAT_RESIZE_STAGE_PREPARING:
 			fprintf(stderr,

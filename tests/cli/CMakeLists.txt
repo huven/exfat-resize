@@ -60,6 +60,7 @@ endif()
 set(
     EXFAT_RESIZE_CLI_TEST_SCRIPTS
     help.sh
+    recovery-guidance.sh
     grow-image.sh
     preserve-data.sh
     explicit-size.sh
