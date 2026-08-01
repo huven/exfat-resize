@@ -70,10 +70,11 @@ A failed or interrupted resize is not automatically repaired, rolled back, or
 resumable.
 Follow the recovery guidance printed with an error.
 .PP
-If the command terminates without printing stage-specific recovery guidance,
-for example because of an interruption, process crash, or power loss, assume
-that destructive metadata updates may have started.
-Do not retry the resize; restore the verified backup.
+Every normal error exit prints stage-specific recovery guidance.
+If the command terminates abnormally without printing stage-specific recovery
+guidance, for example because of an interruption, process crash, or power loss,
+assume that destructive metadata updates may have started; do not retry the
+resize, and restore the verified backup.
 Follow a less conservative checker-and-retry path only when the command
 explicitly reports that it is safe.
 .SH "FILESYSTEM COMPATIBILITY"
@@ -102,8 +103,8 @@ On failure,
 .B exfat-resize
 prints guidance for the recovery boundary reached:
 .IP \(bu 2
-If the filesystem was not modified, correct the reported error and retry when
-appropriate.
+If no filesystem write was attempted, correct the reported error and retry
+when appropriate.
 .IP \(bu 2
 If the source filesystem remains authoritative, run an appropriate filesystem
 checker before retrying.
@@ -113,8 +114,8 @@ If the filesystem may be incomplete, restore the verified backup.
 If the resize completed but the filesystem's dirty state is uncertain, run an
 appropriate filesystem checker and do not retry the resize.
 .PP
-If no stage-specific guidance was printed, follow the conservative
-interruption procedure in
+If the command terminated abnormally without stage-specific guidance, follow
+the conservative interruption procedure in
 .BR SAFETY .
 .SH "RESOURCE REQUIREMENTS"
 Before writing,

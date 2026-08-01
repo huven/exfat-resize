@@ -46,9 +46,10 @@ automatically repaired, rolled back, or resumable. Follow the recovery guidance
 printed with an error; depending on the stage reached, recovery may require a
 filesystem checker or restoring the verified backup.
 
-If the command terminates without printing stage-specific recovery guidance,
-for example because of an interruption, process crash, or power loss, assume
-that destructive metadata updates may have started. Do not retry the resize;
+Every normal error exit prints stage-specific recovery guidance. If the command
+terminates abnormally without printing stage-specific recovery guidance, for
+example because of an interruption, process crash, or power loss, assume that
+destructive metadata updates may have started; do not retry the resize, and
 restore the verified backup. Follow a less conservative checker-and-retry path
 only when the command explicitly reports that it is safe.
 
