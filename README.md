@@ -96,8 +96,11 @@ The filesystem must meet these prerequisites:
 
 ## Supported platforms
 
-macOS and Linux are currently supported and tested. Contributions adding
-support for other platforms are welcome.
+The C11 library is supported on any platform with a C11 compiler. The bundled
+CLI is a thin platform-specific wrapper around the library and is currently
+supported and tested on macOS and Linux. Porting the CLI primarily requires
+implementing device access, exclusive-access checks, and durable
+synchronization for the target platform; contributions are welcome.
 
 The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
