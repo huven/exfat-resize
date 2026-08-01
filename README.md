@@ -158,10 +158,10 @@ enum exfat_resize_stage stage;
 error = exfat_resize(&device, target_size, &options, &stage);
 ```
 
-Before writing, the library rebuilds and validates an in-memory allocation
-model covering the target cluster heap. See the transaction document's
-[memory requirements](docs/TRANSACTION.md#memory-requirements) for
-allocator-backed working-memory sizes, lifetimes, and backing options.
+Before writing, the library snapshots the used source FAT and rebuilds a
+validated in-memory allocation model covering the target cluster heap. See the
+transaction document's [memory requirements](docs/TRANSACTION.md#memory-requirements)
+for allocator-backed working-memory sizes, lifetimes, and backing options.
 
 When an error is returned, `stage` describes the recovery boundary reached:
 
