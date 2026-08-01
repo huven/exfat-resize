@@ -54,6 +54,30 @@ jobs:
       - name: Lint manual page
         run: mandoc -T lint build/exfat-resize.8
 
+  windows:
+    name: Windows (MSVC, library)
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure library and tests
+        run: >-
+          cmake -S . -B build/windows
+          -DEXFAT_RESIZE_BUILD_CLI=OFF
+          -DEXFAT_RESIZE_BUILD_TESTS=ON
+
+      - name: Build library and tests
+        run: cmake --build build/windows --config Release --parallel
+
+      - name: Run library tests
+        run: >-
+          ctest --test-dir build/windows --build-config Release
+          --output-on-failure -L library
+
   linux-big-endian:
     name: Linux (s390x, big endian)
     runs-on: ubuntu-latest
