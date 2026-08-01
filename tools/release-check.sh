@@ -5,7 +5,7 @@ set -eu
 set -f
 
 usage() {
-	echo "usage: $0 [--source-dir SOURCE_DIR] TAG COMMIT" >&2
+	echo "usage: $0 [--source-dir SOURCE_DIR] [--require-signed-tag] TAG COMMIT" >&2
 	exit 2
 }
 
@@ -42,33 +42,66 @@ validate_tag() {
 	printf '%s\n' "$version"
 }
 
-case $# in
-2)
-	if ! source_dir=$(CDPATH= cd -- "$(dirname "$0")/.." 2>/dev/null && pwd); then
-		fail "could not determine the source directory"
-	fi
-	tag=$1
-	commit=$2
-	;;
-4)
-	if [ "$1" != "--source-dir" ]; then
+if ! tool_root=$(CDPATH= cd -- "$(dirname "$0")/.." 2>/dev/null && pwd); then
+	fail "could not determine the release tooling directory"
+fi
+source_dir=$tool_root
+require_signed_tag=false
+
+while [ "$#" -gt 0 ]; do
+	case $1 in
+	--source-dir)
+		if [ "$#" -lt 2 ]; then
+			usage
+		fi
+		if ! source_dir=$(CDPATH= cd -- "$2" 2>/dev/null && pwd); then
+			fail "source directory not found: $2"
+		fi
+		shift 2
+		;;
+	--require-signed-tag)
+		require_signed_tag=true
+		shift
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
 		usage
-	fi
-	if ! source_dir=$(CDPATH= cd -- "$2" 2>/dev/null && pwd); then
-		fail "source directory not found: $2"
-	fi
-	tag=$3
-	commit=$4
-	;;
-*)
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+if [ "$#" -ne 2 ]; then
 	usage
-esac
+fi
+tag=$1
+commit=$2
 
 tag_version=$(validate_tag "$tag")
 tag_ref=refs/tags/$tag
 
 if ! git -C "$source_dir" show-ref --verify --quiet "$tag_ref"; then
 	fail "tag does not exist: $tag"
+fi
+if [ "$require_signed_tag" = true ]; then
+	if [ "$(git -C "$source_dir" cat-file -t "$tag_ref" 2>/dev/null)" != tag ]; then
+		fail "release tag is not annotated: $tag"
+	fi
+	signers=$tool_root/tools/release-signers
+	if [ ! -f "$signers" ]; then
+		fail "release signer allowlist not found: $signers"
+	fi
+	if ! git -C "$source_dir" \
+		-c gpg.format=ssh \
+		-c gpg.ssh.allowedSignersFile="$signers" \
+		verify-tag "$tag_ref" >/dev/null 2>&1; then
+		fail "release tag does not have a valid release signature: $tag"
+	fi
 fi
 if ! tag_commit=$(git -C "$source_dir" rev-parse --verify \
 	"${tag_ref}^{commit}" 2>/dev/null); then
