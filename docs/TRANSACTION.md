@@ -62,19 +62,23 @@ The library requests a 1 MiB I/O work buffer through the caller's allocator.
 It uses that buffer for boot-region I/O, cluster relocation, batched FAT and
 bitmap output, and buffering directory entry sets.
 
-It separately requests a cache block containing seven filesystem sectors.
-Dedicated caches retain source directory data, source directory FAT entries,
-source bitmap data, source bitmap FAT entries, source allocation-model FAT
-entries, target directory data, and target directory FAT entries. Directory
-entry sets are checksummed and rewritten one 32-byte entry at a time.
+During preflight, it requests a snapshot of the used portion of the source FAT,
+rounded up to a filesystem sector. The snapshot is filled by one block-device
+read, provides all source FAT lookups, and is released before the first write.
+Its size is approximately four bytes per source cluster.
+
+It separately requests a cache block containing three filesystem sectors.
+Dedicated caches retain source directory data, source bitmap data, and target
+directory data. Directory entry sets are checksummed and rewritten one 32-byte
+entry at a time.
 
 In addition, `exfat_resize()` requests a writable allocation model containing
 one 32-bit value per target cluster. The model distinguishes free clusters,
 bad clusters, `NoFatChain` allocations, and target FAT links. It is completely
 built and checked against the source bitmap before the dirty flag is set, then
-used to generate both the target FAT and target bitmap. The caller controls
-how this memory is backed through the allocator callbacks; anonymous memory
-and a memory-mapped temporary file are both possible.
+used to generate the target FAT and bitmap and to traverse target directories.
+The caller controls how allocator-backed working memory is backed; anonymous
+memory and a memory-mapped temporary file are both possible.
 
 Directory traversal uses an additional allocator-backed worklist. It may grow
 during preflight, but its final capacity is retained and reused during the
