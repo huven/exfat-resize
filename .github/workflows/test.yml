@@ -67,7 +67,6 @@ jobs:
       - name: Configure library and tests
         run: >-
           cmake -S . -B build/windows
-          -DEXFAT_RESIZE_BUILD_CLI=OFF
           -DEXFAT_RESIZE_BUILD_TESTS=ON
 
       - name: Build library and tests
@@ -77,6 +76,29 @@ jobs:
         run: >-
           ctest --test-dir build/windows --build-config Release
           --output-on-failure -L library
+
+      - name: Configure without POSIX tools
+        shell: pwsh
+        run: |
+          $pathEntries = $env:PATH -split [IO.Path]::PathSeparator
+          $shDirectories = @($pathEntries | Where-Object {
+            $_ -and (Test-Path (Join-Path $_ "sh.exe"))
+          })
+          if ($shDirectories.Count -eq 0) {
+            throw "The runner PATH did not expose sh.exe before the no-POSIX probe"
+          }
+          $shDirectories | ForEach-Object {
+            Write-Host "Removing POSIX shell directory from PATH: $_"
+          }
+          $env:PATH = ($pathEntries | Where-Object {
+            $_ -and $_ -notin $shDirectories
+          }) -join [IO.Path]::PathSeparator
+          if (Get-Command sh.exe -ErrorAction SilentlyContinue) {
+            throw "sh.exe remains available after filtering PATH"
+          }
+
+          cmake -S . -B build/windows-no-posix `
+            -DEXFAT_RESIZE_BUILD_TESTS=OFF
 
   linux-big-endian:
     name: Linux (s390x, big endian)
