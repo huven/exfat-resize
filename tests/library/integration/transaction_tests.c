@@ -74,7 +74,37 @@ static struct boot_state read_boot_state(struct exfat_fixture *fixture, uint64_t
 	return state;
 }
 
+static int durable_image_matches_except_dirty(
+    const struct memory_block_device *actual, const struct memory_block_device *expected)
+{
+	size_t sector_index;
+	size_t byte_index;
+
+	if (actual->sector_count != expected->durable_sector_count)
+		return 0;
+	for (sector_index = 0; sector_index < actual->sector_count; ++sector_index) {
+		const struct memory_sector *actual_sector = &actual->sectors[sector_index];
+		const struct memory_sector *expected_sector = &expected->durable_sectors[sector_index];
+
+		if (actual_sector->sector != expected_sector->sector)
+			return 0;
+		for (byte_index = 0; byte_index < actual->device.sector_size; ++byte_index) {
+			unsigned char actual_byte = actual_sector->data[byte_index];
+			unsigned char expected_byte = expected_sector->data[byte_index];
+
+			if (actual_sector->sector == 0 && byte_index == VOLUME_FLAGS_OFFSET) {
+				actual_byte &= (unsigned char)~UINT8_C(0x02);
+				expected_byte &= (unsigned char)~UINT8_C(0x02);
+			}
+			if (actual_byte != expected_byte)
+				return 0;
+		}
+	}
+	return 1;
+}
+
 static void check_durable_boundary(struct exfat_fixture *fixture,
+    const struct exfat_fixture *completed_fixture,
     const struct exfat_resize_geometry *target,
     size_t completed_sync_count)
 {
@@ -97,6 +127,8 @@ static void check_durable_boundary(struct exfat_fixture *fixture,
 	CHECK(main.volume_sector_count == expected_main_volume);
 	CHECK(backup.volume_sector_count == expected_backup_volume);
 	CHECK(((main.volume_flags & UINT16_C(0x0002)) != 0) == expected_dirty);
+	if (completed_sync_count >= 4)
+		CHECK(durable_image_matches_except_dirty(&fixture->memory, &completed_fixture->memory));
 }
 
 static size_t count_syncs_before(const struct memory_operation *operations, size_t operation_index)
@@ -202,11 +234,18 @@ static void check_transaction_order(const struct memory_operation *operations,
 	CHECK(backup_checksum_written);
 	CHECK(main_sector_written);
 	CHECK(main_checksum_written);
+	for (index = syncs[3] + 1; index < syncs[4]; ++index) {
+		if (operations[index].kind == MEMORY_OPERATION_WRITE) {
+			CHECK(operations[index].first_sector == 0);
+			CHECK(operations[index].sector_count == 1);
+		}
+	}
 	CHECK(operations[syncs[4] - 1].kind == MEMORY_OPERATION_WRITE);
 	CHECK(operations[syncs[4] - 1].first_sector == 0);
 }
 
 static void run_fault_case(const struct memory_operation *baseline,
+    const struct exfat_fixture *completed_fixture,
     size_t operation_index,
     size_t first_transaction_operation,
     size_t first_fat_write,
@@ -240,7 +279,7 @@ static void run_fault_case(const struct memory_operation *baseline,
 	if (baseline[operation_index].kind == MEMORY_OPERATION_SYNC && fail_after)
 		++completed_sync_count;
 	memory_block_device_clear_failure(&fixture.memory);
-	check_durable_boundary(&fixture, target, completed_sync_count);
+	check_durable_boundary(&fixture, completed_fixture, target, completed_sync_count);
 	exfat_fixture_destroy(&fixture);
 }
 
@@ -281,9 +320,9 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	if (baseline != NULL)
 		check_transaction_order(baseline, operation_count, target.fat_offset, syncs,
 		    &first_transaction_operation, &first_fat_write);
-	exfat_fixture_destroy(&fixture);
 	if (baseline == NULL || first_transaction_operation == SIZE_MAX ||
 	    first_fat_write == SIZE_MAX) {
+		exfat_fixture_destroy(&fixture);
 		free(baseline);
 		return;
 	}
@@ -293,15 +332,15 @@ static void test_transaction_failures(uint64_t target_sector_count)
 		enum exfat_resize_stage operation_stage =
 		    expected_stage(baseline, operation_index, first_transaction_operation, first_fat_write);
 
-		run_fault_case(baseline, operation_index, first_transaction_operation, first_fat_write, 0,
-		    0, target_sector_count, &target);
-		run_fault_case(baseline, operation_index, first_transaction_operation, first_fat_write, 1,
-		    operation->sector_count, target_sector_count, &target);
+		run_fault_case(baseline, &fixture, operation_index, first_transaction_operation,
+		    first_fat_write, 0, 0, target_sector_count, &target);
+		run_fault_case(baseline, &fixture, operation_index, first_transaction_operation,
+		    first_fat_write, 1, operation->sector_count, target_sector_count, &target);
 		if (operation->sector_count > 1) {
-			run_fault_case(baseline, operation_index, first_transaction_operation, first_fat_write,
-			    1, 0, target_sector_count, &target);
-			run_fault_case(baseline, operation_index, first_transaction_operation, first_fat_write,
-			    1, 1, target_sector_count, &target);
+			run_fault_case(baseline, &fixture, operation_index, first_transaction_operation,
+			    first_fat_write, 1, 0, target_sector_count, &target);
+			run_fault_case(baseline, &fixture, operation_index, first_transaction_operation,
+			    first_fat_write, 1, 1, target_sector_count, &target);
 		}
 
 		if (operation->kind == MEMORY_OPERATION_READ) {
@@ -319,6 +358,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	CHECK(saw_preparing_read);
 	CHECK(saw_resizing_read);
 	CHECK(saw_finalizing_read);
+	exfat_fixture_destroy(&fixture);
 	free(baseline);
 }
 
