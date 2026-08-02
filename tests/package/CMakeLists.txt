@@ -14,6 +14,10 @@ set_tests_properties(package.install-documentation PROPERTIES LABELS package)
 
 add_test(
     NAME package.version
-    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/version.sh
+    COMMAND
+        ${CMAKE_COMMAND}
+        -DEXFAT_RESIZE_PROJECT_ROOT=${PROJECT_SOURCE_DIR}
+        -DEXFAT_RESIZE_VERSION_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/version-test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/version.cmake
 )
 set_tests_properties(package.version PROPERTIES LABELS package)

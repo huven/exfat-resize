@@ -6,31 +6,11 @@ if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
 
-execute_process(
-    COMMAND
-        sh "${CMAKE_CURRENT_SOURCE_DIR}/tools/version.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE
-        EXFAT_RESIZE_VERSION_RESULT
-    OUTPUT_VARIABLE
-        EXFAT_RESIZE_VERSION_OUTPUT
-    ERROR_VARIABLE
-        EXFAT_RESIZE_VERSION_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExfatResizeVersion.cmake")
+exfat_resize_read_package_version(
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    EXFAT_RESIZE_VERSION
 )
-if(NOT EXFAT_RESIZE_VERSION_RESULT EQUAL 0)
-    message(FATAL_ERROR
-        "Could not determine the exfat-resize version:\n"
-        "${EXFAT_RESIZE_VERSION_ERROR}"
-    )
-endif()
-string(REPLACE "\n" ";" EXFAT_RESIZE_VERSION_FIELDS "${EXFAT_RESIZE_VERSION_OUTPUT}")
-list(LENGTH EXFAT_RESIZE_VERSION_FIELDS EXFAT_RESIZE_VERSION_FIELD_COUNT)
-if(NOT EXFAT_RESIZE_VERSION_FIELD_COUNT EQUAL 2)
-    message(FATAL_ERROR "Version helper returned invalid output")
-endif()
-list(GET EXFAT_RESIZE_VERSION_FIELDS 0 EXFAT_RESIZE_VERSION)
-list(GET EXFAT_RESIZE_VERSION_FIELDS 1 EXFAT_RESIZE_BUILD_VERSION)
 
 project(exfat_resize VERSION ${EXFAT_RESIZE_VERSION} LANGUAGES C)
 
@@ -65,6 +45,15 @@ option(
     "Build with AddressSanitizer and UndefinedBehaviorSanitizer"
     OFF
 )
+
+set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
+if(EXFAT_RESIZE_BUILD_CLI)
+    exfat_resize_resolve_checkout_build_version(
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${PROJECT_VERSION}"
+        EXFAT_RESIZE_BUILD_VERSION
+    )
+endif()
 
 function(exfat_resize_configure_target target)
     target_compile_features(${target} PRIVATE c_std_11)
