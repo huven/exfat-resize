@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 
-#include "block_device.h"
+#include "common.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include "block_device.h"
 
 int exfat_resize_sector_size_is_supported(uint32_t size)
 {
@@ -35,7 +34,7 @@ static enum exfat_resize_error validate_transfer(const struct exfat_resize_block
 	}
 	if (buffer == NULL)
 		return EXFAT_RESIZE_INVALID_ARGUMENT;
-	if ((size_t)sector_count > SIZE_MAX / device->sector_size)
+	if (sector_count > SIZE_MAX / device->sector_size)
 		return EXFAT_RESIZE_ARITHMETIC_OVERFLOW;
 	required_size = (size_t)sector_count * device->sector_size;
 	if (buffer_size < required_size)

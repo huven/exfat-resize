@@ -66,8 +66,8 @@ cli-sanitize-test: sanitize-build
 release-test:
 	tests/package/release-package.sh
 
-dist: VERSION tools/make-dist.sh tools/version.sh
-	@tools/make-dist.sh
+dist: VERSION cmake/ExfatResizeVersion.cmake tools/make-dist.sh tools/version.cmake
+	@CMAKE="$(CMAKE)" tools/make-dist.sh
 
 clean:
 	rm -rf "$(BUILD)" "$(SANITIZE_BUILD)" "$(SANITIZE_CONSUMER_BUILD)" dist

@@ -7,17 +7,19 @@ set -f
 project_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 dist_build=build/dist
 dist_output=dist
+cmake_command=${CMAKE:-cmake}
 
 cd "$project_root"
 commit=$(git rev-parse --verify "HEAD^{commit}")
-version_info=$(sh tools/version.sh --commit "$project_root" "$commit")
-package_version=$(printf '%s\n' "$version_info" | sed -n '1p')
-build_version=$(printf '%s\n' "$version_info" | sed -n '2p')
 
 rm -rf "$dist_build"
 mkdir -p "$dist_build" "$dist_output"
-printf '%s\n' "$package_version" >"$dist_build/package-version"
-printf '%s\n' "$build_version" >"$dist_build/build-version"
+"$cmake_command" \
+	"-DEXFAT_RESIZE_SOURCE_DIR=$project_root" \
+	"-DEXFAT_RESIZE_COMMIT=$commit" \
+	"-DEXFAT_RESIZE_VERSION_OUTPUT_DIR=$dist_build" \
+	-P "$project_root/tools/version.cmake"
+build_version=$(cat "$dist_build/build-version")
 
 package=exfat-resize-$build_version
 archive=$package.tar.gz

@@ -1,11 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 
+#include "common.h"
+
 #include "geometry.h"
 
 #include "block_device.h"
-
-#include <stddef.h>
-#include <stdint.h>
 
 #define EXFAT_MAX_CLUSTER_COUNT (UINT32_MAX - UINT32_C(10))
 
