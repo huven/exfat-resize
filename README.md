@@ -17,6 +17,8 @@ The install command may require elevated privileges depending on the destination
 prefix. Run `exfat-resize --help` for a usage summary or `man exfat-resize` for
 the complete command-line reference.
 
+For a Windows library build, see [Windows](#windows) under Build and test.
+
 ## Safety
 
 > [!WARNING]
@@ -96,8 +98,10 @@ The filesystem must meet these prerequisites:
 
 ## Supported platforms
 
-The C11 library is supported on any platform with a C11 compiler. The bundled
-CLI is a thin platform-specific wrapper around the library and is currently
+The core library is designed to be portable across mainstream C11 environments
+and has no operating-system dependencies. It is continuously tested with GCC
+and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
+is a thin platform-specific wrapper around the library and is currently
 supported and tested on macOS and Linux. Porting the CLI primarily requires
 implementing device access, exclusive-access checks, and durable
 synchronization for the target platform; contributions are welcome.
@@ -223,3 +227,13 @@ using both `find_package()` and `add_subdirectory()`.
 For a custom installation prefix:
 
     cmake --install build --prefix /your/prefix
+
+### Windows
+
+The CLI is not currently supported on Windows, so a standalone CMake build
+includes only the library and its tests by default:
+
+    cmake -S . -B build
+    cmake --build build --config Release
+    ctest --test-dir build --build-config Release --output-on-failure -L library
+    cmake --install build --config Release
