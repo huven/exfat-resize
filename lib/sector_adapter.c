@@ -1,11 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 
+#include "common.h"
+
 #include "sector_adapter.h"
 
 #include "block_device.h"
-
-#include <stddef.h>
-#include <stdint.h>
 
 static int adapt_transfer(const struct exfat_resize_sector_adapter *adapter,
     uint64_t first_sector,

@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 
-#include "endian.h"
+#include "common.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include "endian.h"
 
 static enum exfat_resize_error check_range(
     const void *buffer, size_t buffer_size, size_t offset, size_t width)

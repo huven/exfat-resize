@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 
+#include "common.h"
+
 #include "exfat_resize.h"
 
 #include "block_device.h"
@@ -9,8 +11,6 @@
 #include "geometry.h"
 #include "sector_adapter.h"
 
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 
 enum {

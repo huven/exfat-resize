@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 
-#include "checked_math.h"
+#include "common.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include "checked_math.h"
 
 enum exfat_resize_error exfat_resize_checked_add_u64(
     uint64_t left, uint64_t right, uint64_t *result)

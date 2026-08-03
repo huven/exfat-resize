@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 
-#include "block_device.h"
+#include "common.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include "block_device.h"
 
 int exfat_resize_sector_size_is_supported(uint32_t size)
 {
