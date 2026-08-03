@@ -15,11 +15,13 @@
 
 enum {
 	SECTOR_SIZE = 512,
+	BACKUP_BOOT_REGION = 12,
 	PERFORMANCE_DIRECTORY_FIRST_CLUSTER = 1024,
 	PERFORMANCE_DIRECTORY_CLUSTER_COUNT = 4096,
 	PERFORMANCE_FILE_CLUSTER_COUNT = 8192,
 	PERFORMANCE_FILE_PRIMARY_OFFSET = 352,
 	VOLUME_FLAGS_OFFSET = 106,
+	PERCENT_IN_USE_OFFSET = 112,
 	ENTRY_BITMAP = 0x81,
 	ENTRY_FILE = 0x85,
 	ENTRY_STREAM = 0xc0,
@@ -652,6 +654,94 @@ static int bitmap_cluster_is_set(struct exfat_fixture *fixture,
 	CHECK(exfat_fixture_read_sector(
 	          fixture, first_sector + byte_index / SECTOR_SIZE, sector, sizeof(sector)) == 0);
 	return (sector[byte_index % SECTOR_SIZE] & (1u << ((cluster - 2) % 8))) != 0;
+}
+
+/* Derive allocation accounting from the emitted bitmap, not production state. */
+static void check_percent_in_use_matches_bitmap(
+    struct exfat_fixture *fixture, const struct exfat_resize_geometry *target)
+{
+	unsigned char backup_boot_sector[SECTOR_SIZE];
+	unsigned char main_boot_sector[SECTOR_SIZE];
+	unsigned char root[SECTOR_SIZE];
+	unsigned char sector[SECTOR_SIZE];
+	uint64_t bitmap_cluster_count;
+	uint64_t bitmap_data_length = 0;
+	uint64_t bitmap_first_sector;
+	uint64_t bit_index = 0;
+	uint64_t cluster_index;
+	uint64_t cluster_size = (uint64_t)target->sectors_per_cluster * SECTOR_SIZE;
+	uint64_t expected_bitmap_data_length = ((uint64_t)target->cluster_count + 7) / 8;
+	uint32_t bitmap_cluster = 0;
+	uint32_t used_cluster_count = 0;
+	uint32_t sector_index;
+	unsigned char expected_percent_in_use;
+	size_t byte_index;
+	unsigned int bit_in_byte;
+
+	if (exfat_fixture_read_sector(fixture,
+	        exfat_fixture_cluster_sector(target, target->root_directory_cluster), root,
+	        sizeof(root)) != 0) {
+		CHECK(0);
+		return;
+	}
+	CHECK(root[0] == ENTRY_BITMAP);
+	if (root[0] != ENTRY_BITMAP)
+		return;
+	if (exfat_resize_load_le32(root, sizeof(root), 20, &bitmap_cluster) != EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_load_le64(root, sizeof(root), 24, &bitmap_data_length) !=
+	        EXFAT_RESIZE_SUCCESS) {
+		CHECK(0);
+		return;
+	}
+	CHECK(bitmap_data_length == expected_bitmap_data_length);
+	if (bitmap_data_length != expected_bitmap_data_length)
+		return;
+	bitmap_cluster_count = (bitmap_data_length + cluster_size - 1) / cluster_size;
+	CHECK(bitmap_cluster_count != 0);
+	CHECK(bitmap_cluster >= 2);
+	CHECK((uint64_t)bitmap_cluster + bitmap_cluster_count <= (uint64_t)target->cluster_count + 2);
+	if (bitmap_cluster_count == 0 || bitmap_cluster < 2 ||
+	    (uint64_t)bitmap_cluster + bitmap_cluster_count > (uint64_t)target->cluster_count + 2)
+		return;
+
+	bitmap_first_sector = exfat_fixture_cluster_sector(target, bitmap_cluster);
+	for (cluster_index = 0; cluster_index < bitmap_cluster_count; ++cluster_index) {
+		uint32_t cluster = bitmap_cluster + (uint32_t)cluster_index;
+		uint32_t expected_next =
+		    cluster_index + 1 == bitmap_cluster_count ? UINT32_C(0xffffffff) : cluster + 1;
+
+		CHECK(bitmap_cluster_is_set(fixture, target, bitmap_cluster, cluster));
+		CHECK(load_fat_entry(fixture, target, cluster) == expected_next);
+		for (sector_index = 0; sector_index < target->sectors_per_cluster; ++sector_index) {
+			uint64_t sector_number =
+			    bitmap_first_sector + cluster_index * target->sectors_per_cluster + sector_index;
+
+			if (exfat_fixture_read_sector(fixture, sector_number, sector, sizeof(sector)) != 0) {
+				CHECK(0);
+				return;
+			}
+			for (byte_index = 0; byte_index < sizeof(sector); ++byte_index) {
+				for (bit_in_byte = 0; bit_in_byte < 8; ++bit_in_byte, ++bit_index) {
+					int allocated = (sector[byte_index] & (1u << bit_in_byte)) != 0;
+
+					if (bit_index < target->cluster_count)
+						used_cluster_count += (uint32_t)allocated;
+					else
+						CHECK(!allocated);
+				}
+			}
+		}
+	}
+	if (exfat_fixture_read_sector(fixture, 0, main_boot_sector, sizeof(main_boot_sector)) != 0 ||
+	    exfat_fixture_read_sector(
+	        fixture, BACKUP_BOOT_REGION, backup_boot_sector, sizeof(backup_boot_sector)) != 0) {
+		CHECK(0);
+		return;
+	}
+	expected_percent_in_use =
+	    (unsigned char)((uint64_t)used_cluster_count * 100 / target->cluster_count);
+	CHECK(main_boot_sector[PERCENT_IN_USE_OFFSET] == expected_percent_in_use);
+	CHECK(backup_boot_sector[PERCENT_IN_USE_OFFSET] == expected_percent_in_use);
 }
 
 static void check_cluster_marker(struct exfat_fixture *fixture,
@@ -2054,6 +2144,7 @@ static void test_mapping_extremes(void)
 			    &fixture.memory.device, workspace, sizeof(workspace), &read_back);
 			CHECK(error == EXFAT_RESIZE_SUCCESS);
 			CHECK(memcmp(&read_back, &target, sizeof(target)) == 0);
+			check_percent_in_use_matches_bitmap(&fixture, &target);
 			error = exfat_resize_map_growth_cluster(&fixture.geometry, &target, 5, &mapped);
 			CHECK(error == EXFAT_RESIZE_SUCCESS);
 			check_cluster_marker(&fixture, &target, mapped, 0x55);
