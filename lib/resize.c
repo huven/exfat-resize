@@ -37,7 +37,7 @@ enum {
 #define EXFAT_FAT_BAD_CLUSTER UINT32_C(0xfffffff7)
 #define EXFAT_FAT_END_OF_CHAIN UINT32_C(0xffffffff)
 #define EXFAT_MAX_DIRECTORY_SIZE (UINT64_C(256) * 1024 * 1024)
-#define EXFAT_IO_BUFFER_SIZE (1024U * 1024U)
+#define EXFAT_IO_BUFFER_SIZE ((size_t)UINT32_C(1048576))
 /*
  * A nonzero model value means that the cluster is allocated. Values 2 and
  * above are target FAT entries. The otherwise-invalid value 1 represents an

@@ -16,4 +16,8 @@
 #error "exfat-resize requires exact-width unsigned 8-, 16-, 32-, and 64-bit integer types"
 #endif
 
+#if SIZE_MAX < UINT32_C(1048576)
+#error "exfat-resize requires size_t to represent a 1 MiB work buffer"
+#endif
+
 #endif
