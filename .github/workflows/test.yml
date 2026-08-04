@@ -178,89 +178,24 @@ jobs:
       - name: Build and test the release package
         run: CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} make release-test
 
-  debian-package:
-    name: Debian package (Debian 12, amd64)
-    runs-on: ubuntu-latest
-    container: debian:12
-    timeout-minutes: 30
-
-    steps:
-      - name: Install package build and test tools
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            build-essential ca-certificates cmake dpkg-dev exfatprogs git \
-            gzip libcap2-bin lintian make
-
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Record builder environment
-        run: |
-          cat /etc/os-release
-          gcc --version
-          cmake --version
-          cpack --version
-          dpkg-deb --version
-
-      - name: Trust the runner-mounted checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Build and test Debian packages
-        run: |
-          set -eu
-          make dist
-          archive=$(find dist -maxdepth 1 -type f \
-            -name 'exfat-resize-*.tar.gz' -print)
-          test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
-          tools/build-deb.sh "$archive" deb-artifacts
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          tests/package/deb-install-test.sh deb-artifacts \
-            "$package_version" "$build_version" "$PWD"
-
-      - name: Upload Debian package artifacts
+      - name: Upload source package for Debian packaging
+        if: matrix.name == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: debian-packages-${{ github.run_id }}-${{ github.run_attempt }}
+          name: source-ci-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            deb-artifacts/*.deb
-            deb-artifacts/DEB_SHA256SUMS
-            deb-artifacts/DEB_PACKAGE_VERSIONS
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
 
-  ubuntu-package:
-    name: Debian package (Ubuntu 22.04 LTS, amd64)
-    needs: debian-package
-    runs-on: ubuntu-latest
-    container: ubuntu:22.04
-    timeout-minutes: 20
-
-    steps:
-      - name: Install package test tools
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            ca-certificates cmake g++ exfatprogs git gzip libcap2-bin
-
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Download Debian package artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: debian-packages-${{ github.run_id }}-${{ github.run_attempt }}
-          path: deb-artifacts
-
-      - name: Test the Debian 12-built packages
-        run: |
-          set -eu
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          tests/package/deb-install-test.sh deb-artifacts \
-            "$package_version" "$build_version" "$PWD"
+  debian-package:
+    name: Debian package build and compatibility tests
+    needs: release-package
+    uses: ./.github/workflows/debian-package.yml
+    with:
+      source_artifact_name: >-
+        source-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      package_artifact_name: >-
+        debian-packages-${{ github.run_id }}-${{ github.run_attempt }}
+      retention_days: 1

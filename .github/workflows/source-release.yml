@@ -72,120 +72,22 @@ jobs:
             dist/${{ steps.artifacts.outputs.checksum }}
           if-no-files-found: error
 
-  build_deb:
-    name: Build Debian packages (Debian 12, amd64)
+  debian_package:
+    name: Debian package build and compatibility tests
     needs: build_source
-    runs-on: ubuntu-latest
-    container: debian:12
-    timeout-minutes: 30
-    env:
-      RELEASE_REF: ${{ github.ref_name }}
-
-    steps:
-      - name: Install package build and test tools
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            build-essential ca-certificates cmake dpkg-dev exfatprogs gzip \
-            libcap2-bin lintian make
-
-      - name: Download source artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: source-release-${{ github.ref_name }}-${{ github.run_attempt }}
-          path: source-artifacts
-
-      - name: Record builder environment
-        run: |
-          cat /etc/os-release
-          gcc --version
-          cmake --version
-          cpack --version
-          dpkg-deb --version
-
-      - name: Build and test Debian packages
-        run: |
-          set -eu
-          version=${RELEASE_REF#v}
-          archive=source-artifacts/exfat-resize-$version.tar.gz
-          (cd source-artifacts && sha256sum --check \
-            "exfat-resize-$version.tar.gz.sha256")
-          mkdir source-tree
-          tar -xzf "$archive" -C source-tree
-          source_directory=source-tree/exfat-resize-$version
-          "$source_directory/tools/build-deb.sh" "$archive" deb-artifacts
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          test "$package_version" = "$version"
-          test "$build_version" = "$version"
-          "$source_directory/tests/package/deb-install-test.sh" \
-            deb-artifacts "$package_version" "$build_version" \
-            "$source_directory"
-
-      - name: Upload Debian package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: debian-release-${{ github.ref_name }}-${{ github.run_attempt }}
-          path: |
-            deb-artifacts/*.deb
-            deb-artifacts/DEB_SHA256SUMS
-            deb-artifacts/DEB_PACKAGE_VERSIONS
-          if-no-files-found: error
-
-  test_deb_ubuntu:
-    name: Test Debian packages (Ubuntu 22.04 LTS, amd64)
-    needs:
-      - build_source
-      - build_deb
-    runs-on: ubuntu-latest
-    container: ubuntu:22.04
-    timeout-minutes: 20
-    env:
-      RELEASE_REF: ${{ github.ref_name }}
-
-    steps:
-      - name: Install package test tools
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            ca-certificates cmake g++ exfatprogs gzip libcap2-bin
-
-      - name: Download source artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: source-release-${{ github.ref_name }}-${{ github.run_attempt }}
-          path: source-artifacts
-
-      - name: Download Debian package artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: debian-release-${{ github.ref_name }}-${{ github.run_attempt }}
-          path: deb-artifacts
-
-      - name: Test the Debian 12-built packages
-        run: |
-          set -eu
-          version=${RELEASE_REF#v}
-          archive=source-artifacts/exfat-resize-$version.tar.gz
-          (cd source-artifacts && sha256sum --check \
-            "exfat-resize-$version.tar.gz.sha256")
-          mkdir source-tree
-          tar -xzf "$archive" -C source-tree
-          source_directory=source-tree/exfat-resize-$version
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          test "$package_version" = "$version"
-          test "$build_version" = "$version"
-          "$source_directory/tests/package/deb-install-test.sh" \
-            deb-artifacts "$package_version" "$build_version" \
-            "$source_directory"
+    uses: ./.github/workflows/debian-package.yml
+    with:
+      source_artifact_name: >-
+        source-release-${{ github.ref_name }}-${{ github.run_attempt }}
+      package_artifact_name: >-
+        debian-release-${{ github.ref_name }}-${{ github.run_attempt }}
+      expected_version: ${{ github.ref_name }}
 
   publish_draft:
     name: Create draft release
     needs:
       - build_source
-      - build_deb
-      - test_deb_ubuntu
+      - debian_package
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
