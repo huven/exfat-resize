@@ -1,38 +1,32 @@
 # SPDX-License-Identifier: MIT
 
-name: Source release dry run
+name: Source release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_ref:
-        description: Existing release tag in the form vX.Y.Z
-        required: true
-        type: string
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
 
+concurrency:
+  group: source-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  source-release:
-    name: Source release (${{ inputs.release_ref }})
+  build_source:
+    name: Build source release (${{ github.ref_name }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RELEASE_REF: ${{ github.ref_name }}
 
     steps:
-      - name: Check out release tooling
-        uses: actions/checkout@v6
-        with:
-          path: release-tools
-          persist-credentials: false
-
       - name: Check out release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_ref }}
           fetch-depth: 0
-          fetch-tags: true
-          path: release-source
           persist-credentials: false
 
       - name: Install build tools
@@ -40,40 +34,122 @@ jobs:
 
       - name: Validate release tag and commit
         env:
-          RELEASE_REF: ${{ inputs.release_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          release_commit=$(git -C release-source rev-parse --verify 'HEAD^{commit}')
-          release-tools/tools/release-check.sh \
-            --source-dir release-source "$RELEASE_REF" "$release_commit"
+          release_commit=$(git rev-parse --verify 'HEAD^{commit}')
+          if ! git merge-base --is-ancestor \
+            "$release_commit" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "release commit is not reachable from $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          tools/release-check.sh --require-signed-tag \
+            "$RELEASE_REF" "$release_commit"
 
       - name: Test release package
-        run: make -C release-source release-test
-
-      - name: Build source artifacts
-        run: make -C release-source dist
+        run: make release-test
 
       - name: Verify source artifacts
         id: artifacts
-        env:
-          RELEASE_REF: ${{ inputs.release_ref }}
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
           archive=exfat-resize-$version.tar.gz
           checksum=$archive.sha256
-          cd release-source/dist
+          cd dist
           test -f "$archive"
           test -f "$checksum"
           sha256sum --check "$checksum"
-          printf 'archive=%s\n' "release-source/dist/$archive" >>"$GITHUB_OUTPUT"
-          printf 'checksum=%s\n' "release-source/dist/$checksum" >>"$GITHUB_OUTPUT"
+          printf 'archive=%s\n' "$archive" >>"$GITHUB_OUTPUT"
+          printf 'checksum=%s\n' "$checksum" >>"$GITHUB_OUTPUT"
 
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: source-release-${{ inputs.release_ref }}
+          name: source-release-${{ github.ref_name }}
           path: |
-            ${{ steps.artifacts.outputs.archive }}
-            ${{ steps.artifacts.outputs.checksum }}
+            dist/${{ steps.artifacts.outputs.archive }}
+            dist/${{ steps.artifacts.outputs.checksum }}
           if-no-files-found: error
+
+  publish_draft:
+    name: Create draft release
+    needs: build_source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download source artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: source-release-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Verify downloaded source artifacts
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          archive=exfat-resize-$version.tar.gz
+          checksum=$archive.sha256
+          expected=$(printf '%s\n%s\n' "$archive" "$checksum" | sort)
+          actual=$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [ "$actual" != "$expected" ]; then
+            echo "workflow artifact contains an unexpected file set" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+          (cd release-assets && sha256sum --check "$checksum")
+
+      - name: Create or update draft release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          archive=exfat-resize-$version.tar.gz
+          checksum=$archive.sha256
+          title="exfat-resize $version"
+
+          if is_draft=$(gh release view "$RELEASE_REF" \
+            --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$is_draft" != true ]; then
+              echo "refusing to modify published release $RELEASE_REF" >&2
+              exit 1
+            fi
+            gh release edit "$RELEASE_REF" --draft --title "$title" --verify-tag
+          else
+            gh release create "$RELEASE_REF" --draft --generate-notes \
+              --title "$title" --verify-tag
+          fi
+
+          gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' |
+            while IFS= read -r asset; do
+              if [ -n "$asset" ]; then
+                gh release delete-asset "$RELEASE_REF" "$asset" --yes
+              fi
+            done
+          gh release upload "$RELEASE_REF" \
+            "release-assets/$archive" "release-assets/$checksum"
+
+          expected=$(printf '%s\n%s\n' "$archive" "$checksum" | sort)
+          actual=$(gh release view "$RELEASE_REF" --json assets \
+            --jq '.assets[].name' | sort)
+          if [ "$actual" != "$expected" ]; then
+            echo "draft release contains an unexpected asset set" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
+          mkdir downloaded-release-assets
+          gh release download "$RELEASE_REF" \
+            --dir downloaded-release-assets \
+            --pattern "$archive" --pattern "$checksum"
+          cmp "release-assets/$archive" "downloaded-release-assets/$archive"
+          cmp "release-assets/$checksum" "downloaded-release-assets/$checksum"
+          (cd downloaded-release-assets && sha256sum --check "$checksum")
