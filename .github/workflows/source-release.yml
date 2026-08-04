@@ -66,11 +66,12 @@ jobs:
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: source-release-${{ github.ref_name }}-${{ github.run_attempt }}
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: |
             dist/${{ steps.artifacts.outputs.archive }}
             dist/${{ steps.artifacts.outputs.checksum }}
           if-no-files-found: error
+          overwrite: true
 
   debian_package:
     name: Debian package build and compatibility tests
@@ -78,9 +79,9 @@ jobs:
     uses: ./.github/workflows/debian-package.yml
     with:
       source_artifact_name: >-
-        source-release-${{ github.ref_name }}-${{ github.run_attempt }}
+        source-release-${{ github.ref_name }}-${{ github.run_id }}
       package_artifact_name: >-
-        debian-release-${{ github.ref_name }}-${{ github.run_attempt }}
+        debian-release-${{ github.ref_name }}-${{ github.run_id }}
       expected_version: ${{ github.ref_name }}
 
   publish_draft:
@@ -97,16 +98,17 @@ jobs:
       - name: Download source artifacts
         uses: actions/download-artifact@v4
         with:
-          name: source-release-${{ github.ref_name }}-${{ github.run_attempt }}
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
       - name: Download Debian package artifacts
         uses: actions/download-artifact@v4
         with:
-          name: debian-release-${{ github.ref_name }}-${{ github.run_attempt }}
+          name: debian-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
       - name: Verify and assemble release artifacts
+        id: artifacts
         env:
           RELEASE_REF: ${{ github.ref_name }}
         run: |
@@ -114,21 +116,29 @@ jobs:
           version=${RELEASE_REF#v}
           archive=exfat-resize-$version.tar.gz
           checksum=$archive.sha256
-          runtime=exfat-resize_${version}-1_amd64.deb
-          development=libexfat-resize-dev_${version}-1_amd64.deb
-          package_version=$(sed -n '1p' \
-            release-assets/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' \
-            release-assets/DEB_PACKAGE_VERSIONS)
+          metadata=release-assets/DEB_PACKAGE_METADATA
+          test "$(wc -l <"$metadata" | tr -d ' ')" -eq 6
+          package_version=$(sed -n 's/^package_version=//p' "$metadata")
+          build_version=$(sed -n 's/^build_version=//p' "$metadata")
+          package_release=$(sed -n 's/^package_release=//p' "$metadata")
+          architecture=$(sed -n 's/^architecture=//p' "$metadata")
+          runtime=$(sed -n 's/^runtime_filename=//p' "$metadata")
+          development=$(sed -n 's/^development_filename=//p' "$metadata")
           test "$package_version" = "$version"
           test "$build_version" = "$version"
+          test -n "$package_release"
+          test "$architecture" = amd64
+          test "$runtime" = \
+            "exfat-resize_${version}-${package_release}_${architecture}.deb"
+          test "$development" = \
+            "libexfat-resize-dev_${version}-${package_release}_${architecture}.deb"
           (cd release-assets && sha256sum --check "$checksum")
           (cd release-assets && sha256sum --check DEB_SHA256SUMS)
           cat "release-assets/$checksum" \
             release-assets/DEB_SHA256SUMS | sort -k2 \
             >release-assets/SHA256SUMS
           rm release-assets/DEB_SHA256SUMS \
-            release-assets/DEB_PACKAGE_VERSIONS
+            "$metadata"
           expected=$(printf '%s\n%s\n%s\n%s\n%s\n' \
             "$archive" "$checksum" SHA256SUMS "$runtime" "$development" |
             sort)
@@ -139,19 +149,23 @@ jobs:
             exit 1
           fi
           (cd release-assets && sha256sum --check SHA256SUMS)
+          printf 'runtime=%s\n' "$runtime" >>"$GITHUB_OUTPUT"
+          printf 'development=%s\n' "$development" >>"$GITHUB_OUTPUT"
 
       - name: Create or update draft release
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_REF: ${{ github.ref_name }}
+          RUNTIME_ASSET: ${{ steps.artifacts.outputs.runtime }}
+          DEVELOPMENT_ASSET: ${{ steps.artifacts.outputs.development }}
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
           archive=exfat-resize-$version.tar.gz
           checksum=$archive.sha256
-          runtime=exfat-resize_${version}-1_amd64.deb
-          development=libexfat-resize-dev_${version}-1_amd64.deb
+          runtime=$RUNTIME_ASSET
+          development=$DEVELOPMENT_ASSET
           title="exfat-resize $version"
 
           if is_draft=$(gh release view "$RELEASE_REF" \

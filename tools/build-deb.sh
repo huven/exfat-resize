@@ -102,38 +102,85 @@ linker_flags=$(dpkg-buildflags --get LDFLAGS)
 "$cpack_command" --config "$temporary/build/CPackConfig.cmake" \
 	-G DEB -B "$output_directory"
 
-runtime_package=$output_directory/exfat-resize_${package_version}-1_amd64.deb
-development_package=$output_directory/libexfat-resize-dev_${package_version}-1_amd64.deb
-for package in "$runtime_package" "$development_package"; do
-	if [ ! -f "$package" ]; then
-		echo "expected Debian package not found: $package" >&2
-		exit 1
-	fi
-done
 if [ "$(find "$output_directory" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')" -ne 2 ]; then
 	echo "CPack produced an unexpected Debian package set" >&2
 	exit 1
 fi
 
-if [ "$(dpkg-deb -f "$runtime_package" Package)" != exfat-resize ] ||
-	[ "$(dpkg-deb -f "$development_package" Package)" != libexfat-resize-dev ]; then
-	echo "a Debian package has the wrong package name" >&2
-	exit 1
-fi
-for package in "$runtime_package" "$development_package"; do
-	if [ "$(dpkg-deb -f "$package" Version)" != "$package_version-1" ] ||
-		[ "$(dpkg-deb -f "$package" Architecture)" != amd64 ]; then
-		echo "a Debian package has the wrong version or architecture: $package" >&2
+runtime_package=
+development_package=
+deb_version=
+architecture=
+for package in "$output_directory"/*.deb; do
+	package_name=$(dpkg-deb -f "$package" Package)
+	case $package_name in
+		exfat-resize)
+			if [ -n "$runtime_package" ]; then
+				echo "CPack produced more than one runtime package" >&2
+				exit 1
+			fi
+			runtime_package=$package
+			;;
+		libexfat-resize-dev)
+			if [ -n "$development_package" ]; then
+				echo "CPack produced more than one development package" >&2
+				exit 1
+			fi
+			development_package=$package
+			;;
+		*)
+			echo "CPack produced an unexpected package: $package_name" >&2
+			exit 1
+			;;
+	esac
+
+	current_version=$(dpkg-deb -f "$package" Version)
+	current_architecture=$(dpkg-deb -f "$package" Architecture)
+	if [ -z "$deb_version" ]; then
+		deb_version=$current_version
+		architecture=$current_architecture
+	elif [ "$current_version" != "$deb_version" ] ||
+		[ "$current_architecture" != "$architecture" ]; then
+		echo "Debian packages disagree on version or architecture" >&2
 		exit 1
 	fi
 done
+if [ -z "$runtime_package" ] || [ -z "$development_package" ]; then
+	echo "CPack did not produce both expected Debian packages" >&2
+	exit 1
+fi
+case $deb_version in
+	"$package_version"-*) package_release=${deb_version#"$package_version"-} ;;
+	*)
+		echo "Debian package version disagrees with source: $deb_version" >&2
+		exit 1
+		;;
+esac
+if [ -z "$package_release" ]; then
+	echo "Debian package has an empty package release" >&2
+	exit 1
+fi
+if [ "$architecture" != amd64 ]; then
+	echo "Debian package has an unexpected architecture: $architecture" >&2
+	exit 1
+fi
+
+runtime_filename=${runtime_package##*/}
+development_filename=${development_package##*/}
 
 (
 	cd "$output_directory"
-	sha256sum "${runtime_package##*/}" "${development_package##*/}" |
+	sha256sum "$runtime_filename" "$development_filename" |
 		sort -k2 >DEB_SHA256SUMS
-	printf '%s\n%s\n' "$package_version" "$build_version" \
-		>DEB_PACKAGE_VERSIONS
+	printf '%s\n' \
+		"package_version=$package_version" \
+		"build_version=$build_version" \
+		"package_release=$package_release" \
+		"architecture=$architecture" \
+		"runtime_filename=$runtime_filename" \
+		"development_filename=$development_filename" \
+		>DEB_PACKAGE_METADATA
 )
 
-printf 'built Debian packages for %s (%s)\n' "$package_version" "$build_version"
+printf 'built Debian packages for %s-%s (%s, %s)\n' \
+	"$package_version" "$package_release" "$build_version" "$architecture"

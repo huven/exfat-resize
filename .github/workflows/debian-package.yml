@@ -76,16 +76,17 @@ jobs:
           test -n "$source_directory"
           test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
           "$source_directory/tools/build-deb.sh" "$archive" deb-artifacts
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
+          package_version=$(sed -n 's/^package_version=//p' \
+            deb-artifacts/DEB_PACKAGE_METADATA)
+          build_version=$(sed -n 's/^build_version=//p' \
+            deb-artifacts/DEB_PACKAGE_METADATA)
           if [ -n "$EXPECTED_VERSION" ]; then
             expected_version=${EXPECTED_VERSION#v}
             test "$package_version" = "$expected_version"
             test "$build_version" = "$expected_version"
           fi
           "$source_directory/tests/package/deb-install-test.sh" \
-            deb-artifacts "$package_version" "$build_version" \
-            "$source_directory"
+            deb-artifacts "$source_directory"
 
       - name: Upload Debian package artifacts
         uses: actions/upload-artifact@v4
@@ -94,8 +95,9 @@ jobs:
           path: |
             deb-artifacts/*.deb
             deb-artifacts/DEB_SHA256SUMS
-            deb-artifacts/DEB_PACKAGE_VERSIONS
+            deb-artifacts/DEB_PACKAGE_METADATA
           if-no-files-found: error
+          overwrite: true
           retention-days: ${{ inputs.retention_days }}
 
   ubuntu:
@@ -143,13 +145,14 @@ jobs:
             -type d -name 'exfat-resize-*' -print)
           test -n "$source_directory"
           test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
-          package_version=$(sed -n '1p' deb-artifacts/DEB_PACKAGE_VERSIONS)
-          build_version=$(sed -n '2p' deb-artifacts/DEB_PACKAGE_VERSIONS)
+          package_version=$(sed -n 's/^package_version=//p' \
+            deb-artifacts/DEB_PACKAGE_METADATA)
+          build_version=$(sed -n 's/^build_version=//p' \
+            deb-artifacts/DEB_PACKAGE_METADATA)
           if [ -n "$EXPECTED_VERSION" ]; then
             expected_version=${EXPECTED_VERSION#v}
             test "$package_version" = "$expected_version"
             test "$build_version" = "$expected_version"
           fi
           "$source_directory/tests/package/deb-install-test.sh" \
-            deb-artifacts "$package_version" "$build_version" \
-            "$source_directory"
+            deb-artifacts "$source_directory"

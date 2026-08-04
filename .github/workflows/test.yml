@@ -182,11 +182,12 @@ jobs:
         if: matrix.name == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: source-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          name: source-ci-${{ github.run_id }}
           path: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
           if-no-files-found: error
+          overwrite: true
           retention-days: 1
 
   debian-package:
@@ -195,7 +196,7 @@ jobs:
     uses: ./.github/workflows/debian-package.yml
     with:
       source_artifact_name: >-
-        source-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        source-ci-${{ github.run_id }}
       package_artifact_name: >-
-        debian-packages-${{ github.run_id }}-${{ github.run_attempt }}
+        debian-packages-${{ github.run_id }}
       retention_days: 1

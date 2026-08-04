@@ -1,4 +1,4 @@
-exfat-resize (@PROJECT_VERSION@-1) unstable; urgency=medium
+exfat-resize (@PROJECT_VERSION@-@CPACK_DEBIAN_PACKAGE_RELEASE@) unstable; urgency=medium
 
   * Package the upstream exfat-resize @PROJECT_VERSION@ release.
 

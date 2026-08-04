@@ -5,15 +5,13 @@ set -eu
 LC_ALL=C
 export LC_ALL
 
-if [ "$#" -ne 4 ]; then
-	echo "usage: $0 PACKAGE_DIRECTORY PACKAGE_VERSION BUILD_VERSION SOURCE_DIRECTORY" >&2
+if [ "$#" -ne 2 ]; then
+	echo "usage: $0 PACKAGE_DIRECTORY SOURCE_DIRECTORY" >&2
 	exit 2
 fi
 
 package_directory=$1
-package_version=$2
-build_version=$3
-source_directory=$4
+source_directory=$2
 
 case $package_directory in
 	/*) ;;
@@ -28,14 +26,51 @@ if [ "$(id -u)" -ne 0 ]; then
 	echo "Debian package installation tests must run as root" >&2
 	exit 1
 fi
-if [ "$(dpkg --print-architecture)" != amd64 ]; then
-	echo "Debian package installation tests require amd64" >&2
+
+metadata=$package_directory/DEB_PACKAGE_METADATA
+manifest=$package_directory/DEB_SHA256SUMS
+for required_file in "$metadata" "$manifest"; do
+	if [ ! -f "$required_file" ]; then
+		echo "required package metadata not found: $required_file" >&2
+		exit 1
+	fi
+done
+if [ "$(wc -l <"$metadata" | tr -d ' ')" -ne 6 ]; then
+	echo "Debian package metadata has an unexpected format" >&2
 	exit 1
 fi
 
-runtime_package=$package_directory/exfat-resize_${package_version}-1_amd64.deb
-development_package=$package_directory/libexfat-resize-dev_${package_version}-1_amd64.deb
-manifest=$package_directory/DEB_SHA256SUMS
+package_version=$(sed -n 's/^package_version=//p' "$metadata")
+build_version=$(sed -n 's/^build_version=//p' "$metadata")
+package_release=$(sed -n 's/^package_release=//p' "$metadata")
+architecture=$(sed -n 's/^architecture=//p' "$metadata")
+runtime_filename=$(sed -n 's/^runtime_filename=//p' "$metadata")
+development_filename=$(sed -n 's/^development_filename=//p' "$metadata")
+for required_value in \
+	"$package_version" "$build_version" "$package_release" \
+	"$architecture" "$runtime_filename" "$development_filename"; do
+	if [ -z "$required_value" ]; then
+		echo "Debian package metadata contains an empty value" >&2
+		exit 1
+	fi
+done
+
+if [ "$architecture" != amd64 ] ||
+	[ "$(dpkg --print-architecture)" != "$architecture" ]; then
+	echo "Debian package installation tests require amd64 packages on amd64" >&2
+	exit 1
+fi
+
+deb_version=$package_version-$package_release
+expected_runtime_filename=exfat-resize_${deb_version}_${architecture}.deb
+expected_development_filename=libexfat-resize-dev_${deb_version}_${architecture}.deb
+if [ "$runtime_filename" != "$expected_runtime_filename" ] ||
+	[ "$development_filename" != "$expected_development_filename" ]; then
+	echo "Debian package metadata contains unexpected filenames" >&2
+	exit 1
+fi
+runtime_package=$package_directory/$runtime_filename
+development_package=$package_directory/$development_filename
 for required_file in "$runtime_package" "$development_package" "$manifest"; do
 	if [ ! -f "$required_file" ]; then
 		echo "required package artifact not found: $required_file" >&2
@@ -46,6 +81,13 @@ if [ ! -d "$source_directory/tests/package/consumer" ]; then
 	echo "package consumer source not found: $source_directory" >&2
 	exit 1
 fi
+
+for package_name in exfat-resize libexfat-resize-dev; do
+	if dpkg-query --show "$package_name" >/dev/null 2>&1; then
+		echo "refusing to replace pre-existing package state: $package_name" >&2
+		exit 1
+	fi
+done
 
 (
 	cd "$package_directory"
@@ -58,8 +100,8 @@ if [ "$(dpkg-deb -f "$runtime_package" Package)" != exfat-resize ] ||
 	exit 1
 fi
 for package in "$runtime_package" "$development_package"; do
-	if [ "$(dpkg-deb -f "$package" Version)" != "$package_version-1" ] ||
-		[ "$(dpkg-deb -f "$package" Architecture)" != amd64 ]; then
+	if [ "$(dpkg-deb -f "$package" Version)" != "$deb_version" ] ||
+		[ "$(dpkg-deb -f "$package" Architecture)" != "$architecture" ]; then
 		echo "package metadata contains an unexpected version or architecture" >&2
 		exit 1
 	fi
@@ -176,7 +218,7 @@ gzip -dc /usr/share/man/man8/exfat-resize.8.gz |
 	exit 1
 }
 gzip -dc /usr/share/doc/exfat-resize/changelog.Debian.gz |
-	grep -F "exfat-resize ($package_version-1)" >/dev/null || {
+	grep -F "exfat-resize ($deb_version)" >/dev/null || {
 	echo "installed Debian changelog has an unexpected version" >&2
 	exit 1
 }
