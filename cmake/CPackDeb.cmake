@@ -62,11 +62,48 @@ find_program(GZIP_EXECUTABLE gzip REQUIRED)
 execute_process(
     COMMAND
         ${GZIP_EXECUTABLE} -9 -n -c
+        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+    OUTPUT_FILE
+        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8.gz
+    COMMAND_ERROR_IS_FATAL
+        ANY
+)
+execute_process(
+    COMMAND
+        ${GZIP_EXECUTABLE} -9 -n -c
         ${CMAKE_CURRENT_BINARY_DIR}/changelog.Debian
     OUTPUT_FILE
         ${CMAKE_CURRENT_BINARY_DIR}/changelog.Debian.gz
     COMMAND_ERROR_IS_FATAL
         ANY
+)
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8.gz
+    DESTINATION
+        ${CMAKE_INSTALL_MANDIR}/man8
+    COMPONENT
+        Runtime
+)
+install(
+    FILES
+        LICENSE
+    DESTINATION
+        ${CMAKE_INSTALL_DOCDIR}
+    RENAME
+        copyright
+    COMPONENT
+        Runtime
+)
+install(
+    FILES
+        LICENSE
+    DESTINATION
+        ${CMAKE_INSTALL_DATAROOTDIR}/doc/libexfat-resize-dev
+    RENAME
+        copyright
+    COMPONENT
+        Development
 )
 install(
     FILES
