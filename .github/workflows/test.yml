@@ -177,3 +177,24 @@ jobs:
 
       - name: Build and test the release package
         run: CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} make release-test
+
+      - name: Upload source package for Linux binary build
+        if: matrix.name == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-ci-${{ github.run_id }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  linux-binary:
+    name: Linux binary archive
+    needs: release-package
+    uses: ./.github/workflows/linux-binary.yml
+    with:
+      source_artifact_name: source-ci-${{ github.run_id }}
+      binary_artifact_name: linux-binary-ci-${{ github.run_id }}
+      retention_days: 1
