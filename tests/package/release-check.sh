@@ -42,9 +42,11 @@ fi
 ssh-keygen -q -t ed25519 -N "" -C "release check" -f "$signing_key"
 ssh-keygen -q -t ed25519 -N "" -C "other signer" -f "$other_signing_key"
 
-mkdir -p "$repository/tools"
+mkdir -p "$repository/cmake" "$repository/tools"
+cp "$project_root/cmake/ExfatResizeVersion.cmake" \
+	"$repository/cmake/ExfatResizeVersion.cmake"
 cp "$project_root/tools/release-check.sh" "$repository/tools/release-check.sh"
-cp "$project_root/tools/version.sh" "$repository/tools/version.sh"
+cp "$project_root/tools/version.cmake" "$repository/tools/version.cmake"
 signing_public_key=$(cat "$signing_key.pub")
 printf '%s namespaces="git" %s\n' \
 	"release-check@example.invalid" "$signing_public_key" \
@@ -55,7 +57,7 @@ git -C "$repository" config user.name "Release Check Test"
 git -C "$repository" config user.email "release-check@example.invalid"
 
 printf '%s\n' 1.2.3 >"$repository/VERSION"
-git -C "$repository" add VERSION tools
+git -C "$repository" add VERSION cmake tools
 git -C "$repository" commit --quiet -m "Release 1.2.3"
 commit_123=$(git -C "$repository" rev-parse --verify 'HEAD^{commit}')
 git -C "$repository" tag v1.2.3 "$commit_123"
