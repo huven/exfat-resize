@@ -321,6 +321,8 @@ static int configure_checksum_wrap_entry_set(struct exfat_fixture *fixture)
 
 	if (exfat_fixture_read_sector(fixture, child_sector, child, sizeof(child)) != 0)
 		return -1;
+	/* The checksum-wrap prefix assumes an otherwise zeroed File primary. */
+	memset(child + 4, 0, 28);
 	child[1] = 3;
 	vendor = child + 32 * 3;
 	memset(vendor, 0, 32);
@@ -763,6 +765,29 @@ static unsigned char expected_cluster_byte(uint32_t source_cluster, uint64_t clu
 	return (unsigned char)(((uint64_t)source_cluster * 131 + cluster_byte_offset * 29) % 251 + 1);
 }
 
+static void check_file_primary_entries_preserved(
+    const unsigned char source[SECTOR_SIZE], const unsigned char target[SECTOR_SIZE])
+{
+	size_t entry_offset;
+	size_t byte_offset;
+	int saw_file = 0;
+
+	for (entry_offset = 0; entry_offset < SECTOR_SIZE; entry_offset += 32) {
+		int source_is_file = source[entry_offset] == ENTRY_FILE;
+		int target_is_file = target[entry_offset] == ENTRY_FILE;
+
+		CHECK(source_is_file == target_is_file);
+		if (!source_is_file)
+			continue;
+		saw_file = 1;
+		for (byte_offset = 0; byte_offset < 32; ++byte_offset) {
+			if (byte_offset != 2 && byte_offset != 3)
+				CHECK(source[entry_offset + byte_offset] == target[entry_offset + byte_offset]);
+		}
+	}
+	CHECK(saw_file);
+}
+
 static void check_cluster_pattern(struct exfat_fixture *fixture,
     const struct exfat_resize_geometry *geometry,
     uint32_t source_cluster,
@@ -792,7 +817,10 @@ static void test_resize(void)
 	struct exfat_resize_options options;
 	struct exfat_fixture fixture;
 	unsigned char workspace[SECTOR_SIZE * 2 + 13];
+	unsigned char source_root[SECTOR_SIZE];
+	unsigned char source_child[SECTOR_SIZE];
 	unsigned char root[SECTOR_SIZE];
+	unsigned char child[SECTOR_SIZE];
 	enum exfat_resize_error error;
 	uint32_t mapped;
 	uint32_t bitmap_cluster;
@@ -804,6 +832,12 @@ static void test_resize(void)
 	uint32_t next_cluster;
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT + 1) == 0);
+	CHECK(exfat_fixture_read_sector(&fixture,
+	          exfat_fixture_cluster_sector(
+	              &fixture.geometry, fixture.geometry.root_directory_cluster),
+	          source_root, sizeof(source_root)) == 0);
+	CHECK(exfat_fixture_read_sector(&fixture, exfat_fixture_cluster_sector(&fixture.geometry, 6),
+	          source_child, sizeof(source_child)) == 0);
 	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(target.cluster_heap_offset > fixture.geometry.cluster_heap_offset);
@@ -831,6 +865,7 @@ static void test_resize(void)
 	CHECK(mapped == target.root_directory_cluster);
 	CHECK(exfat_fixture_read_sector(
 	          &fixture, exfat_fixture_cluster_sector(&target, mapped), root, sizeof(root)) == 0);
+	check_file_primary_entries_preserved(source_root, root);
 	CHECK(root[0] == 0x81);
 	CHECK(exfat_resize_load_le32(root, sizeof(root), 20, &bitmap_cluster) == EXFAT_RESIZE_SUCCESS);
 	CHECK(exfat_resize_load_le64(root, sizeof(root), 24, &bitmap_length) == EXFAT_RESIZE_SUCCESS);
@@ -839,6 +874,12 @@ static void test_resize(void)
 	CHECK(
 	    exfat_resize_load_le32(root + 32, sizeof(root) - 32, 20, &mapped) == EXFAT_RESIZE_SUCCESS);
 	check_cluster_marker(&fixture, &target, mapped, 0x44);
+
+	error = exfat_resize_map_growth_cluster(&fixture.geometry, &target, 6, &mapped);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_fixture_read_sector(
+	          &fixture, exfat_fixture_cluster_sector(&target, mapped), child, sizeof(child)) == 0);
+	check_file_primary_entries_preserved(source_child, child);
 
 	error = exfat_resize_map_growth_cluster(&fixture.geometry, &target, 5, &mapped);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);

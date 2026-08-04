@@ -35,7 +35,21 @@ enum {
 	ENTRY_FILE_NAME = 0xc1,
 	NO_FAT_CHAIN = 0x02,
 	ALLOCATION_POSSIBLE = 0x01,
-	DIRECTORY_ATTRIBUTE = 0x10
+	READ_ONLY_ATTRIBUTE = 0x01,
+	HIDDEN_ATTRIBUTE = 0x02,
+	SYSTEM_ATTRIBUTE = 0x04,
+	DIRECTORY_ATTRIBUTE = 0x10,
+	ARCHIVE_ATTRIBUTE = 0x20,
+
+	FILE_ATTRIBUTES_OFFSET = 4,
+	FILE_CREATE_TIMESTAMP_OFFSET = 8,
+	FILE_MODIFIED_TIMESTAMP_OFFSET = 12,
+	FILE_ACCESS_TIMESTAMP_OFFSET = 16,
+	FILE_CREATE_INCREMENT_OFFSET = 20,
+	FILE_MODIFIED_INCREMENT_OFFSET = 21,
+	FILE_CREATE_UTC_OFFSET = 22,
+	FILE_MODIFIED_UTC_OFFSET = 23,
+	FILE_ACCESS_UTC_OFFSET = 24
 };
 
 static uint32_t boot_checksum_byte(uint32_t checksum, unsigned char value)
@@ -60,6 +74,19 @@ static uint16_t entry_set_checksum(const unsigned char entries[ENTRY_SIZE * 3])
 			checksum = entry_checksum_byte(checksum, entries[index]);
 	}
 	return checksum;
+}
+
+static uint32_t file_timestamp(unsigned int seed)
+{
+	uint32_t year = 2026 - 1980;
+	uint32_t month = seed % 12 + 1;
+	uint32_t day = seed % 28 + 1;
+	uint32_t hour = seed % 24;
+	uint32_t minute = seed % 60;
+	uint32_t double_second = seed % 30;
+
+	return (year << 25) | (month << 21) | (day << 16) | (hour << 11) | (minute << 5) |
+	    double_second;
 }
 
 static int write_sectors(
@@ -309,8 +336,20 @@ static int append_file_set(unsigned char directory[SECTOR_SIZE],
 	entries = directory + *offset;
 	entries[0] = ENTRY_FILE;
 	entries[1] = 2;
-	if (exfat_resize_store_le16(entries, ENTRY_SIZE, 4, attributes) != EXFAT_RESIZE_SUCCESS)
+	if (exfat_resize_store_le16(entries, ENTRY_SIZE, FILE_ATTRIBUTES_OFFSET, attributes) !=
+	        EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le32(entries, ENTRY_SIZE, FILE_CREATE_TIMESTAMP_OFFSET,
+	        file_timestamp(name)) != EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le32(entries, ENTRY_SIZE, FILE_MODIFIED_TIMESTAMP_OFFSET,
+	        file_timestamp((unsigned int)name + 31)) != EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le32(entries, ENTRY_SIZE, FILE_ACCESS_TIMESTAMP_OFFSET,
+	        file_timestamp((unsigned int)name + 67)) != EXFAT_RESIZE_SUCCESS)
 		return -1;
+	entries[FILE_CREATE_INCREMENT_OFFSET] = (unsigned char)((unsigned int)name % 200);
+	entries[FILE_MODIFIED_INCREMENT_OFFSET] = (unsigned char)(((unsigned int)name + 73) % 200);
+	entries[FILE_CREATE_UTC_OFFSET] = (unsigned char)(0x80 | ((unsigned int)name % 8));
+	entries[FILE_MODIFIED_UTC_OFFSET] = (unsigned char)(0x80 | (((unsigned int)name + 3) % 8));
+	entries[FILE_ACCESS_UTC_OFFSET] = (unsigned char)(0x80 | (((unsigned int)name + 6) % 8));
 
 	entries[ENTRY_SIZE] = ENTRY_STREAM;
 	entries[ENTRY_SIZE + 1] = ALLOCATION_POSSIBLE | (no_fat_chain ? NO_FAT_CHAIN : 0);
@@ -432,18 +471,21 @@ static int initialize_directories(struct exfat_fixture *fixture)
 		return -1;
 	offset += ENTRY_SIZE;
 
-	if (append_file_set(root, &offset, 0, 5, SECTOR_SIZE, 1, 'A') != 0 ||
+	if (append_file_set(root, &offset, ARCHIVE_ATTRIBUTE, 5, SECTOR_SIZE, 1, 'A') != 0 ||
 	    append_file_set(root, &offset, DIRECTORY_ATTRIBUTE, 6, SECTOR_SIZE, 1, 'D') != 0 ||
-	    append_file_set(root, &offset, 0, fixture->crossing_first_cluster,
+	    append_file_set(root, &offset, ARCHIVE_ATTRIBUTE | READ_ONLY_ATTRIBUTE,
+	        fixture->crossing_first_cluster,
 	        (uint64_t)fixture->crossing_cluster_count * fixture->geometry.sectors_per_cluster *
 	            SECTOR_SIZE,
 	        1, 'C') != 0 ||
-	    append_file_set(root, &offset, 0, fixture->fragmented_clusters[0],
+	    append_file_set(root, &offset, ARCHIVE_ATTRIBUTE | HIDDEN_ATTRIBUTE,
+	        fixture->fragmented_clusters[0],
 	        (uint64_t)3 * fixture->geometry.sectors_per_cluster * SECTOR_SIZE, 0, 'F') != 0)
 		return -1;
 
 	offset = 0;
-	if (append_file_set(child, &offset, 0, 8, SECTOR_SIZE, 1, 'N') != 0)
+	if (append_file_set(
+	        child, &offset, ARCHIVE_ATTRIBUTE | SYSTEM_ATTRIBUTE, 8, SECTOR_SIZE, 1, 'N') != 0)
 		return -1;
 
 	if (write_sectors(fixture, exfat_fixture_cluster_sector(&fixture->geometry, 2), 1, root) != 0 ||
