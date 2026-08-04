@@ -18,6 +18,12 @@ struct exfat_resize_geometry {
 };
 
 /*
+ * Returns the sectors needed for FAT entries 0 through cluster_count + 1.
+ * sector_size must be a supported logical sector size.
+ */
+uint32_t exfat_resize_used_fat_sector_count(uint32_t cluster_count, uint32_t sector_size);
+
+/*
  * Calculates the largest geometry that fits target_volume_sector_count.
  *
  * device_geometry and source must already have been validated. This function

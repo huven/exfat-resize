@@ -8,6 +8,13 @@
 
 #define EXFAT_MAX_CLUSTER_COUNT (UINT32_MAX - UINT32_C(10))
 
+uint32_t exfat_resize_used_fat_sector_count(uint32_t cluster_count, uint32_t sector_size)
+{
+	uint64_t byte_count = ((uint64_t)cluster_count + 2) * 4;
+
+	return (uint32_t)((byte_count + sector_size - 1) / sector_size);
+}
+
 static int candidate_fits(const struct exfat_resize_device_geometry *device_geometry,
     const struct exfat_resize_geometry *source,
     uint64_t target_volume_sector_count,
@@ -15,20 +22,16 @@ static int candidate_fits(const struct exfat_resize_device_geometry *device_geom
     uint32_t *fat_length,
     uint32_t *cluster_heap_offset)
 {
-	const uint64_t sector_size = device_geometry->logical_sector_size;
+	const uint32_t sector_size = device_geometry->logical_sector_size;
 	const uint64_t sectors_per_cluster = source->sectors_per_cluster;
-	uint64_t candidate_fat_length;
+	uint32_t candidate_fat_length;
 	uint64_t candidate_heap_offset;
 	uint64_t fat_end;
 	uint64_t heap_movement;
 
-	candidate_fat_length = ((uint64_t)candidate_cluster_count + 2) * 4;
-	candidate_fat_length = (candidate_fat_length + sector_size - 1) / sector_size;
+	candidate_fat_length = exfat_resize_used_fat_sector_count(candidate_cluster_count, sector_size);
 	if (candidate_fat_length < source->fat_length)
 		candidate_fat_length = source->fat_length;
-	if (candidate_fat_length > UINT32_MAX)
-		return 0;
-
 	candidate_heap_offset = source->cluster_heap_offset;
 	fat_end = (uint64_t)source->fat_offset + candidate_fat_length;
 	if (fat_end > candidate_heap_offset) {
@@ -41,7 +44,7 @@ static int candidate_fits(const struct exfat_resize_device_geometry *device_geom
 	        (target_volume_sector_count - candidate_heap_offset) / sectors_per_cluster)
 		return 0;
 
-	*fat_length = (uint32_t)candidate_fat_length;
+	*fat_length = candidate_fat_length;
 	*cluster_heap_offset = (uint32_t)candidate_heap_offset;
 	return 1;
 }
@@ -53,7 +56,7 @@ static int target_geometry_is_consistent(const struct exfat_resize_device_geomet
 	uint64_t available_clusters;
 	uint64_t fat_end;
 	uint64_t heap_movement;
-	uint64_t minimum_fat_length;
+	uint32_t minimum_fat_length;
 
 	if (target->cluster_heap_offset < source->cluster_heap_offset ||
 	    target->volume_sector_count <= target->cluster_heap_offset)
@@ -67,9 +70,8 @@ static int target_geometry_is_consistent(const struct exfat_resize_device_geomet
 	if (fat_end > target->cluster_heap_offset)
 		return 0;
 
-	minimum_fat_length = ((uint64_t)target->cluster_count + 2) * 4;
-	minimum_fat_length = (minimum_fat_length + device_geometry->logical_sector_size - 1) /
-	    device_geometry->logical_sector_size;
+	minimum_fat_length = exfat_resize_used_fat_sector_count(
+	    target->cluster_count, device_geometry->logical_sector_size);
 	if (target->fat_length < minimum_fat_length)
 		return 0;
 
