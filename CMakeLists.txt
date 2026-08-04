@@ -45,6 +45,15 @@ option(
     "Build with AddressSanitizer and UndefinedBehaviorSanitizer"
     OFF
 )
+option(
+    EXFAT_RESIZE_BUILD_DEB
+    "Configure CPack to build Debian binary packages"
+    OFF
+)
+
+if(EXFAT_RESIZE_BUILD_DEB AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "Debian packages can only be built on Linux")
+endif()
 
 set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
 if(EXFAT_RESIZE_BUILD_CLI)
@@ -178,6 +187,8 @@ install(
         exfat_resizeTargets
     ARCHIVE DESTINATION
         ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT
+        Development
 )
 
 if(EXFAT_RESIZE_BUILD_CLI)
@@ -186,13 +197,38 @@ if(EXFAT_RESIZE_BUILD_CLI)
             exfat-resize
         RUNTIME DESTINATION
             ${CMAKE_INSTALL_BINDIR}
+        COMPONENT
+            Runtime
     )
-    install(
-        FILES
-            ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
-        DESTINATION
-            ${CMAKE_INSTALL_MANDIR}/man8
-    )
+    if(EXFAT_RESIZE_BUILD_DEB)
+        find_program(GZIP_EXECUTABLE gzip REQUIRED)
+        execute_process(
+            COMMAND
+                ${GZIP_EXECUTABLE} -9 -n -c
+                ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+            OUTPUT_FILE
+                ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8.gz
+            COMMAND_ERROR_IS_FATAL
+                ANY
+        )
+        install(
+            FILES
+                ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8.gz
+            DESTINATION
+                ${CMAKE_INSTALL_MANDIR}/man8
+            COMPONENT
+                Runtime
+        )
+    else()
+        install(
+            FILES
+                ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+            DESTINATION
+                ${CMAKE_INSTALL_MANDIR}/man8
+            COMPONENT
+                Runtime
+        )
+    endif()
 endif()
 
 install(
@@ -200,14 +236,49 @@ install(
         include/exfat_resize.h
     DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT
+        Development
 )
+
+if(EXFAT_RESIZE_BUILD_DEB)
+    install(
+        FILES
+            LICENSE
+        DESTINATION
+            ${CMAKE_INSTALL_DOCDIR}
+        RENAME
+            copyright
+        COMPONENT
+            Runtime
+    )
+    install(
+        FILES
+            LICENSE
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/doc/libexfat-resize-dev
+        RENAME
+            copyright
+        COMPONENT
+            Development
+    )
+else()
+    install(
+        FILES
+            LICENSE
+        DESTINATION
+            ${CMAKE_INSTALL_DOCDIR}
+        COMPONENT
+            Runtime
+    )
+endif()
 
 install(
     FILES
-        LICENSE
         README.md
     DESTINATION
         ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT
+        Runtime
 )
 
 install(
@@ -215,6 +286,8 @@ install(
         docs/TRANSACTION.md
     DESTINATION
         ${CMAKE_INSTALL_DOCDIR}/docs
+    COMPONENT
+        Runtime
 )
 
 install(
@@ -224,6 +297,8 @@ install(
         exfat_resize::
     DESTINATION
         ${CMAKE_INSTALL_LIBDIR}/cmake/exfat_resize
+    COMPONENT
+        Development
 )
 
 install(
@@ -232,7 +307,13 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/exfat_resizeConfigVersion.cmake
     DESTINATION
         ${CMAKE_INSTALL_LIBDIR}/cmake/exfat_resize
+    COMPONENT
+        Development
 )
+
+if(EXFAT_RESIZE_BUILD_DEB)
+    include(cmake/CPackDeb.cmake)
+endif()
 
 if(EXFAT_RESIZE_BUILD_TESTS)
     enable_testing()

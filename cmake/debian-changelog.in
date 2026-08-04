@@ -1,0 +1,5 @@
+exfat-resize (@PROJECT_VERSION@-1) unstable; urgency=medium
+
+  * Package the upstream exfat-resize @PROJECT_VERSION@ release.
+
+ -- @CPACK_PACKAGE_CONTACT@  @EXFAT_RESIZE_DEB_CHANGELOG_DATE@
