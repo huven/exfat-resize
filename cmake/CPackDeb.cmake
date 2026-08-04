@@ -34,8 +34,8 @@ set(CPACK_DEBIAN_RUNTIME_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_RECOMMENDS exfatprogs)
 set(CPACK_DEBIAN_RUNTIME_DESCRIPTION
     "Grow existing exFAT filesystems
- exfat-resize grows an existing exFAT filesystem in a regular file or raw
- block device after its backing object has already been enlarged."
+exfat-resize grows an existing exFAT filesystem in a regular file or raw
+block device after its backing object has already been enlarged."
 )
 
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME libexfat-resize-dev)
@@ -43,8 +43,8 @@ set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_SECTION libdevel)
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS libc6-dev)
 set(CPACK_DEBIAN_DEVELOPMENT_DESCRIPTION
     "Development files for exfat-resize
- This package contains the static library, public C header, and CMake package
- files needed to develop software using libexfat-resize."
+This package contains the static library, public C header, and CMake package
+files needed to develop software using libexfat-resize."
 )
 
 string(

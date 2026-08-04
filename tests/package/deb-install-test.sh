@@ -96,8 +96,8 @@ if [ "$(dpkg-deb -f "$runtime_package" Description | sed -n '1p')" != \
 	exit 1
 fi
 
-runtime_files=$(dpkg-deb --contents "$runtime_package")
-development_files=$(dpkg-deb --contents "$development_package")
+runtime_files=$(dpkg-deb --fsys-tarfile "$runtime_package" | tar -tf -)
+development_files=$(dpkg-deb --fsys-tarfile "$development_package" | tar -tf -)
 for required_path in \
 	./usr/bin/exfat-resize \
 	./usr/share/man/man8/exfat-resize.8.gz \
@@ -105,7 +105,7 @@ for required_path in \
 	./usr/share/doc/exfat-resize/changelog.Debian.gz \
 	./usr/share/doc/exfat-resize/README.md \
 	./usr/share/doc/exfat-resize/docs/TRANSACTION.md; do
-	printf '%s\n' "$runtime_files" | grep -F " $required_path" >/dev/null || {
+	printf '%s\n' "$runtime_files" | grep -Fx "$required_path" >/dev/null || {
 		echo "runtime package is missing $required_path" >&2
 		exit 1
 	}
@@ -151,8 +151,20 @@ for package in "$runtime_package" "$development_package"; do
 		awk '$1 ~ /^[-l]/ { print $6 }' >>"$installed_files"
 done
 
-DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-	"$runtime_package" "$development_package"
+DEBIAN_FRONTEND=noninteractive apt-get \
+	-o "Dpkg::Options::=--path-include=/usr/share/man/*" \
+	-o "Dpkg::Options::=--path-include=/usr/share/doc/*" \
+	install --yes "$runtime_package" "$development_package"
+
+while IFS= read -r installed_file; do
+	case $installed_file in
+		./*) installed_file=/${installed_file#./} ;;
+	esac
+	if [ ! -e "$installed_file" ] && [ ! -L "$installed_file" ]; then
+		echo "package installation omitted a file: $installed_file" >&2
+		exit 1
+	fi
+done <"$installed_files"
 
 if [ "$(exfat-resize --version)" != "exfat-resize $build_version" ]; then
 	echo "installed executable has an unexpected build version" >&2
