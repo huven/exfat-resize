@@ -122,7 +122,7 @@ static enum exfat_resize_error validate_boot_values(
 	uint64_t heap_end;
 	uint64_t available_clusters;
 	uint64_t expected_cluster_count;
-	uint64_t minimum_fat_sectors;
+	uint32_t minimum_fat_sectors;
 	uint64_t minimum_volume_sectors;
 
 	if (values->bytes_per_sector_shift < 9 || values->bytes_per_sector_shift > 12 ||
@@ -165,8 +165,7 @@ static enum exfat_resize_error validate_boot_values(
 	if (fat_end > geometry->cluster_heap_offset)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 
-	minimum_fat_sectors = ((uint64_t)geometry->cluster_count + 2) * 4;
-	minimum_fat_sectors = (minimum_fat_sectors + sector_size - 1) / sector_size;
+	minimum_fat_sectors = exfat_resize_used_fat_sector_count(geometry->cluster_count, sector_size);
 	if (geometry->fat_length < minimum_fat_sectors)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 

@@ -22,6 +22,7 @@ function(exfat_resize_add_library_test target test_name)
         NAME ${test_name}
         COMMAND ${target}
     )
+    set_tests_properties(${test_name} PROPERTIES LABELS library)
 endfunction()
 
 exfat_resize_add_library_test(
@@ -70,15 +71,4 @@ exfat_resize_add_library_test(
     support/memory_block_device.c
     support/test_allocator.c
     integration/transaction_tests.c
-)
-
-set_tests_properties(
-    library.foundation
-    library.boot_region
-    library.geometry
-    library.resize
-    library.api
-    library.transaction
-    PROPERTIES
-        LABELS library
 )

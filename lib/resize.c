@@ -229,13 +229,11 @@ static int cluster_is_valid(const struct exfat_resize_geometry *geometry, uint32
 static enum exfat_resize_error load_source_fat(struct resize_context *context)
 {
 	enum exfat_resize_error error;
-	uint64_t byte_count = ((uint64_t)context->source.cluster_count + 2) * 4;
-	uint64_t sector_count;
 	uint64_t allocation_size;
+	uint32_t sector_count;
 
-	error = exfat_resize_checked_ceil_divide_u64(byte_count, context->sector_size, &sector_count);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
+	sector_count =
+	    exfat_resize_used_fat_sector_count(context->source.cluster_count, context->sector_size);
 	if (sector_count > context->source.fat_length)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	error = exfat_resize_checked_multiply_u64(sector_count, context->sector_size, &allocation_size);
@@ -249,8 +247,8 @@ static enum exfat_resize_error load_source_fat(struct resize_context *context)
 	if (context->source_fat == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
 
-	return exfat_resize_block_device_read(context->device, context->source.fat_offset,
-	    (uint32_t)sector_count, context->source_fat, context->source_fat_size);
+	return exfat_resize_block_device_read(context->device, context->source.fat_offset, sector_count,
+	    context->source_fat, context->source_fat_size);
 }
 
 static enum exfat_resize_error source_fat_get(
@@ -1383,10 +1381,10 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 {
 	enum exfat_resize_error error;
 	uint64_t fat_sector = 0;
-	uint64_t fat_sector_count;
+	uint32_t fat_sector_count;
 
-	fat_sector_count = ((uint64_t)context->target.cluster_count + 2) * 4;
-	fat_sector_count = (fat_sector_count + context->sector_size - 1) / context->sector_size;
+	fat_sector_count =
+	    exfat_resize_used_fat_sector_count(context->target.cluster_count, context->sector_size);
 	if (fat_sector_count > context->target.fat_length)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
 
