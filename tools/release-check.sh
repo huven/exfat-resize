@@ -45,6 +45,7 @@ validate_tag() {
 if ! tool_root=$(CDPATH= cd -- "$(dirname "$0")/.." 2>/dev/null && pwd); then
 	fail "could not determine the release tooling directory"
 fi
+cmake_command=${CMAKE:-cmake}
 source_dir=$tool_root
 require_signed_tag=false
 
@@ -123,12 +124,26 @@ if [ "$package_version" != "$tag_version" ]; then
 	fail "VERSION $package_version does not match tag version $tag_version"
 fi
 
-if ! version_info=$(sh "$source_dir/tools/version.sh" --commit \
-	"$source_dir" "$expected_commit"); then
+if ! version_output=$(mktemp -d \
+	"${TMPDIR:-/tmp}/exfat-resize-release-check.XXXXXX"); then
+	fail "could not create temporary version output directory"
+fi
+cleanup() {
+	rm -rf "$version_output"
+}
+trap cleanup EXIT HUP INT TERM
+
+if ! "$cmake_command" \
+	"-DEXFAT_RESIZE_SOURCE_DIR=$source_dir" \
+	"-DEXFAT_RESIZE_COMMIT=$expected_commit" \
+	"-DEXFAT_RESIZE_VERSION_OUTPUT_DIR=$version_output" \
+	-P "$tool_root/tools/version.cmake"; then
 	fail "could not determine the release version"
 fi
-resolved_package_version=$(printf '%s\n' "$version_info" | sed -n '1p')
-build_version=$(printf '%s\n' "$version_info" | sed -n '2p')
+if ! resolved_package_version=$(cat "$version_output/package-version") ||
+	! build_version=$(cat "$version_output/build-version"); then
+	fail "version helper did not produce the expected output"
+fi
 if [ "$resolved_package_version" != "$tag_version" ]; then
 	fail "version helper reported package version $resolved_package_version, expected $tag_version"
 fi
