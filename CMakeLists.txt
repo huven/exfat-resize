@@ -178,6 +178,8 @@ install(
         exfat_resizeTargets
     ARCHIVE DESTINATION
         ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT
+        Development
 )
 
 if(EXFAT_RESIZE_BUILD_CLI)
@@ -186,12 +188,16 @@ if(EXFAT_RESIZE_BUILD_CLI)
             exfat-resize
         RUNTIME DESTINATION
             ${CMAKE_INSTALL_BINDIR}
+        COMPONENT
+            Runtime
     )
     install(
         FILES
             ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
         DESTINATION
             ${CMAKE_INSTALL_MANDIR}/man8
+        COMPONENT
+            Runtime
     )
 endif()
 
@@ -200,6 +206,8 @@ install(
         include/exfat_resize.h
     DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT
+        Development
 )
 
 install(
@@ -208,6 +216,8 @@ install(
         README.md
     DESTINATION
         ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT
+        Runtime
 )
 
 install(
@@ -215,6 +225,8 @@ install(
         docs/TRANSACTION.md
     DESTINATION
         ${CMAKE_INSTALL_DOCDIR}/docs
+    COMPONENT
+        Runtime
 )
 
 install(
@@ -224,6 +236,8 @@ install(
         exfat_resize::
     DESTINATION
         ${CMAKE_INSTALL_LIBDIR}/cmake/exfat_resize
+    COMPONENT
+        Development
 )
 
 install(
@@ -232,6 +246,8 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/exfat_resizeConfigVersion.cmake
     DESTINATION
         ${CMAKE_INSTALL_LIBDIR}/cmake/exfat_resize
+    COMPONENT
+        Development
 )
 
 if(EXFAT_RESIZE_BUILD_TESTS)

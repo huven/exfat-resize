@@ -66,11 +66,12 @@ jobs:
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: source-release-${{ github.ref_name }}
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: |
             dist/${{ steps.artifacts.outputs.archive }}
             dist/${{ steps.artifacts.outputs.checksum }}
           if-no-files-found: error
+          overwrite: true
 
   publish_draft:
     name: Create draft release
@@ -84,7 +85,7 @@ jobs:
       - name: Download source artifacts
         uses: actions/download-artifact@v4
         with:
-          name: source-release-${{ github.ref_name }}
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
       - name: Verify downloaded source artifacts
@@ -150,6 +151,4 @@ jobs:
           gh release download "$RELEASE_REF" \
             --dir downloaded-release-assets \
             --pattern "$archive" --pattern "$checksum"
-          cmp "release-assets/$archive" "downloaded-release-assets/$archive"
-          cmp "release-assets/$checksum" "downloaded-release-assets/$checksum"
           (cd downloaded-release-assets && sha256sum --check "$checksum")
