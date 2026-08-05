@@ -18,6 +18,8 @@ enum {
 	BACKUP_BOOT_REGION = 12,
 	PERFORMANCE_DIRECTORY_FIRST_CLUSTER = 1024,
 	PERFORMANCE_DIRECTORY_CLUSTER_COUNT = 4096,
+	PERFORMANCE_CACHE_SECTOR_COUNT = 512,
+	PERFORMANCE_METADATA_SECTOR_COUNT = 512,
 	PERFORMANCE_FILE_CLUSTER_COUNT = 8192,
 	PERFORMANCE_FILE_PRIMARY_OFFSET = 352,
 	VOLUME_FLAGS_OFFSET = 106,
@@ -452,6 +454,60 @@ static int make_performance_chain(
 	return made == count ? 0 : -1;
 }
 
+static int performance_chain_contains_cluster(
+    const uint32_t *clusters, uint32_t count, uint32_t cluster)
+{
+	uint32_t index;
+
+	for (index = 0; index < count; ++index) {
+		if (clusters[index] == cluster)
+			return 1;
+	}
+	return 0;
+}
+
+static int add_performance_metadata(unsigned char *directory_data,
+    unsigned char *bitmap,
+    size_t bitmap_size,
+    const struct exfat_fixture *fixture,
+    const uint32_t *directory_clusters,
+    uint32_t directory_cluster_count)
+{
+	uint32_t file_cluster = 2;
+	uint32_t index;
+
+	for (index = 0; index < PERFORMANCE_METADATA_SECTOR_COUNT; ++index) {
+		unsigned char *entry_set = directory_data + (size_t)index * SECTOR_SIZE;
+		unsigned char *stream = entry_set + 32;
+
+		while (file_cluster <= fixture->geometry.cluster_count + 1 &&
+		    (performance_cluster_is_reserved(file_cluster) ||
+		        performance_chain_contains_cluster(
+		            directory_clusters, directory_cluster_count, file_cluster)))
+			++file_cluster;
+		if (file_cluster > fixture->geometry.cluster_count + 1)
+			return -1;
+
+		entry_set[0] = ENTRY_FILE;
+		entry_set[1] = 2;
+		stream[0] = ENTRY_STREAM;
+		stream[1] = ALLOCATION_POSSIBLE | NO_FAT_CHAIN;
+		stream[3] = 1;
+		entry_set[64] = ENTRY_FILE_NAME;
+		if (exfat_resize_store_le64(stream, 32, 8, SECTOR_SIZE) != EXFAT_RESIZE_SUCCESS ||
+		    exfat_resize_store_le32(stream, 32, 20, file_cluster) != EXFAT_RESIZE_SUCCESS ||
+		    exfat_resize_store_le64(stream, 32, 24, SECTOR_SIZE) != EXFAT_RESIZE_SUCCESS ||
+		    exfat_resize_store_le16(entry_set + 64, 32, 2, (uint16_t)(index + 1)) !=
+		        EXFAT_RESIZE_SUCCESS ||
+		    exfat_resize_store_le16(entry_set, 32, 2, entry_set_checksum(entry_set)) !=
+		        EXFAT_RESIZE_SUCCESS ||
+		    set_bitmap_buffer_cluster(bitmap, bitmap_size, file_cluster, 1) != 0)
+			return -1;
+		++file_cluster;
+	}
+	return 0;
+}
+
 static int configure_fat_chained_file(
     struct exfat_fixture *fixture, uint32_t cluster_count, int fragmented)
 {
@@ -539,7 +595,8 @@ done:
 	return result;
 }
 
-static int configure_fat_chained_root_directory(struct exfat_fixture *fixture, int fragmented)
+static int configure_fat_chained_root_directory(
+    struct exfat_fixture *fixture, int fragmented, uint32_t *continuation_clusters)
 {
 	const uint32_t continuation_count = PERFORMANCE_DIRECTORY_CLUSTER_COUNT - 1;
 	unsigned char root[SECTOR_SIZE];
@@ -567,6 +624,8 @@ static int configure_fat_chained_root_directory(struct exfat_fixture *fixture, i
 		goto done;
 	if (make_performance_chain(fixture, clusters, continuation_count, fragmented) != 0)
 		goto done;
+	if (continuation_clusters != NULL)
+		memcpy(continuation_clusters, clusters, (size_t)continuation_count * sizeof(*clusters));
 
 	if (fixture->memory.device.read(fixture->memory.device.context, fixture->geometry.fat_offset,
 	        fixture->geometry.fat_length, fat) != 0)
@@ -592,6 +651,9 @@ static int configure_fat_chained_root_directory(struct exfat_fixture *fixture, i
 		if (set_bitmap_buffer_cluster(bitmap, bitmap_size, clusters[index], 1) != 0)
 			goto done;
 	}
+	if (add_performance_metadata(
+	        directory_data, bitmap, bitmap_size, fixture, clusters, continuation_count) != 0)
+		goto done;
 
 	if (exfat_fixture_read_sector(fixture,
 	        exfat_fixture_cluster_sector(
@@ -605,8 +667,10 @@ static int configure_fat_chained_root_directory(struct exfat_fixture *fixture, i
 	for (index = 0; index + 1 < continuation_count; ++index) {
 		unsigned char *sector = directory_data + (size_t)index * SECTOR_SIZE;
 
-		for (offset = 0; offset < SECTOR_SIZE; offset += 32)
-			sector[offset] = 1;
+		for (offset = 0; offset < SECTOR_SIZE; offset += 32) {
+			if (sector[offset] == 0)
+				sector[offset] = 1;
+		}
 	}
 
 	if (fixture->memory.device.write(fixture->memory.device.context, fixture->geometry.fat_offset,
@@ -642,6 +706,86 @@ static int operation_contains_sector(const struct memory_operation *operation, u
 {
 	return sector >= operation->first_sector &&
 	    sector - operation->first_sector < operation->sector_count;
+}
+
+static uint32_t expected_chain_operation_sector_count(const struct exfat_resize_geometry *geometry,
+    const uint32_t *clusters,
+    uint32_t cluster_count,
+    uint32_t first_cluster_index)
+{
+	uint64_t first_sector = exfat_fixture_cluster_sector(geometry, clusters[first_cluster_index]);
+	uint32_t sector_count = 1;
+
+	while (first_cluster_index + sector_count < cluster_count &&
+	    sector_count < PERFORMANCE_CACHE_SECTOR_COUNT &&
+	    exfat_fixture_cluster_sector(geometry, clusters[first_cluster_index + sector_count]) ==
+	        first_sector + sector_count)
+		++sector_count;
+	return sector_count;
+}
+
+static size_t check_chain_operations(const struct exfat_fixture *fixture,
+    const struct exfat_resize_geometry *geometry,
+    const uint32_t *clusters,
+    uint32_t cluster_count,
+    enum memory_operation_kind kind,
+    size_t first_operation,
+    size_t end_operation,
+    size_t *first_matching_operation)
+{
+	uint32_t cluster_index = 0;
+	size_t count = 0;
+	size_t operation_index;
+
+	if (first_matching_operation != NULL)
+		*first_matching_operation = SIZE_MAX;
+	for (operation_index = first_operation;
+	    operation_index < end_operation && cluster_index < cluster_count; ++operation_index) {
+		const struct memory_operation *operation = &fixture->memory.operations[operation_index];
+		uint64_t expected_sector = exfat_fixture_cluster_sector(geometry, clusters[cluster_index]);
+		uint32_t expected_sector_count;
+
+		if (operation->kind != kind || operation->first_sector != expected_sector)
+			continue;
+		expected_sector_count =
+		    expected_chain_operation_sector_count(geometry, clusters, cluster_count, cluster_index);
+		CHECK(operation->sector_count == expected_sector_count);
+		if (first_matching_operation != NULL && *first_matching_operation == SIZE_MAX)
+			*first_matching_operation = operation_index;
+		cluster_index += expected_sector_count;
+		++count;
+	}
+	CHECK(cluster_index == cluster_count);
+	return count;
+}
+
+static size_t first_operation_of_kind(
+    const struct exfat_fixture *fixture, enum memory_operation_kind kind)
+{
+	size_t operation_index;
+
+	for (operation_index = 0; operation_index < fixture->memory.operation_count;
+	    ++operation_index) {
+		if (fixture->memory.operations[operation_index].kind == kind)
+			return operation_index;
+	}
+	return SIZE_MAX;
+}
+
+static size_t directory_rewrite_start(
+    const struct exfat_fixture *fixture, size_t first_write, uint64_t target_root_sector)
+{
+	size_t operation_index;
+
+	for (operation_index = first_write; operation_index < fixture->memory.operation_count;
+	    ++operation_index) {
+		const struct memory_operation *operation = &fixture->memory.operations[operation_index];
+
+		if (operation->kind == MEMORY_OPERATION_READ &&
+		    operation_contains_sector(operation, target_root_sector))
+			return operation_index;
+	}
+	return SIZE_MAX;
 }
 
 static int bitmap_cluster_is_set(struct exfat_fixture *fixture,
@@ -2314,20 +2458,44 @@ static void test_file_fat_stream_uses_source_snapshot(void)
 
 static void test_directory_fat_stream_uses_source_snapshot_and_target_model(void)
 {
+	const uint32_t continuation_count = PERFORMANCE_DIRECTORY_CLUSTER_COUNT - 1;
 	struct exfat_resize_options options = resize_options();
 	int fragmented;
 
 	for (fragmented = 0; fragmented <= 1; ++fragmented) {
 		struct exfat_resize_geometry target;
 		struct exfat_fixture fixture;
+		uint32_t *source_clusters;
+		uint32_t *target_clusters;
 		enum exfat_resize_error error;
+		size_t first_write;
+		size_t metadata_write_operation = SIZE_MAX;
+		size_t read_operation_count;
+		size_t rewrite_start;
+		size_t write_operation_count;
 		uint64_t target_root_sector;
+		uint32_t cluster_index;
 		uint32_t target_root_cluster;
 
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
-		CHECK(configure_fat_chained_root_directory(&fixture, fragmented) == 0);
+		source_clusters = malloc((size_t)continuation_count * sizeof(*source_clusters));
+		target_clusters = malloc((size_t)continuation_count * sizeof(*target_clusters));
+		CHECK(source_clusters != NULL);
+		CHECK(target_clusters != NULL);
+		if (source_clusters == NULL || target_clusters == NULL) {
+			free(source_clusters);
+			free(target_clusters);
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		CHECK(configure_fat_chained_root_directory(&fixture, fragmented, source_clusters) == 0);
 		error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
+		for (cluster_index = 0; cluster_index < continuation_count; ++cluster_index) {
+			error = exfat_resize_map_growth_cluster(&fixture.geometry, &target,
+			    source_clusters[cluster_index], &target_clusters[cluster_index]);
+			CHECK(error == EXFAT_RESIZE_SUCCESS);
+		}
 		error = exfat_resize_map_growth_cluster(&fixture.geometry, &target,
 		    fixture.geometry.root_directory_cluster, &target_root_cluster);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
@@ -2338,7 +2506,46 @@ static void test_directory_fat_stream_uses_source_snapshot_and_target_model(void
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		check_source_fat_snapshot_read(&fixture);
 		CHECK(rewrite_fat_read_count(&fixture, &target, target_root_sector) == 0);
+
+		first_write = first_operation_of_kind(&fixture, MEMORY_OPERATION_WRITE);
+		CHECK(first_write != SIZE_MAX);
+		if (first_write != SIZE_MAX) {
+			read_operation_count = check_chain_operations(&fixture, &fixture.geometry,
+			    source_clusters, continuation_count, MEMORY_OPERATION_READ, 0, first_write, NULL);
+			CHECK(read_operation_count == (fragmented ? continuation_count : 8));
+		}
+		rewrite_start = directory_rewrite_start(&fixture, first_write, target_root_sector);
+		CHECK(rewrite_start != SIZE_MAX);
+		if (rewrite_start != SIZE_MAX) {
+			read_operation_count =
+			    check_chain_operations(&fixture, &target, target_clusters, continuation_count,
+			        MEMORY_OPERATION_READ, rewrite_start, fixture.memory.operation_count, NULL);
+			CHECK(read_operation_count == (fragmented ? continuation_count : 8));
+			write_operation_count = check_chain_operations(&fixture, &target, target_clusters,
+			    PERFORMANCE_METADATA_SECTOR_COUNT, MEMORY_OPERATION_WRITE, rewrite_start,
+			    fixture.memory.operation_count, &metadata_write_operation);
+			CHECK(write_operation_count == (fragmented ? PERFORMANCE_METADATA_SECTOR_COUNT : 1));
+		}
+		free(source_clusters);
+		free(target_clusters);
 		exfat_fixture_destroy(&fixture);
+
+		if (!fragmented) {
+			enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
+
+			CHECK(metadata_write_operation != SIZE_MAX);
+			CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+			CHECK(configure_fat_chained_root_directory(&fixture, 0, NULL) == 0);
+			memory_block_device_clear_operations(&fixture.memory);
+			memory_block_device_fail_after_operation(&fixture.memory, metadata_write_operation,
+			    PERFORMANCE_METADATA_SECTOR_COUNT / 2, 1234);
+			error =
+			    exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, &stage);
+			CHECK(error == EXFAT_RESIZE_IO_ERROR);
+			CHECK(stage == EXFAT_RESIZE_STAGE_RESIZING);
+			CHECK(fixture.memory.operation_count == metadata_write_operation + 1);
+			exfat_fixture_destroy(&fixture);
+		}
 	}
 }
 
