@@ -48,16 +48,13 @@ fi
 mkdir -p "$temporary/extracted" "$temporary/install-root"
 tar -xzf "$archive" -C "$temporary/extracted"
 package_directory=$temporary/extracted/$package
-top_level=$(find "$temporary/extracted" -mindepth 1 -maxdepth 1 \
-	-printf '%f\n')
+top_level=$(find "$temporary/extracted" -mindepth 1 -maxdepth 1 -printf '%f\n')
 if [ "$top_level" != "$package" ] || [ ! -d "$package_directory" ]; then
 	echo "Linux archive has an unexpected top-level directory" >&2
 	exit 1
 fi
-expected=$(printf '%s\n' LICENSE exfat-resize exfat-resize.8 install.sh \
-	uninstall.sh | sort)
-actual=$(find "$package_directory" -mindepth 1 -maxdepth 1 \
-	-printf '%f\n' | sort)
+expected=$(printf '%s\n' LICENSE exfat-resize exfat-resize.8 install.sh uninstall.sh | sort)
+actual=$(find "$package_directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
 if [ "$actual" != "$expected" ]; then
 	echo "Linux archive contains an unexpected file set" >&2
 	printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
@@ -74,13 +71,11 @@ if [ "$(stat -c '%a' "$package_directory/exfat-resize.8")" != 644 ] ||
 	echo "Linux archive data-file modes are incorrect" >&2
 	exit 1
 fi
-if [ "$("$package_directory/exfat-resize" --version)" != \
-	"exfat-resize $build_version" ]; then
+if [ "$("$package_directory/exfat-resize" --version)" != "exfat-resize $build_version" ]; then
 	echo "archived CLI version is incorrect" >&2
 	exit 1
 fi
-if ! grep -F "exfat-resize $build_version" \
-	"$package_directory/exfat-resize.8" >/dev/null; then
+if ! grep -F "exfat-resize $build_version" "$package_directory/exfat-resize.8" >/dev/null; then
 	echo "archived manual page has an incorrect version" >&2
 	exit 1
 fi
@@ -101,18 +96,14 @@ if [ "$(find "$install_prefix" -type f | wc -l)" -ne 3 ]; then
 	exit 1
 fi
 
-touch "$install_prefix/bin/unrelated" \
-	"$install_prefix/share/man/man8/unrelated.8" \
+touch "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.8" \
 	"$install_prefix/share/doc/exfat-resize/unrelated"
 DESTDIR=$temporary/install-root "$package_directory/uninstall.sh"
-if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] ||
-	[ -e "$installed_license" ]; then
+if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ]; then
 	echo "uninstaller left an installed project file behind" >&2
 	exit 1
 fi
-for unrelated in \
-	"$install_prefix/bin/unrelated" \
-	"$install_prefix/share/man/man8/unrelated.8" \
+for unrelated in "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.8" \
 	"$install_prefix/share/doc/exfat-resize/unrelated"; do
 	if [ ! -f "$unrelated" ]; then
 		echo "uninstaller removed an unrelated file: $unrelated" >&2

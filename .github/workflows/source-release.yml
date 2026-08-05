@@ -43,8 +43,7 @@ jobs:
             echo "release commit is not reachable from $DEFAULT_BRANCH" >&2
             exit 1
           fi
-          tools/release-check.sh --require-signed-tag \
-            "$RELEASE_REF" "$release_commit"
+          tools/release-check.sh --require-signed-tag "$RELEASE_REF" "$release_commit"
 
       - name: Test release package
         run: make release-test
@@ -125,8 +124,7 @@ jobs:
             fi
             gh release edit "$RELEASE_REF" --draft --title "$title" --verify-tag
           else
-            gh release create "$RELEASE_REF" --draft --generate-notes \
-              --title "$title" --verify-tag
+            gh release create "$RELEASE_REF" --draft --generate-notes --title "$title" --verify-tag
           fi
 
           gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' |
@@ -135,12 +133,10 @@ jobs:
                 gh release delete-asset "$RELEASE_REF" "$asset" --yes
               fi
             done
-          gh release upload "$RELEASE_REF" \
-            "release-assets/$archive" "release-assets/$checksum"
+          gh release upload "$RELEASE_REF" "release-assets/$archive" "release-assets/$checksum"
 
           expected=$(printf '%s\n%s\n' "$archive" "$checksum" | sort)
-          actual=$(gh release view "$RELEASE_REF" --json assets \
-            --jq '.assets[].name' | sort)
+          actual=$(gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' | sort)
           if [ "$actual" != "$expected" ]; then
             echo "draft release contains an unexpected asset set" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
@@ -148,7 +144,6 @@ jobs:
           fi
 
           mkdir downloaded-release-assets
-          gh release download "$RELEASE_REF" \
-            --dir downloaded-release-assets \
+          gh release download "$RELEASE_REF" --dir downloaded-release-assets \
             --pattern "$archive" --pattern "$checksum"
           (cd downloaded-release-assets && sha256sum --check "$checksum")

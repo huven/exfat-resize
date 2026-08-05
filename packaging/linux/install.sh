@@ -23,13 +23,9 @@ case $destdir in
 esac
 
 install_root=$destdir$prefix
-mkdir -p "$install_root/bin" "$install_root/share/man/man8" \
-	"$install_root/share/doc/exfat-resize"
-install -m 0755 "$archive_directory/exfat-resize" \
-	"$install_root/bin/exfat-resize"
-install -m 0644 "$archive_directory/exfat-resize.8" \
-	"$install_root/share/man/man8/exfat-resize.8"
-install -m 0644 "$archive_directory/LICENSE" \
-	"$install_root/share/doc/exfat-resize/LICENSE"
+mkdir -p "$install_root/bin" "$install_root/share/man/man8" "$install_root/share/doc/exfat-resize"
+install -m 0755 "$archive_directory/exfat-resize" "$install_root/bin/exfat-resize"
+install -m 0644 "$archive_directory/exfat-resize.8" "$install_root/share/man/man8/exfat-resize.8"
+install -m 0644 "$archive_directory/LICENSE" "$install_root/share/doc/exfat-resize/LICENSE"
 
 echo "installed exfat-resize under $install_root"

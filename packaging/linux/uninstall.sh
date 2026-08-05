@@ -22,8 +22,7 @@ case $destdir in
 esac
 
 install_root=$destdir$prefix
-rm -f "$install_root/bin/exfat-resize" \
-	"$install_root/share/man/man8/exfat-resize.8" \
+rm -f "$install_root/bin/exfat-resize" "$install_root/share/man/man8/exfat-resize.8" \
 	"$install_root/share/doc/exfat-resize/LICENSE"
 rmdir "$install_root/share/doc/exfat-resize" 2>/dev/null || true
 

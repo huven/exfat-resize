@@ -61,14 +61,12 @@ jobs:
         run: |
           set -eu
           test "$(uname -m)" = x86_64
-          archive=$(find source-artifacts -maxdepth 1 -type f \
-            -name 'exfat-resize-*.tar.gz' -print)
+          archive=$(find source-artifacts -maxdepth 1 -type f -name 'exfat-resize-*.tar.gz' -print)
           test -n "$archive"
           test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
           checksum=$archive.sha256
           test -f "$checksum"
-          (cd source-artifacts && sha256sum --check \
-            "${checksum#source-artifacts/}")
+          (cd source-artifacts && sha256sum --check "${checksum#source-artifacts/}")
 
           mkdir source-tree
           tar -xzf "$archive" -C source-tree
@@ -79,12 +77,10 @@ jobs:
 
           if [ -n "$EXPECTED_VERSION" ]; then
             expected_version=${EXPECTED_VERSION#v}
-            test "$(sed -n '1p' \
-              "$source_directory/.tarball-version")" = "$expected_version"
+            test "$(sed -n '1p' "$source_directory/.tarball-version")" = "$expected_version"
           fi
 
-          "$source_directory/tools/build-linux-binary.sh" \
-            "$source_directory" linux-artifacts
+          "$source_directory/tools/build-linux-binary.sh" "$source_directory" linux-artifacts
           binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
             -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
           test -n "$binary_archive"

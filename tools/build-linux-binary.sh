@@ -33,21 +33,18 @@ if [ -e "$source_directory/.git" ]; then
 	echo "source directory must be an extracted, Git-free source archive" >&2
 	exit 1
 fi
-if [ ! -f "$source_directory/VERSION" ] ||
-	[ ! -f "$source_directory/.tarball-version" ]; then
+if [ ! -f "$source_directory/VERSION" ] || [ ! -f "$source_directory/.tarball-version" ]; then
 	echo "source archive version metadata is missing" >&2
 	exit 1
 fi
 
 package_version=$(sed -n '1p' "$source_directory/VERSION")
 build_version=$(sed -n '1p' "$source_directory/.tarball-version")
-if ! printf '%s\n' "$package_version" |
-	grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
+if ! printf '%s\n' "$package_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
 	echo "invalid package version: $package_version" >&2
 	exit 1
 fi
-if ! printf '%s\n' "$build_version" |
-	grep -E '^[0-9A-Za-z][0-9A-Za-z.+-]*$' >/dev/null; then
+if ! printf '%s\n' "$build_version" | grep -E '^[0-9A-Za-z][0-9A-Za-z.+-]*$' >/dev/null; then
 	echo "invalid build version: $build_version" >&2
 	exit 1
 fi
@@ -64,16 +61,11 @@ if [ "${source_directory##*/}" != "exfat-resize-$build_version" ]; then
 fi
 
 mkdir -p "$temporary/build" "$temporary/stage" "$output_directory"
-"$cmake_command" -S "$source_directory" -B "$temporary/build" \
-	-DCMAKE_BUILD_TYPE=Release \
-	-DEXFAT_RESIZE_BUILD_CLI=ON \
-	-DEXFAT_RESIZE_BUILD_TESTS=OFF
-"$cmake_command" --build "$temporary/build" --parallel \
-	--target exfat-resize
-"$cmake_command" --install "$temporary/build" \
-	--component Runtime \
-	--prefix "$temporary/stage/usr/local" \
-	--strip
+"$cmake_command" -S "$source_directory" -B "$temporary/build" -DCMAKE_BUILD_TYPE=Release \
+	-DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=OFF
+"$cmake_command" --build "$temporary/build" --parallel --target exfat-resize
+"$cmake_command" --install "$temporary/build" --component Runtime \
+	--prefix "$temporary/stage/usr/local" --strip
 
 binary=$temporary/stage/usr/local/bin/exfat-resize
 manual=$temporary/stage/usr/local/share/man/man8/exfat-resize.8
@@ -103,8 +95,7 @@ fi
 glibc_versions=$(LC_ALL=C readelf --version-info "$binary" |
 	grep -o 'GLIBC_[0-9][0-9.]*' | sort -Vu)
 maximum_glibc=$(printf '%s\n' "$glibc_versions" | tail -n 1)
-newest_glibc=$(printf '%s\n%s\n' GLIBC_2.28 "$maximum_glibc" |
-	sort -Vu | tail -n 1)
+newest_glibc=$(printf '%s\n%s\n' GLIBC_2.28 "$maximum_glibc" | sort -Vu | tail -n 1)
 if [ "$newest_glibc" != GLIBC_2.28 ]; then
 	echo "binary requires a glibc symbol newer than GLIBC_2.28:" >&2
 	printf '%s\n' "$glibc_versions" >&2
@@ -117,10 +108,8 @@ mkdir "$package_directory"
 install -m 0755 "$binary" "$package_directory/exfat-resize"
 install -m 0644 "$manual" "$package_directory/exfat-resize.8"
 install -m 0644 "$license" "$package_directory/LICENSE"
-install -m 0755 "$source_directory/packaging/linux/install.sh" \
-	"$package_directory/install.sh"
-install -m 0755 "$source_directory/packaging/linux/uninstall.sh" \
-	"$package_directory/uninstall.sh"
+install -m 0755 "$source_directory/packaging/linux/install.sh" "$package_directory/install.sh"
+install -m 0755 "$source_directory/packaging/linux/uninstall.sh" "$package_directory/uninstall.sh"
 
 archive=$package.tar.gz
 tar -czf "$output_directory/$archive" -C "$temporary" "$package"
