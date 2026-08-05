@@ -67,10 +67,12 @@ rounded up to a filesystem sector. The snapshot is filled by one block-device
 read, provides all source FAT lookups, and is released before the first write.
 Its size is approximately four bytes per source cluster.
 
-It separately requests a cache block containing three filesystem sectors.
-Dedicated caches retain source directory data, source bitmap data, and target
-directory data. Directory entry sets are checksummed and rewritten one 32-byte
-entry at a time.
+It separately requests a 768 KiB cache block, divided into three 256 KiB
+windows. Dedicated windows retain source directory data, source bitmap data,
+and target directory data. Sequential sectors are read together, and dirty
+target-directory sectors are written together; each window stops at a stream
+discontinuity. Directory entry sets are still checksummed and rewritten one
+32-byte entry at a time within those windows.
 
 In addition, `exfat_resize()` requests a writable allocation model containing
 one 32-bit value per target cluster. The model distinguishes free clusters,

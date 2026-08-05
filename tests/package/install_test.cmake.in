@@ -136,7 +136,8 @@ foreach(required_text
         "requires the verified backup"
         "## Memory requirements"
         "snapshot of the used portion of the source FAT"
-        "cache block containing three filesystem sectors"
+        "768 KiB cache block"
+        "three 256 KiB"
         "one 32-bit value per target cluster"
 )
     string(FIND "${transaction_contents}" "${required_text}" required_text_offset)
