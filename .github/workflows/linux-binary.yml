@@ -93,3 +93,52 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: ${{ inputs.retention_days }}
+
+  compatibility:
+    name: Compatibility (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:12
+          - name: Ubuntu 22.04 LTS
+            image: ubuntu:22.04
+
+    steps:
+      - name: Install exFAT and archive tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            ca-certificates exfatprogs findutils gzip tar
+
+      - name: Download tested Linux archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.binary_artifact_name }}
+          path: linux-artifacts
+
+      - name: Run regular-file resize compatibility test
+        run: |
+          set -eu
+          binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
+          test -n "$binary_archive"
+          test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
+
+          mkdir extracted
+          tar -xzf "$binary_archive" -C extracted --strip-components=1
+          binary=extracted/exfat-resize
+          "$binary" --version
+
+          image=compatibility-smoke.exfat
+          truncate -s 64M "$image"
+          mkfs.exfat "$image" >/dev/null
+          truncate -s 128M "$image"
+          "$binary" "$image"
+          fsck.exfat -n "$image"
