@@ -183,9 +183,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: source-ci-${{ github.run_id }}
-          path: |
-            dist/*.tar.gz
-            dist/*.tar.gz.sha256
+          path: dist/*.tar.gz
           if-no-files-found: error
           overwrite: true
           retention-days: 1

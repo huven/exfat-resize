@@ -119,10 +119,6 @@ install -m 0755 "$source_directory/packaging/linux/uninstall.sh" "$package_direc
 
 archive=$package.tar.gz
 tar -czf "$output_directory/$archive" -C "$temporary" "$package"
-(
-	cd "$output_directory"
-	sha256sum "$archive" >"$archive.sha256"
-)
 
 echo "built $output_directory/$archive"
 echo "maximum referenced glibc symbol: $maximum_glibc"

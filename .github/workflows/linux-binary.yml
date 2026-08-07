@@ -6,11 +6,11 @@ on:
   workflow_call:
     inputs:
       source_artifact_name:
-        description: Artifact containing the source archive and its checksum
+        description: Artifact containing the tested source archive
         required: true
         type: string
       binary_artifact_name:
-        description: Artifact name for the Linux archive and checksum
+        description: Artifact name for the tested Linux archive
         required: true
         type: string
       expected_version:
@@ -42,7 +42,7 @@ jobs:
           dnf install --assumeyes \
             binutils ca-certificates cmake diffutils findutils gcc gzip make tar
 
-      - name: Download source artifacts
+      - name: Download tested source archive
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.source_artifact_name }}
@@ -64,9 +64,6 @@ jobs:
           archive=$(find source-artifacts -maxdepth 1 -type f -name 'exfat-resize-*.tar.gz' -print)
           test -n "$archive"
           test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
-          checksum=$archive.sha256
-          test -f "$checksum"
-          (cd source-artifacts && sha256sum --check "${checksum#source-artifacts/}")
 
           mkdir source-tree
           tar -xzf "$archive" -C source-tree
@@ -88,13 +85,11 @@ jobs:
           "$source_directory/tests/package/linux-binary-test.sh" \
             "$binary_archive" "$source_directory"
 
-      - name: Upload Linux binary artifacts
+      - name: Upload tested Linux archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.binary_artifact_name }}
-          path: |
-            linux-artifacts/*.tar.gz
-            linux-artifacts/*.tar.gz.sha256
+          path: linux-artifacts/exfat-resize-*-linux-x86_64-glibc.tar.gz
           if-no-files-found: error
           overwrite: true
           retention-days: ${{ inputs.retention_days }}

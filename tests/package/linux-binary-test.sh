@@ -29,14 +29,6 @@ case $archive_name in
 		exit 1
 		;;
 esac
-if [ ! -f "$archive.sha256" ]; then
-	echo "Linux archive checksum is missing" >&2
-	exit 1
-fi
-(
-	cd "$archive_directory"
-	sha256sum --check "$archive_name.sha256"
-)
 
 build_version=$(sed -n '1p' "$source_directory/.tarball-version")
 package=exfat-resize-$build_version-linux-x86_64-glibc

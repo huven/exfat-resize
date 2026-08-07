@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-name: Source release
+name: Release
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: source-release-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -48,33 +48,37 @@ jobs:
       - name: Test release package
         run: make release-test
 
-      - name: Verify source artifacts
+      - name: Verify source archive
         id: artifacts
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
           archive=exfat-resize-$version.tar.gz
-          checksum=$archive.sha256
-          cd dist
-          test -f "$archive"
-          test -f "$checksum"
-          sha256sum --check "$checksum"
+          test -f "dist/$archive"
           printf 'archive=%s\n' "$archive" >>"$GITHUB_OUTPUT"
-          printf 'checksum=%s\n' "$checksum" >>"$GITHUB_OUTPUT"
 
-      - name: Upload source artifacts
+      - name: Upload tested source archive
         uses: actions/upload-artifact@v4
         with:
           name: source-release-${{ github.ref_name }}-${{ github.run_id }}
-          path: |
-            dist/${{ steps.artifacts.outputs.archive }}
-            dist/${{ steps.artifacts.outputs.checksum }}
+          path: dist/${{ steps.artifacts.outputs.archive }}
           if-no-files-found: error
           overwrite: true
 
+  build_linux:
+    name: Linux binary archive
+    needs: build_source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-binary.yml
+    with:
+      source_artifact_name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+      binary_artifact_name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
+      expected_version: ${{ github.ref_name }}
+
   publish_draft:
     name: Create draft release
-    needs: build_source
+    needs: [build_source, build_linux]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -87,22 +91,27 @@ jobs:
           name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
-      - name: Verify downloaded source artifacts
+      - name: Download tested Linux archive
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: release-assets
+
+      - name: Verify release asset names
         env:
           RELEASE_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
-          archive=exfat-resize-$version.tar.gz
-          checksum=$archive.sha256
-          expected=$(printf '%s\n%s\n' "$archive" "$checksum" | sort)
+          source_archive=exfat-resize-$version.tar.gz
+          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          expected=$(printf '%s\n%s\n' "$source_archive" "$linux_archive" | sort)
           actual=$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if [ "$actual" != "$expected" ]; then
             echo "workflow artifact contains an unexpected file set" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
             exit 1
           fi
-          (cd release-assets && sha256sum --check "$checksum")
 
       - name: Create or update draft release
         env:
@@ -112,8 +121,8 @@ jobs:
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
-          archive=exfat-resize-$version.tar.gz
-          checksum=$archive.sha256
+          source_archive=exfat-resize-$version.tar.gz
+          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
           title="exfat-resize $version"
 
           if is_draft=$(gh release view "$RELEASE_REF" \
@@ -133,17 +142,19 @@ jobs:
                 gh release delete-asset "$RELEASE_REF" "$asset" --yes
               fi
             done
-          gh release upload "$RELEASE_REF" "release-assets/$archive" "release-assets/$checksum"
+          gh release upload "$RELEASE_REF" \
+            "release-assets/$source_archive" "release-assets/$linux_archive"
 
-          expected=$(printf '%s\n%s\n' "$archive" "$checksum" | sort)
-          actual=$(gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' | sort)
+          api_endpoint=repos/$GH_REPO/releases/tags/$RELEASE_REF
+          expected=$(
+            for asset in "$source_archive" "$linux_archive"; do
+              digest=$(sha256sum "release-assets/$asset" | cut -d ' ' -f 1)
+              printf '%s\tsha256:%s\n' "$asset" "$digest"
+            done | sort
+          )
+          actual=$(gh api "$api_endpoint" --jq '.assets[] | [.name, .digest] | @tsv' | sort)
           if [ "$actual" != "$expected" ]; then
-            echo "draft release contains an unexpected asset set" >&2
+            echo "draft release asset names or digests do not match" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
             exit 1
           fi
-
-          mkdir downloaded-release-assets
-          gh release download "$RELEASE_REF" --dir downloaded-release-assets \
-            --pattern "$archive" --pattern "$checksum"
-          (cd downloaded-release-assets && sha256sum --check "$checksum")
