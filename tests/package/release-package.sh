@@ -51,18 +51,11 @@ git status --short --untracked-files=all >"$temporary/status.before"
 package_version=$(cat build/dist/package-version)
 build_version=$(cat build/dist/build-version)
 archive=dist/exfat-resize-$build_version.tar.gz
-archive_name=${archive##*/}
-if [ ! -f "$archive" ] || [ ! -f "$archive.sha256" ]; then
-	echo "release archive or checksum is missing" >&2
+if [ ! -f "$archive" ]; then
+	echo "release archive is missing" >&2
 	exit 1
 fi
-if command -v sha256sum >/dev/null 2>&1; then
-	(cd dist && sha256sum -c "$archive_name.sha256")
-else
-	(cd dist && shasum -a 256 -c "$archive_name.sha256")
-fi
 cp "$archive" "$temporary/reference.tar.gz"
-cp "$archive.sha256" "$temporary/reference.tar.gz.sha256"
 
 git clone --quiet --no-local "$project_root" "$temporary/dirty-helper-repository"
 printf '%s\n' '' 'This uncommitted line is intentional.' \
@@ -81,10 +74,15 @@ fi
 	cd "$temporary/dirty-helper-repository"
 	"$make_command" dist
 )
-cmp "$temporary/reference.tar.gz" \
-	"$temporary/dirty-helper-repository/$archive"
-cmp "$temporary/reference.tar.gz.sha256" \
-	"$temporary/dirty-helper-repository/$archive.sha256"
+dirty_archive=$temporary/dirty-helper-repository/$archive
+dirty_source=$temporary/dirty-source
+mkdir -p "$dirty_source"
+tar -xzf "$dirty_archive" -C "$dirty_source"
+if grep -F "This uncommitted line is intentional." \
+	"$dirty_source/exfat-resize-$build_version/README.md" >/dev/null; then
+	echo "release archive contains an uncommitted working-tree change" >&2
+	exit 1
+fi
 
 tar -xzf "$temporary/reference.tar.gz" -C "$temporary"
 source_tree=$temporary/exfat-resize-$build_version

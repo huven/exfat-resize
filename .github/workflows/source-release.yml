@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: MIT
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build_source:
+    name: Build source release (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_REF: ${{ github.ref_name }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install --yes cmake g++
+
+      - name: Validate release tag and commit
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          release_commit=$(git rev-parse --verify 'HEAD^{commit}')
+          if ! git merge-base --is-ancestor \
+            "$release_commit" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "release commit is not reachable from $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          tools/release-check.sh --require-signed-tag "$RELEASE_REF" "$release_commit"
+
+      - name: Test release package
+        run: make release-test
+
+      - name: Verify source archive
+        id: artifacts
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          archive=exfat-resize-$version.tar.gz
+          test -f "dist/$archive"
+          printf 'archive=%s\n' "$archive" >>"$GITHUB_OUTPUT"
+
+      - name: Upload tested source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: dist/${{ steps.artifacts.outputs.archive }}
+          if-no-files-found: error
+          overwrite: true
+
+  build_linux:
+    name: Linux binary archive
+    needs: build_source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-binary.yml
+    with:
+      source_artifact_name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+      binary_artifact_name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
+      expected_version: ${{ github.ref_name }}
+
+  publish_draft:
+    name: Create draft release
+    needs: [build_source, build_linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download source artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: release-assets
+
+      - name: Download tested Linux archive
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: release-assets
+
+      - name: Verify release asset names
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          source_archive=exfat-resize-$version.tar.gz
+          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          expected=$(printf '%s\n%s\n' "$source_archive" "$linux_archive" | sort)
+          actual=$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [ "$actual" != "$expected" ]; then
+            echo "workflow artifact contains an unexpected file set" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
+      - name: Create or update draft release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          source_archive=exfat-resize-$version.tar.gz
+          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          title="exfat-resize $version"
+
+          if is_draft=$(gh release view "$RELEASE_REF" \
+            --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$is_draft" != true ]; then
+              echo "refusing to modify published release $RELEASE_REF" >&2
+              exit 1
+            fi
+            gh release edit "$RELEASE_REF" --draft --title "$title" --verify-tag
+          else
+            gh release create "$RELEASE_REF" --draft --generate-notes --title "$title" --verify-tag
+          fi
+
+          gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' |
+            while IFS= read -r asset; do
+              if [ -n "$asset" ]; then
+                gh release delete-asset "$RELEASE_REF" "$asset" --yes
+              fi
+            done
+          gh release upload "$RELEASE_REF" \
+            "release-assets/$source_archive" "release-assets/$linux_archive"
+
+          api_endpoint=repos/$GH_REPO/releases/tags/$RELEASE_REF
+          expected=$(
+            for asset in "$source_archive" "$linux_archive"; do
+              digest=$(sha256sum "release-assets/$asset" | cut -d ' ' -f 1)
+              printf '%s\tsha256:%s\n' "$asset" "$digest"
+            done | sort
+          )
+          actual=$(gh api "$api_endpoint" --jq '.assets[] | [.name, .digest] | @tsv' | sort)
+          if [ "$actual" != "$expected" ]; then
+            echo "draft release asset names or digests do not match" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi

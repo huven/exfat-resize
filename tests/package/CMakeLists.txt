@@ -21,3 +21,9 @@ add_test(
         -P ${CMAKE_CURRENT_SOURCE_DIR}/version.cmake
 )
 set_tests_properties(package.version PROPERTIES LABELS package)
+
+add_test(
+    NAME package.release-check
+    COMMAND sh ${PROJECT_SOURCE_DIR}/tests/package/release-check.sh
+)
+set_tests_properties(package.release-check PROPERTIES LABELS package)

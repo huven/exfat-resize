@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: MIT
+
+name: Linux binary
+
+on:
+  workflow_call:
+    inputs:
+      source_artifact_name:
+        description: Artifact containing the tested source archive
+        required: true
+        type: string
+      binary_artifact_name:
+        description: Artifact name for the tested Linux archive
+        required: true
+        type: string
+      expected_version:
+        description: Optional tag or version that the binary must match
+        required: false
+        default: ""
+        type: string
+      retention_days:
+        description: Artifact retention days; 0 uses the repository default
+        required: false
+        default: 0
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (AlmaLinux 8.10, x86-64 glibc)
+    runs-on: ubuntu-latest
+    container: almalinux:8.10
+    timeout-minutes: 30
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+
+    steps:
+      - name: Install build tools
+        run: |
+          dnf install --assumeyes \
+            binutils ca-certificates cmake diffutils findutils gcc gzip make tar
+
+      - name: Download tested source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact_name }}
+          path: source-artifacts
+
+      - name: Record builder environment
+        run: |
+          cat /etc/os-release
+          uname -a
+          getconf GNU_LIBC_VERSION
+          gcc --version
+          cmake --version
+          readelf --version
+
+      - name: Build and test Linux binary archive
+        run: |
+          set -eu
+          test "$(uname -m)" = x86_64
+          archive=$(find source-artifacts -maxdepth 1 -type f -name 'exfat-resize-*.tar.gz' -print)
+          test -n "$archive"
+          test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
+
+          mkdir source-tree
+          tar -xzf "$archive" -C source-tree
+          source_directory=$(find source-tree -mindepth 1 -maxdepth 1 \
+            -type d -name 'exfat-resize-*' -print)
+          test -n "$source_directory"
+          test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
+
+          if [ -n "$EXPECTED_VERSION" ]; then
+            expected_version=${EXPECTED_VERSION#v}
+            test "$(sed -n '1p' "$source_directory/.tarball-version")" = "$expected_version"
+          fi
+
+          "$source_directory/tools/build-linux-binary.sh" "$source_directory" linux-artifacts
+          binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
+          test -n "$binary_archive"
+          test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
+          "$source_directory/tests/package/linux-binary-test.sh" \
+            "$binary_archive" "$source_directory"
+
+      - name: Upload tested Linux archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary_artifact_name }}
+          path: linux-artifacts/exfat-resize-*-linux-x86_64-glibc.tar.gz
+          if-no-files-found: error
+          overwrite: true
+          retention-days: ${{ inputs.retention_days }}
+
+  compatibility:
+    name: Compatibility (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:12
+          - name: Ubuntu 22.04 LTS
+            image: ubuntu:22.04
+
+    steps:
+      - name: Install exFAT and archive tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            ca-certificates exfatprogs findutils gzip tar
+
+      - name: Download tested Linux archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.binary_artifact_name }}
+          path: linux-artifacts
+
+      - name: Run regular-file resize compatibility test
+        run: |
+          set -eu
+          binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
+          test -n "$binary_archive"
+          test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
+
+          mkdir extracted
+          tar -xzf "$binary_archive" -C extracted --strip-components=1
+          binary=extracted/exfat-resize
+          "$binary" --version
+
+          image=compatibility-smoke.exfat
+          truncate -s 64M "$image"
+          mkfs.exfat "$image" >/dev/null
+          truncate -s 128M "$image"
+          "$binary" "$image"
+          fsck.exfat -n "$image"
