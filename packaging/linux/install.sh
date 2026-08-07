@@ -24,8 +24,12 @@ esac
 
 install_root=$destdir$prefix
 mkdir -p "$install_root/bin" "$install_root/share/man/man8" "$install_root/share/doc/exfat-resize"
+mkdir -p "$install_root/share/doc/exfat-resize/docs"
 install -m 0755 "$archive_directory/exfat-resize" "$install_root/bin/exfat-resize"
 install -m 0644 "$archive_directory/exfat-resize.8" "$install_root/share/man/man8/exfat-resize.8"
 install -m 0644 "$archive_directory/LICENSE" "$install_root/share/doc/exfat-resize/LICENSE"
+install -m 0644 "$archive_directory/README.md" "$install_root/share/doc/exfat-resize/README.md"
+install -m 0644 "$archive_directory/docs/TRANSACTION.md" \
+	"$install_root/share/doc/exfat-resize/docs/TRANSACTION.md"
 
 echo "installed exfat-resize under $install_root"

@@ -53,11 +53,19 @@ if [ "$top_level" != "$package" ] || [ ! -d "$package_directory" ]; then
 	echo "Linux archive has an unexpected top-level directory" >&2
 	exit 1
 fi
-expected=$(printf '%s\n' LICENSE exfat-resize exfat-resize.8 install.sh uninstall.sh | sort)
+expected=$(
+	printf '%s\n' LICENSE README.md docs exfat-resize exfat-resize.8 install.sh uninstall.sh |
+		sort
+)
 actual=$(find "$package_directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
 if [ "$actual" != "$expected" ]; then
 	echo "Linux archive contains an unexpected file set" >&2
 	printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+	exit 1
+fi
+documentation=$(find "$package_directory/docs" -mindepth 1 -maxdepth 1 -printf '%f\n')
+if [ "$documentation" != TRANSACTION.md ]; then
+	echo "Linux archive contains an unexpected documentation file set" >&2
 	exit 1
 fi
 if [ "$(stat -c '%a' "$package_directory/exfat-resize")" != 755 ] ||
@@ -67,7 +75,9 @@ if [ "$(stat -c '%a' "$package_directory/exfat-resize")" != 755 ] ||
 	exit 1
 fi
 if [ "$(stat -c '%a' "$package_directory/exfat-resize.8")" != 644 ] ||
-	[ "$(stat -c '%a' "$package_directory/LICENSE")" != 644 ]; then
+	[ "$(stat -c '%a' "$package_directory/LICENSE")" != 644 ] ||
+	[ "$(stat -c '%a' "$package_directory/README.md")" != 644 ] ||
+	[ "$(stat -c '%a' "$package_directory/docs/TRANSACTION.md")" != 644 ]; then
 	echo "Linux archive data-file modes are incorrect" >&2
 	exit 1
 fi
@@ -80,31 +90,39 @@ if ! grep -F "exfat-resize $build_version" "$package_directory/exfat-resize.8" >
 	exit 1
 fi
 cmp "$source_directory/LICENSE" "$package_directory/LICENSE"
+cmp "$source_directory/README.md" "$package_directory/README.md"
+cmp "$source_directory/docs/TRANSACTION.md" "$package_directory/docs/TRANSACTION.md"
 
 DESTDIR=$temporary/install-root "$package_directory/install.sh"
 install_prefix=$temporary/install-root/usr/local
 installed_binary=$install_prefix/bin/exfat-resize
 installed_manual=$install_prefix/share/man/man8/exfat-resize.8
 installed_license=$install_prefix/share/doc/exfat-resize/LICENSE
+installed_readme=$install_prefix/share/doc/exfat-resize/README.md
+installed_transaction=$install_prefix/share/doc/exfat-resize/docs/TRANSACTION.md
 if [ "$("$installed_binary" --version)" != "exfat-resize $build_version" ] ||
-	[ ! -f "$installed_manual" ] || [ ! -f "$installed_license" ]; then
+	[ ! -f "$installed_manual" ] || [ ! -f "$installed_license" ] ||
+	[ ! -f "$installed_readme" ] || [ ! -f "$installed_transaction" ]; then
 	echo "installed Linux archive is incomplete" >&2
 	exit 1
 fi
-if [ "$(find "$install_prefix" -type f | wc -l)" -ne 3 ]; then
+if [ "$(find "$install_prefix" -type f | wc -l)" -ne 5 ]; then
 	echo "installer created an unexpected file set" >&2
 	exit 1
 fi
 
 touch "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.8" \
-	"$install_prefix/share/doc/exfat-resize/unrelated"
+	"$install_prefix/share/doc/exfat-resize/unrelated" \
+	"$install_prefix/share/doc/exfat-resize/docs/unrelated"
 DESTDIR=$temporary/install-root "$package_directory/uninstall.sh"
-if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ]; then
+if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ] ||
+	[ -e "$installed_readme" ] || [ -e "$installed_transaction" ]; then
 	echo "uninstaller left an installed project file behind" >&2
 	exit 1
 fi
 for unrelated in "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.8" \
-	"$install_prefix/share/doc/exfat-resize/unrelated"; do
+	"$install_prefix/share/doc/exfat-resize/unrelated" \
+	"$install_prefix/share/doc/exfat-resize/docs/unrelated"; do
 	if [ ! -f "$unrelated" ]; then
 		echo "uninstaller removed an unrelated file: $unrelated" >&2
 		exit 1

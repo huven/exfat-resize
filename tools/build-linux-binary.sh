@@ -69,8 +69,12 @@ mkdir -p "$temporary/build" "$temporary/stage" "$output_directory"
 
 binary=$temporary/stage/usr/local/bin/exfat-resize
 manual=$temporary/stage/usr/local/share/man/man8/exfat-resize.8
-license=$temporary/stage/usr/local/share/doc/exfat_resize/LICENSE
-if [ ! -x "$binary" ] || [ ! -f "$manual" ] || [ ! -f "$license" ]; then
+documentation=$temporary/stage/usr/local/share/doc/exfat_resize
+license=$documentation/LICENSE
+readme=$documentation/README.md
+transaction=$documentation/docs/TRANSACTION.md
+if [ ! -x "$binary" ] || [ ! -f "$manual" ] || [ ! -f "$license" ] ||
+	[ ! -f "$readme" ] || [ ! -f "$transaction" ]; then
 	echo "CMake runtime installation is incomplete" >&2
 	exit 1
 fi
@@ -104,10 +108,12 @@ fi
 
 package=exfat-resize-$build_version-linux-x86_64-glibc
 package_directory=$temporary/$package
-mkdir "$package_directory"
+mkdir -p "$package_directory/docs"
 install -m 0755 "$binary" "$package_directory/exfat-resize"
 install -m 0644 "$manual" "$package_directory/exfat-resize.8"
 install -m 0644 "$license" "$package_directory/LICENSE"
+install -m 0644 "$readme" "$package_directory/README.md"
+install -m 0644 "$transaction" "$package_directory/docs/TRANSACTION.md"
 install -m 0755 "$source_directory/packaging/linux/install.sh" "$package_directory/install.sh"
 install -m 0755 "$source_directory/packaging/linux/uninstall.sh" "$package_directory/uninstall.sh"
 
