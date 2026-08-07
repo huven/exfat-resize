@@ -17,6 +17,8 @@ The install command may require elevated privileges depending on the destination
 prefix. Run `exfat-resize --help` for a usage summary or `man exfat-resize` for
 the complete command-line reference.
 
+For a prebuilt Linux CLI, see [Binary install](#binary-install).
+
 For a Windows library build, see [Windows](#windows) under Build and test.
 
 ## Safety
@@ -237,3 +239,38 @@ includes only the library and its tests by default:
     cmake --build build --config Release
     ctest --test-dir build --build-config Release --output-on-failure -L library
     cmake --install build --config Release
+
+## Binary install
+
+GitHub Releases provide a prebuilt CLI archive expected to run on all conventional
+`x86_64` Linux distributions using glibc 2.28 or newer. It is built on
+AlmaLinux 8.10 and tested by performing an exFAT resize on Debian 12 and Ubuntu
+22.04 LTS. Musl-based distributions such as Alpine, non-FHS systems such as
+NixOS, and other CPU architectures require a different build or compatibility
+setup.
+
+Download `exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz` from the corresponding
+[GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
+an immutable SHA-256 digest beside the asset; compare it with the output of:
+
+    sha256sum exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
+
+Replace `X.Y.Z` below with the release version, then extract and install it:
+
+    tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
+    cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+    sudo ./install.sh
+
+The installer defaults to `/usr/local`. To use another absolute prefix, set
+`PREFIX`; elevated privileges are unnecessary when the destination is writable:
+
+    PREFIX=/your/prefix ./install.sh
+
+Use the same prefix and the `uninstall.sh` from the same release to remove the
+installed files:
+
+    sudo ./uninstall.sh
+
+For a custom prefix, remove it with:
+
+    PREFIX=/your/prefix ./uninstall.sh
