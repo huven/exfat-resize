@@ -29,11 +29,4 @@ git -c tar.umask=022 archive --format=tar --prefix="$package/" \
 gzip -n -9 -c <"$dist_build/$package.tar" >"$dist_build/$archive"
 mv "$dist_build/$archive" "$dist_output/$archive"
 
-if command -v sha256sum >/dev/null 2>&1; then
-	(cd "$dist_output" && sha256sum "$archive" > "$archive.sha256")
-else
-	(cd "$dist_output" && shasum -a 256 "$archive" > "$archive.sha256")
-fi
-
 echo "created $dist_output/$archive"
-echo "created $dist_output/$archive.sha256"

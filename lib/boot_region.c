@@ -330,8 +330,8 @@ enum exfat_resize_error exfat_resize_read_boot_regions(
     size_t work_buffer_size,
     struct exfat_resize_geometry *geometry)
 {
-	struct exfat_boot_values main;
-	struct exfat_boot_values backup;
+	struct exfat_boot_values main_values;
+	struct exfat_boot_values backup_values;
 	enum exfat_resize_error error;
 
 	if (device == NULL || work_buffer == NULL || geometry == NULL)
@@ -339,18 +339,18 @@ enum exfat_resize_error exfat_resize_read_boot_regions(
 	if (work_buffer_size < device->sector_size)
 		return EXFAT_RESIZE_INSUFFICIENT_WORKSPACE;
 
-	error =
-	    read_boot_region(device, EXFAT_MAIN_BOOT_REGION, 1, work_buffer, work_buffer_size, &main);
+	error = read_boot_region(
+	    device, EXFAT_MAIN_BOOT_REGION, 1, work_buffer, work_buffer_size, &main_values);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error = read_boot_region(
-	    device, EXFAT_BACKUP_BOOT_REGION, 0, work_buffer, work_buffer_size, &backup);
+	    device, EXFAT_BACKUP_BOOT_REGION, 0, work_buffer, work_buffer_size, &backup_values);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	if (!boot_regions_are_consistent(&main, &backup))
+	if (!boot_regions_are_consistent(&main_values, &backup_values))
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 
-	*geometry = main.geometry;
+	*geometry = main_values.geometry;
 	return EXFAT_RESIZE_SUCCESS;
 }
 
