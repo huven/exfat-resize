@@ -26,6 +26,7 @@ enum {
 	PERCENT_IN_USE_OFFSET = 112,
 	ENTRY_BITMAP = 0x81,
 	ENTRY_FILE = 0x85,
+	ENTRY_VOLUME_GUID = 0xa0,
 	ENTRY_STREAM = 0xc0,
 	ENTRY_FILE_NAME = 0xc1,
 	ENTRY_VENDOR_EXTENSION = 0xe0,
@@ -1304,7 +1305,7 @@ static void test_unsupported_directory_entries(void)
 		{ 0xc2, 4, 0, TARGET_SECTOR_COUNT, EXFAT_RESIZE_UNSUPPORTED_CRITICAL_ENTRY },
 		{ 0xe2, 4, 1, 12100, EXFAT_RESIZE_UNSUPPORTED_ALLOCATED_ENTRY },
 		{ 0x84, 14, 0, TARGET_SECTOR_COUNT, EXFAT_RESIZE_UNSUPPORTED_CRITICAL_ENTRY },
-		{ 0xa4, 14, 1, 12100, EXFAT_RESIZE_UNSUPPORTED_ALLOCATED_ENTRY },
+		{ 0xa4, 14, 1, 12100, EXFAT_RESIZE_INVALID_FILESYSTEM },
 	};
 	struct exfat_resize_options options = resize_options();
 	size_t index;
@@ -1324,9 +1325,11 @@ static void test_unsupported_directory_entries(void)
 		memset(entry, 0, 32);
 		entry[0] = cases[index].entry_type;
 		if (cases[index].allocated) {
-			entry[1] = ALLOCATION_POSSIBLE;
-			CHECK(
-			    exfat_resize_store_le16(entry, 32, 4, ALLOCATION_POSSIBLE) == EXFAT_RESIZE_SUCCESS);
+			if (cases[index].entry_index == 4)
+				entry[1] = ALLOCATION_POSSIBLE;
+			else
+				CHECK(exfat_resize_store_le16(entry, 32, 4, ALLOCATION_POSSIBLE) ==
+				    EXFAT_RESIZE_SUCCESS);
 			CHECK(exfat_resize_store_le32(entry, 32, 20, 5) == EXFAT_RESIZE_SUCCESS);
 			CHECK(exfat_resize_store_le64(entry, 32, 24, SECTOR_SIZE) == EXFAT_RESIZE_SUCCESS);
 		}
@@ -1487,16 +1490,19 @@ static void test_unallocated_benign_entries_are_preserved(void)
 		root_sector = exfat_fixture_cluster_sector(&fixture.geometry, 2);
 		CHECK(exfat_fixture_read_sector(&fixture, root_sector, root, sizeof(root)) == 0);
 		entry = root + 32 * 14;
-		entry[0] = secondary_case ? 0xe2 : 0xa4;
+		entry[0] = secondary_case ? 0xe2 : ENTRY_VOLUME_GUID;
 		memcpy(entry + 8, "benign-entry", 12);
-		memcpy(expected, entry, sizeof(expected));
 		if (secondary_case) {
 			unsigned char *entry_set = root + 32 * 11;
 
 			entry_set[1] = 3;
 			checksum = entry_set_checksum_count(entry_set, 4);
 			CHECK(exfat_resize_store_le16(entry_set, 32, 2, checksum) == EXFAT_RESIZE_SUCCESS);
+		} else {
+			checksum = entry_set_checksum_count(entry, 1);
+			CHECK(exfat_resize_store_le16(entry, 32, 2, checksum) == EXFAT_RESIZE_SUCCESS);
 		}
+		memcpy(expected, entry, sizeof(expected));
 		CHECK(
 		    fixture.memory.device.write(fixture.memory.device.context, root_sector, 1, root) == 0);
 		memory_block_device_clear_operations(&fixture.memory);
@@ -1509,6 +1515,46 @@ static void test_unallocated_benign_entries_are_preserved(void)
 		CHECK(exfat_fixture_read_sector(&fixture,
 		          exfat_fixture_cluster_sector(&target, mapped_root), root, sizeof(root)) == 0);
 		CHECK(memcmp(root + 32 * 14, expected, sizeof(expected)) == 0);
+		exfat_fixture_destroy(&fixture);
+	}
+}
+
+static void test_unknown_benign_primaries_are_rejected(void)
+{
+	struct exfat_resize_options options = resize_options();
+	unsigned char secondary_count;
+
+	for (secondary_count = 0; secondary_count <= 1; ++secondary_count) {
+		struct exfat_fixture fixture;
+		unsigned char root[SECTOR_SIZE];
+		unsigned char *entry_set;
+		enum exfat_resize_error error;
+		enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+		uint16_t checksum;
+		uint64_t root_sector;
+
+		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+		root_sector = exfat_fixture_cluster_sector(&fixture.geometry, 2);
+		CHECK(exfat_fixture_read_sector(&fixture, root_sector, root, sizeof(root)) == 0);
+		entry_set = root + 32 * 14;
+		memset(entry_set, 0, 32 * (secondary_count + 1));
+		entry_set[0] = 0xa4;
+		entry_set[1] = secondary_count;
+		memcpy(entry_set + 8, "unknown-primary", 15);
+		if (secondary_count != 0) {
+			entry_set[32] = 0xe2;
+			memcpy(entry_set + 40, "unknown-secondary", 17);
+		}
+		checksum = entry_set_checksum_count(entry_set, secondary_count + 1);
+		CHECK(exfat_resize_store_le16(entry_set, 32, 2, checksum) == EXFAT_RESIZE_SUCCESS);
+		CHECK(
+		    fixture.memory.device.write(fixture.memory.device.context, root_sector, 1, root) == 0);
+		memory_block_device_clear_operations(&fixture.memory);
+
+		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, &stage);
+		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
+		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+		check_operations_are_read_only(&fixture);
 		exfat_fixture_destroy(&fixture);
 	}
 }
@@ -2652,6 +2698,7 @@ int main(void)
 	test_bitmap_entry_rejections();
 	test_malformed_bitmap_fat_chain_is_rejected();
 	test_unallocated_benign_entries_are_preserved();
+	test_unknown_benign_primaries_are_rejected();
 	test_malformed_fat_streams_are_rejected();
 	test_misplaced_system_entry_is_rejected();
 	test_truncated_entry_set_is_rejected();

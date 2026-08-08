@@ -20,6 +20,7 @@ enum {
 	EXFAT_ENTRY_UPCASE = 0x82,
 	EXFAT_ENTRY_VOLUME_LABEL = 0x83,
 	EXFAT_ENTRY_FILE = 0x85,
+	EXFAT_ENTRY_VOLUME_GUID = 0xa0,
 	EXFAT_ENTRY_STREAM = 0xc0,
 	EXFAT_ENTRY_FILE_NAME = 0xc1,
 	EXFAT_ENTRY_VENDOR_EXTENSION = 0xe0,
@@ -47,6 +48,9 @@ enum {
 #define EXFAT_MODEL_NO_FAT_CHAIN UINT32_C(1)
 
 enum {
+	EXFAT_PRIMARY_SECONDARY_COUNT_OFFSET = 1,
+	EXFAT_PRIMARY_FLAGS_OFFSET = 4,
+
 	EXFAT_FILE_SECONDARY_COUNT_OFFSET = 1,
 	EXFAT_FILE_CHECKSUM_OFFSET = 2,
 	EXFAT_FILE_ATTRIBUTES_OFFSET = 4,
@@ -1112,27 +1116,6 @@ static enum exfat_resize_error scan_upcase_entry(struct resize_context *context,
 	return write_directory_entry(context, location, entry);
 }
 
-static enum exfat_resize_error scan_unknown_primary(
-    const unsigned char entry[EXFAT_DIRECTORY_ENTRY_SIZE])
-{
-	enum exfat_resize_error error;
-	uint16_t flags;
-	uint32_t first_cluster;
-
-	if ((entry[0] & EXFAT_ENTRY_BENIGN) == 0)
-		return EXFAT_RESIZE_UNSUPPORTED_CRITICAL_ENTRY;
-
-	error = exfat_resize_load_le16(entry, EXFAT_DIRECTORY_ENTRY_SIZE, 4, &flags);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	if ((flags & EXFAT_ALLOCATION_POSSIBLE) == 0)
-		return EXFAT_RESIZE_SUCCESS;
-	error = exfat_resize_load_le32(entry, EXFAT_DIRECTORY_ENTRY_SIZE, 20, &first_cluster);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	return first_cluster < 2 ? EXFAT_RESIZE_SUCCESS : EXFAT_RESIZE_UNSUPPORTED_ALLOCATED_ENTRY;
-}
-
 static enum exfat_resize_error scan_one_directory(struct resize_context *context,
     const struct allocation_stream *directory,
     enum directory_scan_mode mode)
@@ -1181,8 +1164,22 @@ static enum exfat_resize_error scan_one_directory(struct resize_context *context
 		case EXFAT_ENTRY_FILE:
 			error = scan_file_entry_set(context, &cursor, entry, &location, mode);
 			break;
+		case EXFAT_ENTRY_VOLUME_GUID:
+			if (!directory->root_directory || entry[EXFAT_PRIMARY_SECONDARY_COUNT_OFFSET] != 0 ||
+			    (entry[EXFAT_PRIMARY_FLAGS_OFFSET] &
+			        (EXFAT_ALLOCATION_POSSIBLE | EXFAT_NO_FAT_CHAIN)) != 0)
+				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			error = EXFAT_RESIZE_SUCCESS;
+			break;
 		default:
-			error = scan_unknown_primary(entry);
+			/*
+			 * Revision 1.00 defines no other primary directory-entry types.
+			 * Revisit this rejection before accepting later minor revisions:
+			 * future benign primaries may declare checksummed secondary entry
+			 * sets that must be consumed and preserved as a unit.
+			 */
+			error = (entry[0] & EXFAT_ENTRY_BENIGN) == 0 ? EXFAT_RESIZE_UNSUPPORTED_CRITICAL_ENTRY
+			                                             : EXFAT_RESIZE_INVALID_FILESYSTEM;
 			break;
 		}
 		if (error != EXFAT_RESIZE_SUCCESS)
