@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+
+set(project_root "@PROJECT_SOURCE_DIR@")
+set(test_root "@CMAKE_CURRENT_BINARY_DIR@/os-detection")
+set(cmake "@CMAKE_COMMAND@")
+
+function(run_configuration build expected_cli)
+    execute_process(
+        COMMAND
+            "${cmake}"
+            -S "${project_root}"
+            -B "${build}"
+            -DEXFAT_RESIZE_BUILD_TESTS=OFF
+            ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error
+    )
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "Configuration failed:\n${output}${error}")
+    endif()
+
+    file(
+        STRINGS "${build}/CMakeCache.txt" cli_setting
+        REGEX "^EXFAT_RESIZE_BUILD_CLI:BOOL="
+    )
+    if(NOT cli_setting STREQUAL "EXFAT_RESIZE_BUILD_CLI:BOOL=${expected_cli}")
+        message(FATAL_ERROR "Unexpected CLI setting: ${cli_setting}")
+    endif()
+endfunction()
+
+file(REMOVE_RECURSE "${test_root}")
+
+run_configuration("${test_root}/macos" ON)
+
+execute_process(
+    COMMAND xcrun --sdk iphoneos --show-sdk-path
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE ios_sdk
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT result EQUAL 0)
+    message(STATUS "iOS SDK unavailable; skipping Apple device-platform checks")
+    return()
+endif()
+
+set(ios_arguments
+    -DCMAKE_SYSTEM_NAME=iOS
+    "-DCMAKE_OSX_SYSROOT=${ios_sdk}"
+    -DCMAKE_OSX_ARCHITECTURES=arm64
+    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+)
+run_configuration("${test_root}/ios" OFF ${ios_arguments})
+execute_process(
+    COMMAND "${cmake}" --build "${test_root}/ios" --target exfat_resize
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "iOS library build failed:\n${output}${error}")
+endif()
+
+execute_process(
+    COMMAND
+        "${cmake}"
+        -S "${project_root}"
+        -B "${test_root}/ios-cli"
+        -DEXFAT_RESIZE_BUILD_TESTS=OFF
+        -DEXFAT_RESIZE_BUILD_CLI=ON
+        ${ios_arguments}
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(result EQUAL 0)
+    message(FATAL_ERROR "The iOS CLI configuration unexpectedly succeeded")
+endif()
+if(NOT "${output}${error}" MATCHES "The exfat-resize CLI supports only macOS and Linux")
+    message(FATAL_ERROR "The iOS CLI configuration produced an unexpected error:\n${output}${error}")
+endif()

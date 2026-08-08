@@ -16,7 +16,6 @@ struct device {
 	struct exfat_resize_block_device block_device;
 };
 
-int device_open_flags(int is_block_device);
 int device_open(struct device *device, const char *path, char *error, size_t error_size);
 void device_close(struct device *device);
 

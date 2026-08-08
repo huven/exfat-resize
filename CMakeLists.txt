@@ -17,12 +17,13 @@ project(exfat_resize VERSION ${EXFAT_RESIZE_VERSION} LANGUAGES C)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
+set(EXFAT_RESIZE_CLI_SUPPORTED OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(EXFAT_RESIZE_CLI_SUPPORTED ON)
+endif()
+
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        set(EXFAT_RESIZE_BUILD_CLI_DEFAULT ON)
-    else()
-        set(EXFAT_RESIZE_BUILD_CLI_DEFAULT OFF)
-    endif()
+    set(EXFAT_RESIZE_BUILD_CLI_DEFAULT ${EXFAT_RESIZE_CLI_SUPPORTED})
     set(EXFAT_RESIZE_BUILD_TESTS_DEFAULT ON)
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 else()
@@ -45,6 +46,10 @@ option(
     "Build with AddressSanitizer and UndefinedBehaviorSanitizer"
     OFF
 )
+
+if(EXFAT_RESIZE_BUILD_CLI AND NOT EXFAT_RESIZE_CLI_SUPPORTED)
+    message(FATAL_ERROR "The exfat-resize CLI supports only macOS and Linux")
+endif()
 
 set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
 if(EXFAT_RESIZE_BUILD_CLI)
