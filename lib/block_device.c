@@ -6,7 +6,8 @@
 
 int exfat_resize_sector_size_is_supported(uint32_t size)
 {
-	return size >= 512 && size <= 4096 && (size & (size - 1)) == 0;
+	return size >= EXFAT_RESIZE_MIN_SECTOR_SIZE && size <= EXFAT_RESIZE_MAX_SECTOR_SIZE &&
+	    (size & (size - 1)) == 0;
 }
 
 enum exfat_resize_error exfat_resize_validate_block_device(

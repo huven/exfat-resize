@@ -8,6 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define EXFAT_RESIZE_MIN_SECTOR_SIZE UINT32_C(512)
+#define EXFAT_RESIZE_MAX_SECTOR_SIZE UINT32_C(4096)
+
 struct exfat_resize_device_geometry {
 	uint32_t logical_sector_size;
 	uint64_t sector_count;
