@@ -27,3 +27,16 @@ add_test(
     COMMAND sh ${PROJECT_SOURCE_DIR}/tests/package/release-check.sh
 )
 set_tests_properties(package.release-check PROPERTIES LABELS package)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING)
+    configure_file(
+        os_detection.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/os_detection.cmake
+        @ONLY
+    )
+    add_test(
+        NAME package.os-detection
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/os_detection.cmake
+    )
+    set_tests_properties(package.os-detection PROPERTIES LABELS package)
+endif()

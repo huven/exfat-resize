@@ -5,7 +5,6 @@
 #include "device.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,17 +45,6 @@ static int wait_for_child(pid_t child)
 	}
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS)
 		return -1;
-	return 0;
-}
-
-static int check_open_flags(void)
-{
-#if defined(__linux__)
-	if ((device_open_flags(0) & O_EXCL) != 0 || (device_open_flags(1) & O_EXCL) == 0) {
-		fprintf(stderr, "O_EXCL selection does not distinguish regular and block devices\n");
-		return -1;
-	}
-#endif
 	return 0;
 }
 
@@ -130,8 +118,6 @@ static int test_regular_file(const char *program)
 
 int main(int argc, char **argv)
 {
-	if (check_open_flags() != 0)
-		return EXIT_FAILURE;
 	if (argc == 3 && strcmp(argv[1], "--expect-locked") == 0)
 		return expect_locked_device(argv[2]);
 	if (argc == 1)

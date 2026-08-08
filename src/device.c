@@ -19,13 +19,27 @@
 #include <unistd.h>
 
 #if defined(__APPLE__)
-#include <sys/disk.h>
-#include <sys/ioctl.h>
+#include <TargetConditionals.h>
+
+#if TARGET_OS_OSX
+#define EXFAT_RESIZE_PLATFORM_MACOS 1
+#else
+#error Unsupported Apple operating system
+#endif
+
 #elif defined(__linux__)
-#include <linux/fs.h>
-#include <sys/ioctl.h>
+#define EXFAT_RESIZE_PLATFORM_LINUX 1
+
 #else
 #error Unsupported operating system
+#endif
+
+#if defined(EXFAT_RESIZE_PLATFORM_MACOS)
+#include <sys/disk.h>
+#include <sys/ioctl.h>
+#elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 #endif
 
 static int block_device_read(
@@ -57,32 +71,20 @@ static void record_io_error(struct device *device, const char *operation, int er
 	device->io_error_number = error_number;
 }
 
-int device_open_flags(int is_block_device)
-{
-	int flags = O_RDWR;
-
-#if defined(__APPLE__)
-	(void)is_block_device;
-	flags |= O_EXLOCK | O_NONBLOCK;
-#else
-	if (is_block_device)
-		flags |= O_EXCL;
-#endif
-	return flags;
-}
-
 int device_open(struct device *device, const char *path, char *error, size_t error_size)
 {
 	struct stat st;
-#if defined(__linux__)
+#if defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	struct stat path_st;
 #endif
 	uint64_t bytes;
 	uint32_t sector_size = 512;
-	int flags;
+	int flags = O_RDWR;
 	int fd;
 
-#if defined(__linux__)
+#if defined(EXFAT_RESIZE_PLATFORM_MACOS)
+	flags |= O_EXLOCK | O_NONBLOCK;
+#elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	if (stat(path, &path_st) != 0) {
 		set_error(error, error_size, path);
 		return -1;
@@ -91,9 +93,8 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		(void)snprintf(error, error_size, "%s: not a regular file or block device", path);
 		return -1;
 	}
-	flags = device_open_flags(S_ISBLK(path_st.st_mode));
-#else
-	flags = device_open_flags(0);
+	if (S_ISBLK(path_st.st_mode))
+		flags |= O_EXCL;
 #endif
 	fd = open(path, flags);
 
@@ -109,7 +110,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		set_error(error, error_size, path);
 		goto fail_after_open;
 	}
-#if defined(__linux__)
+#if defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	if (st.st_dev != path_st.st_dev || st.st_ino != path_st.st_ino ||
 	    S_ISREG(st.st_mode) != S_ISREG(path_st.st_mode) ||
 	    S_ISBLK(st.st_mode) != S_ISBLK(path_st.st_mode)) {
@@ -119,7 +120,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 #endif
 
 	if (S_ISREG(st.st_mode)) {
-#if defined(__linux__)
+#if defined(EXFAT_RESIZE_PLATFORM_LINUX)
 		if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
 			if (is_in_use_error(errno))
 				set_in_use_error(error, error_size, path);
@@ -135,7 +136,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 #endif
 		bytes = (uint64_t)st.st_size;
 	} else {
-#if defined(__APPLE__)
+#if defined(EXFAT_RESIZE_PLATFORM_MACOS)
 		uint64_t blocks;
 		if (ioctl(fd, DKIOCGETBLOCKSIZE, &sector_size) != 0 ||
 		    ioctl(fd, DKIOCGETBLOCKCOUNT, &blocks) != 0) {
@@ -147,7 +148,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 			goto fail_after_open;
 		}
 		bytes = blocks * (uint64_t)sector_size;
-#else
+#elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 		int logical_size;
 		if (ioctl(fd, BLKSSZGET, &logical_size) != 0 || logical_size <= 0 ||
 		    ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
@@ -245,7 +246,7 @@ static int block_device_sync(void *context)
 	struct device *device = context;
 	int result;
 
-#if defined(__APPLE__)
+#if defined(EXFAT_RESIZE_PLATFORM_MACOS)
 	if (device->is_regular_file) {
 		do {
 			result = fcntl(device->fd, F_FULLFSYNC);
@@ -259,7 +260,7 @@ static int block_device_sync(void *context)
 			result = ioctl(device->fd, DKIOCSYNCHRONIZE, &request);
 		} while (result != 0 && errno == EINTR);
 	}
-#else
+#elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	do {
 		result = fsync(device->fd);
 	} while (result != 0 && errno == EINTR);
