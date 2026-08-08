@@ -131,10 +131,12 @@ struct exfat_resize_block_device {
 /*
  * Allocator callbacks
  *
- * allocate is called only with a nonzero size. It returns either NULL or
- * memory aligned for max_align_t and writable for at least size bytes. A
- * successful allocation must be disjoint from the public argument objects,
- * callback-owned state, and every other live allocation made for the call.
+ * allocate is called only with a nonzero size. It returns either NULL or at
+ * least size bytes of readable and writable, max_align_t-aligned storage whose
+ * effective-type semantics match those of storage returned by malloc (ISO/IEC
+ * 9899:2011 section 6.5, paragraphs 6 and 7). A successful allocation must be
+ * disjoint from the public argument objects, callback-owned state, and every
+ * other live allocation made for the call.
  *
  * Each successful allocation remains valid until deallocate is called exactly
  * once with its original pointer and size. deallocate is never called with
