@@ -143,6 +143,28 @@ static size_t count_syncs_before(const struct memory_operation *operations, size
 	return count;
 }
 
+static void check_preparing_write_ranges(const struct memory_operation *operations,
+    size_t first_transaction_operation,
+    size_t first_fat_write,
+    const struct exfat_resize_geometry *source)
+{
+	uint64_t source_heap_end =
+	    source->cluster_heap_offset + (uint64_t)source->cluster_count * source->sectors_per_cluster;
+	size_t index;
+
+	for (index = first_transaction_operation; index < first_fat_write; ++index) {
+		const struct memory_operation *operation = &operations[index];
+
+		if (operation->kind != MEMORY_OPERATION_WRITE)
+			continue;
+		if (operation->first_sector == 0) {
+			CHECK(operation->sector_count == 1);
+			continue;
+		}
+		CHECK(operation->first_sector >= source_heap_end);
+	}
+}
+
 static enum exfat_resize_stage expected_stage(const struct memory_operation *operations,
     size_t operation_index,
     size_t first_transaction_operation,
@@ -326,6 +348,8 @@ static void test_transaction_failures(uint64_t target_sector_count)
 		free(baseline);
 		return;
 	}
+	check_preparing_write_ranges(
+	    baseline, first_transaction_operation, first_fat_write, &fixture.geometry);
 
 	for (operation_index = 0; operation_index < operation_count; ++operation_index) {
 		const struct memory_operation *operation = &baseline[operation_index];
