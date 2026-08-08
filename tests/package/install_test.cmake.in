@@ -155,6 +155,10 @@ foreach(required_text
         "Memory requirements"
         "docs/TRANSACTION.md"
         "Working-memory sizes and lifetimes"
+        "readable and writable"
+        "effective-type semantics"
+        "storage returned by malloc"
+        "9899:2011 section 6.5"
 )
     string(FIND "${header_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
