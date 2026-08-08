@@ -40,6 +40,10 @@ enum {
 #define EXFAT_MAX_DIRECTORY_SIZE (UINT64_C(256) * 1024 * 1024)
 #define EXFAT_IO_BUFFER_SIZE ((size_t)UINT32_C(1048576))
 #define EXFAT_SECTOR_CACHE_SIZE ((size_t)UINT32_C(262144))
+
+_Static_assert(EXFAT_SECTOR_CACHE_SIZE >= EXFAT_RESIZE_MAX_SECTOR_SIZE,
+    "a sector cache must hold at least one maximum-sized sector");
+
 /*
  * A nonzero model value means that the cluster is allocated. Values 2 and
  * above are target FAT entries. The otherwise-invalid value 1 represents an
@@ -91,6 +95,8 @@ enum sector_cache_index {
 	SECTOR_CACHE_COUNT
 };
 
+#define EXFAT_SECTOR_CACHE_BUFFER_SIZE ((size_t)SECTOR_CACHE_COUNT * EXFAT_SECTOR_CACHE_SIZE)
+
 enum stream_chain_source { STREAM_CHAIN_SOURCE_FAT, STREAM_CHAIN_TARGET_MODEL };
 
 struct allocation_stream {
@@ -141,7 +147,6 @@ struct resize_context {
 	struct directory_worklist directories;
 	struct sector_cache caches[SECTOR_CACHE_COUNT];
 	unsigned char *cache_buffer;
-	size_t cache_buffer_size;
 	unsigned char *io_buffer;
 	uint32_t io_sector_capacity;
 	size_t sector_size;
@@ -1637,9 +1642,8 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	        (uint64_t)context->target.cluster_count + 2)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
 
-	context->cache_buffer_size = (size_t)SECTOR_CACHE_COUNT * EXFAT_SECTOR_CACHE_SIZE;
 	context->cache_buffer =
-	    context->allocator.allocate(context->allocator.context, context->cache_buffer_size);
+	    context->allocator.allocate(context->allocator.context, EXFAT_SECTOR_CACHE_BUFFER_SIZE);
 	if (context->cache_buffer == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
 	for (cache_index = 0; cache_index < SECTOR_CACHE_COUNT; ++cache_index) {
@@ -1647,8 +1651,6 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 		    context->cache_buffer + cache_index * EXFAT_SECTOR_CACHE_SIZE;
 		context->caches[cache_index].sector_capacity =
 		    (uint32_t)(EXFAT_SECTOR_CACHE_SIZE / context->sector_size);
-		if (context->caches[cache_index].sector_capacity == 0)
-			return EXFAT_RESIZE_INTERNAL_ERROR;
 	}
 
 	model_size = (uint64_t)context->target.cluster_count * sizeof(*context->allocation_model);
@@ -1762,7 +1764,7 @@ static void release_context(struct resize_context *context)
 	}
 	if (context->cache_buffer != NULL) {
 		context->allocator.deallocate(
-		    context->allocator.context, context->cache_buffer, context->cache_buffer_size);
+		    context->allocator.context, context->cache_buffer, EXFAT_SECTOR_CACHE_BUFFER_SIZE);
 		context->cache_buffer = NULL;
 	}
 	if (context->io_buffer != NULL) {
