@@ -61,9 +61,9 @@ function(run_git)
     endif()
 endfunction()
 
-function(read_head output_variable)
+function(read_head source_dir output_variable)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${repository}" rev-parse HEAD
+        COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" rev-parse HEAD
         RESULT_VARIABLE git_result
         OUTPUT_VARIABLE commit
         ERROR_VARIABLE git_error
@@ -73,6 +73,40 @@ function(read_head output_variable)
         message(FATAL_ERROR "Could not read test commit: ${git_error}")
     endif()
     set(${output_variable} "${commit}" PARENT_SCOPE)
+endfunction()
+
+function(expect_checkout source_dir expected_package_version expected_build_version)
+    exfat_resize_read_package_version("${source_dir}" package_version)
+    exfat_resize_resolve_checkout_build_version(
+        "${source_dir}"
+        "${package_version}"
+        build_version
+    )
+    if(NOT package_version STREQUAL expected_package_version OR
+       NOT build_version STREQUAL expected_build_version)
+        message(FATAL_ERROR
+            "Checkout version in ${source_dir}: expected "
+            "'${expected_package_version}' and '${expected_build_version}', got "
+            "'${package_version}' and '${build_version}'"
+        )
+    endif()
+endfunction()
+
+function(expect_commit source_dir commit expected_package_version expected_build_version)
+    exfat_resize_resolve_commit_version(
+        "${source_dir}"
+        "${commit}"
+        package_version
+        build_version
+    )
+    if(NOT package_version STREQUAL expected_package_version OR
+       NOT build_version STREQUAL expected_build_version)
+        message(FATAL_ERROR
+            "Commit version in ${source_dir}: expected "
+            "'${expected_package_version}' and '${expected_build_version}', got "
+            "'${package_version}' and '${build_version}'"
+        )
+    endif()
 endfunction()
 
 function(expect_tag_rejected mode commit)
@@ -105,7 +139,7 @@ function(expect_tag_rejected mode commit)
     string(TOLOWER "${test_output}${test_error}" test_log)
     string(FIND
         "${test_log}"
-        "tag v2.0.0 does not match package version 1.2.3"
+        "tag v2.0.0 does not match package version 1.3.0"
         mismatch_offset
     )
     if(mismatch_offset EQUAL -1)
@@ -121,43 +155,97 @@ run_git(init --quiet)
 run_git(config user.name "exfat-resize test")
 run_git(config user.email "test@example.invalid")
 file(WRITE "${repository}/VERSION" "1.2.3\n")
-run_git(add VERSION)
+file(WRITE "${repository}/NOTES" "clean\n")
+run_git(add VERSION NOTES)
 run_git(commit --quiet -m "Matching version")
-read_head(matching_commit)
+read_head("${repository}" matching_commit)
 run_git(tag v1.2.3)
 
-exfat_resize_read_package_version("${repository}" package_version)
-exfat_resize_resolve_checkout_build_version(
+expect_checkout("${repository}" "1.2.3" "1.2.3")
+expect_commit("${repository}" "${matching_commit}" "1.2.3" "1.2.3")
+
+execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+file(TOUCH_NOCREATE "${repository}/NOTES")
+expect_checkout("${repository}" "1.2.3" "1.2.3")
+
+file(APPEND "${repository}/NOTES" "dirty\n")
+expect_checkout("${repository}" "1.2.3" "1.2.3-dirty")
+expect_commit("${repository}" "${matching_commit}" "1.2.3" "1.2.3")
+run_git(checkout -- NOTES)
+
+file(WRITE "${repository}/VERSION" "1.3.0\n")
+run_git(add VERSION)
+run_git(commit --quiet -m "Version transition")
+read_head("${repository}" transition_commit)
+string(SUBSTRING "${transition_commit}" 0 12 transition_id)
+set(transition_version "1.3.0-g${transition_id}")
+
+expect_checkout("${repository}" "1.3.0" "${transition_version}")
+expect_commit(
     "${repository}"
-    "${package_version}"
-    build_version
+    "${transition_commit}"
+    "1.3.0"
+    "${transition_version}"
 )
-if(NOT package_version STREQUAL "1.2.3" OR
-   NOT build_version STREQUAL "1.2.3")
-    message(FATAL_ERROR
-        "Checkout version: expected '1.2.3', got "
-        "'${package_version}' and '${build_version}'"
-    )
+
+file(APPEND "${repository}/NOTES" "dirty\n")
+expect_checkout("${repository}" "1.3.0" "${transition_version}-dirty")
+expect_commit(
+    "${repository}"
+    "${transition_commit}"
+    "1.3.0"
+    "${transition_version}"
+)
+run_git(checkout -- NOTES)
+
+set(shallow_repository "${EXFAT_RESIZE_VERSION_TEST_DIR}/shallow-repository")
+execute_process(
+    COMMAND
+        "${GIT_EXECUTABLE}" clone --quiet --no-local --depth 1
+        "${repository}" "${shallow_repository}"
+    RESULT_VARIABLE clone_result
+    OUTPUT_VARIABLE clone_output
+    ERROR_VARIABLE clone_error
+)
+if(NOT clone_result EQUAL 0)
+    message(FATAL_ERROR "Could not create shallow clone: ${clone_output}${clone_error}")
+endif()
+if(NOT EXISTS "${shallow_repository}/.git/shallow")
+    message(FATAL_ERROR "Version test clone is not shallow")
+endif()
+read_head("${shallow_repository}" shallow_commit)
+if(NOT shallow_commit STREQUAL transition_commit)
+    message(FATAL_ERROR "Full and shallow version tests use different commits")
 endif()
 
-exfat_resize_resolve_commit_version(
-    "${repository}"
-    "${matching_commit}"
-    package_version
-    build_version
+expect_checkout("${shallow_repository}" "1.3.0" "${transition_version}")
+expect_commit(
+    "${shallow_repository}"
+    "${transition_commit}"
+    "1.3.0"
+    "${transition_version}"
 )
-if(NOT package_version STREQUAL "1.2.3" OR
-   NOT build_version STREQUAL "1.2.3")
-    message(FATAL_ERROR
-        "Commit version: expected '1.2.3', got "
-        "'${package_version}' and '${build_version}'"
-    )
-endif()
+file(APPEND "${shallow_repository}/NOTES" "dirty\n")
+expect_checkout("${shallow_repository}" "1.3.0" "${transition_version}-dirty")
+expect_commit(
+    "${shallow_repository}"
+    "${transition_commit}"
+    "1.3.0"
+    "${transition_version}"
+)
+
+run_git(tag v1.3.0 "${transition_commit}")
+expect_checkout("${repository}" "1.3.0" "1.3.0")
+expect_commit("${repository}" "${transition_commit}" "1.3.0" "1.3.0")
+file(APPEND "${repository}/NOTES" "dirty\n")
+expect_checkout("${repository}" "1.3.0" "1.3.0-dirty")
+expect_commit("${repository}" "${transition_commit}" "1.3.0" "1.3.0")
+run_git(checkout -- NOTES)
 
 file(WRITE "${repository}/change" "mismatch\n")
 run_git(add change)
 run_git(commit --quiet -m "Mismatching tag")
-read_head(mismatching_commit)
+read_head("${repository}" mismatching_commit)
 run_git(tag v2.0.0)
 
 expect_tag_rejected(checkout "${mismatching_commit}")
