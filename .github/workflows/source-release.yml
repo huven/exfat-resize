@@ -145,14 +145,17 @@ jobs:
           gh release upload "$RELEASE_REF" \
             "release-assets/$source_archive" "release-assets/$linux_archive"
 
-          api_endpoint=repos/$GH_REPO/releases/tags/$RELEASE_REF
           expected=$(
             for asset in "$source_archive" "$linux_archive"; do
               digest=$(sha256sum "release-assets/$asset" | cut -d ' ' -f 1)
               printf '%s\tsha256:%s\n' "$asset" "$digest"
             done | sort
           )
-          actual=$(gh api "$api_endpoint" --jq '.assets[] | [.name, .digest] | @tsv' | sort)
+          actual=$(
+            gh release view "$RELEASE_REF" --json assets \
+              --jq '.assets[] | [.name, .digest] | @tsv' |
+              sort
+          )
           if [ "$actual" != "$expected" ]; then
             echo "draft release asset names or digests do not match" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
