@@ -25,21 +25,13 @@ function(_exfat_resize_validate_exact_tag exact_tag package_version)
     endif()
 endfunction()
 
-# Convert git describe output into the build identity shown by the CLI.
-function(_exfat_resize_format_description description package_version output_variable)
-    if(description MATCHES "^v")
-        string(SUBSTRING "${description}" 1 -1 build_version)
-    else()
-        set(build_version "${package_version}-g${description}")
-    endif()
-
-    set(${output_variable} "${build_version}" PARENT_SCOPE)
-endfunction()
-
-# Describe either the working tree or a specific commit, validating exact tags.
-function(_exfat_resize_describe_git source_dir package_version commit output_variable)
+# Resolve either the working tree or a specific commit, validating exact tags.
+function(_exfat_resize_resolve_git_build_version
+         source_dir package_version commit output_variable)
+    set(revision HEAD)
     set(commit_argument)
     if(commit)
+        set(revision "${commit}")
         list(APPEND commit_argument "${commit}")
     endif()
 
@@ -54,30 +46,44 @@ function(_exfat_resize_describe_git source_dir package_version commit output_var
     )
     if(exact_tag_result EQUAL 0)
         _exfat_resize_validate_exact_tag("${exact_tag}" "${package_version}")
+        set(build_version "${package_version}")
+    else()
+        execute_process(
+            COMMAND
+                "${GIT_EXECUTABLE}" -C "${source_dir}" rev-parse
+                --verify "${revision}^{commit}"
+            RESULT_VARIABLE object_id_result
+            OUTPUT_VARIABLE object_id
+            ERROR_VARIABLE object_id_error
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT object_id_result EQUAL 0)
+            message(FATAL_ERROR "Could not resolve Git commit: ${object_id_error}")
+        endif()
+        string(LENGTH "${object_id}" object_id_length)
+        if(NOT object_id MATCHES "^[0-9A-Fa-f]+$" OR object_id_length LESS 12)
+            message(FATAL_ERROR "Invalid Git commit object ID: '${object_id}'")
+        endif()
+        string(SUBSTRING "${object_id}" 0 12 commit_id)
+        string(TOLOWER "${commit_id}" commit_id)
+        set(build_version "${package_version}-g${commit_id}")
     endif()
 
-    set(dirty_argument)
     if(NOT commit)
-        list(APPEND dirty_argument --dirty)
-    endif()
-    execute_process(
-        COMMAND
-            "${GIT_EXECUTABLE}" -C "${source_dir}" describe
-            --tags --match "v[0-9]*" --always ${dirty_argument} ${commit_argument}
-        RESULT_VARIABLE description_result
-        OUTPUT_VARIABLE description
-        ERROR_VARIABLE description_error
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(NOT description_result EQUAL 0)
-        message(FATAL_ERROR "Could not describe Git source: ${description_error}")
+        execute_process(
+            COMMAND
+                "${GIT_EXECUTABLE}" -C "${source_dir}"
+                -c diff.autoRefreshIndex=true diff --quiet HEAD --
+            RESULT_VARIABLE dirty_result
+            ERROR_VARIABLE dirty_error
+        )
+        if(dirty_result EQUAL 1)
+            string(APPEND build_version "-dirty")
+        elseif(NOT dirty_result EQUAL 0)
+            message(FATAL_ERROR "Could not inspect Git checkout: ${dirty_error}")
+        endif()
     endif()
 
-    _exfat_resize_format_description(
-        "${description}"
-        "${package_version}"
-        build_version
-    )
     _exfat_resize_validate_build_version("${build_version}")
     set(${output_variable} "${build_version}" PARENT_SCOPE)
 endfunction()
@@ -110,7 +116,7 @@ function(exfat_resize_resolve_checkout_build_version
     elseif(EXISTS "${source_dir}/.git")
         find_package(Git QUIET)
         if(GIT_FOUND)
-            _exfat_resize_describe_git(
+            _exfat_resize_resolve_git_build_version(
                 "${source_dir}"
                 "${package_version}"
                 ""
@@ -148,7 +154,7 @@ function(exfat_resize_resolve_commit_version
     endif()
     _exfat_resize_validate_package_version("${package_version}")
 
-    _exfat_resize_describe_git(
+    _exfat_resize_resolve_git_build_version(
         "${source_dir}"
         "${package_version}"
         "${commit}"
