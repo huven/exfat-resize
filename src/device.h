@@ -16,6 +16,8 @@ struct device {
 #if defined(_WIN32)
 	HANDLE handle;
 	DWORD io_error_number;
+	void *volume_io_buffer;
+	size_t volume_io_buffer_size;
 #else
 	int fd;
 	int is_regular_file;

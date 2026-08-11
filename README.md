@@ -2,7 +2,7 @@
 
 exfat-resize provides a portable C11 library and command-line tool for growing
 an existing exFAT filesystem in a regular file or raw block device. On Windows,
-the initial CLI support is limited to regular image files. The backing object
+the CLI supports regular image files and logical volumes. The backing object
 must be enlarged before the filesystem is resized.
 
 ## Quick install
@@ -39,11 +39,13 @@ filesystem is unmounted and ensure the check completes successfully.
 `exfat-resize` is not a general filesystem checker; it validates only the
 invariants needed for the resize.
 
-Keep the filesystem unmounted and prevent all other access for the complete
-operation. When resizing a regular image file, also ensure it is not attached
-through a loop or disk-image device. Platform locking helps detect cooperating
-users, but regular-file locks are advisory and cannot exclude a process that
-ignores them.
+Prevent all other access for the complete operation. On macOS and Linux, keep
+the filesystem unmounted. For a Windows logical volume, close all files and
+applications using it; the CLI obtains an exclusive volume lock and dismounts
+the filesystem before accessing it. When resizing a regular image file, also
+ensure it is not attached through a loop or disk-image device. Platform locking
+helps detect cooperating users, but regular-file locks are advisory and cannot
+exclude a process that ignores them.
 
 The backing object or partition must already be enlarged. The tool does not
 enlarge regular files or partitions. A failed or interrupted resize is not
@@ -67,8 +69,8 @@ only when the command explicitly reports that it is safe.
 With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of
 bytes. It is rounded down to a whole filesystem sector. Shrinking is not
-supported. On Windows, `device` must currently name a regular image file; drive
-letters and Windows volume or device paths are not yet accepted.
+supported. On Windows, `device` may be an image path, a drive designator such as
+`E:`, or a volume-GUID path such as `\\?\Volume{GUID}\`.
 
 Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
 to use all available space:
@@ -80,6 +82,11 @@ On macOS or Linux, grow the exFAT filesystem on an unmounted raw device to use
 all available space:
 
     exfat-resize /dev/your-exfat-device
+
+On Windows, run an elevated terminal, close applications using the logical
+volume, and identify it by drive letter or volume-GUID path:
+
+    exfat-resize E:
 
 Only filesystems meeting the
 [compatibility requirements](#filesystem-compatibility) below are supported.
@@ -107,16 +114,18 @@ The core library is designed to be portable across mainstream C11 environments
 and has no operating-system dependencies. It is continuously tested with GCC
 and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
 is a thin platform-specific wrapper around the library. macOS and Linux support
-regular images and raw block devices. Windows currently supports only regular
-image files; logical volumes such as `E:`, volume-GUID paths, and other Windows
-device namespaces are rejected before opening. Windows paths are accepted as
-Unicode paths.
+regular images and raw block devices. Windows supports regular images, drive
+designators such as `E:`, and volume-GUID paths. Physical disks such as
+`\\.\PhysicalDrive0` and other Windows device namespaces remain unsupported.
+Windows paths are accepted as Unicode paths.
 
 The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
 Linux. Windows image files are opened without sharing by using `CreateFileW`
-and synchronized with `FlushFileBuffers`. Persistence ultimately depends on the
-operating system and storage device honoring their flush requests.
+and synchronized with `FlushFileBuffers`. Windows logical volumes are opened
+for direct I/O, locked with `FSCTL_LOCK_VOLUME`, dismounted, and kept locked for
+the complete operation. Persistence ultimately depends on the operating system
+and storage device honoring their flush requests.
 On macOS, platform mechanisms reject known mounted or otherwise busy backing
 objects. The CLI retains its requested locks for the complete operation;
 regular-file locks remain advisory as described above.
@@ -237,8 +246,8 @@ For a custom installation prefix:
 
 ### Windows
 
-The Windows build includes the image-file CLI and the library by default. It
-uses only native Windows APIs and does not require a POSIX compatibility layer:
+The Windows build includes the CLI and library by default. It uses only native
+Windows APIs and does not require a POSIX compatibility layer:
 
     cmake -S . -B build
     cmake --build build --config Release
@@ -248,9 +257,16 @@ uses only native Windows APIs and does not require a POSIX compatibility layer:
 The Windows CLI accepts regular image-file paths, including Unicode paths and
 long absolute file paths. It assigns image files a 512-byte virtual sector
 size, requests exclusive file access for the complete resize, and flushes
-filesystem metadata through the Windows file API. Direct logical-volume and
-block-device access is intentionally deferred; invocations such as
-`exfat-resize E:` are not yet supported.
+filesystem metadata through the Windows file API.
+
+Logical volumes may be named by an exact drive designator such as `E:` or by an
+exact volume-GUID path such as `\\?\Volume{GUID}\`. Run the command from an
+elevated terminal and close all files and applications using the volume. The
+CLI obtains an exclusive volume lock, determines the volume's logical and
+physical sector alignment, enables access through the final sectors, dismounts
+the filesystem, and retains the lock until the operation is complete. It does
+not modify partition tables. Physical-disk paths such as
+`\\.\PhysicalDrive0` remain unsupported.
 
 ## Binary install
 

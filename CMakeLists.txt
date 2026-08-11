@@ -134,6 +134,7 @@ if(EXFAT_RESIZE_BUILD_CLI)
             EXFAT_RESIZE_CLI_SOURCES
             src/cli.c
             src/windows/device.c
+            src/windows/device_path.c
             src/windows/entry.c
         )
     else()

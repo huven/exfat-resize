@@ -2,7 +2,11 @@
 
 function(exfat_resize_add_device_test target source test_name)
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        set(device_source ${PROJECT_SOURCE_DIR}/src/windows/device.c)
+        set(
+            device_source
+            ${PROJECT_SOURCE_DIR}/src/windows/device.c
+            ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+        )
     else()
         set(device_source ${PROJECT_SOURCE_DIR}/src/posix/device.c)
     endif()
@@ -35,6 +39,23 @@ function(exfat_resize_add_device_test target source test_name)
 endfunction()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_executable(
+        exfat_resize_windows_device_path_test
+        windows-device-path.c
+        ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+    )
+    target_include_directories(
+        exfat_resize_windows_device_path_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    exfat_resize_configure_target(exfat_resize_windows_device_path_test)
+    add_test(
+        NAME cli.windows-device-path
+        COMMAND exfat_resize_windows_device_path_test
+    )
+    set_tests_properties(cli.windows-device-path PROPERTIES LABELS cli)
+
     exfat_resize_add_device_test(
         exfat_resize_device_image_test
         device-image-windows.c

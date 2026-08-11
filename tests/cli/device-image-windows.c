@@ -131,7 +131,7 @@ static int expect_unsupported_path(const char *path)
 		device_close(&device);
 		return -1;
 	}
-	if (strstr(error, "not supported yet") == NULL) {
+	if (strstr(error, "unsupported Windows device path") == NULL) {
 		fprintf(stderr, "unexpected path-rejection diagnostic: %s\n", error);
 		return -1;
 	}
@@ -229,10 +229,8 @@ int main(void)
 	}
 	if (check_io_diagnostics(path) != 0)
 		goto cleanup;
-	if (expect_unsupported_path("E:") != 0 ||
-	    expect_unsupported_path("\\\\.\\PhysicalDrive0") != 0 ||
-	    expect_unsupported_path("//./PhysicalDrive0") != 0 ||
-	    expect_unsupported_path("\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\") != 0)
+	if (expect_unsupported_path("\\\\.\\PhysicalDrive0") != 0 ||
+	    expect_unsupported_path("//./PhysicalDrive0") != 0)
 		goto cleanup;
 
 	status = EXIT_SUCCESS;

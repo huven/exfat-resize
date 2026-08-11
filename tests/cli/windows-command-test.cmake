@@ -49,7 +49,7 @@ endfunction()
 if(TEST_CASE STREQUAL "help")
     expect_success(--help)
     foreach(required_text
-            "Usage: exfat-resize IMAGE [SIZE]"
+            "Usage: exfat-resize DEVICE [SIZE]"
             "Arguments:"
             "Desired filesystem size in bytes"
             "Options:"
@@ -59,7 +59,8 @@ if(TEST_CASE STREQUAL "help")
             "Read the safety requirements"
             "README.md distributed with exfat-resize"
             "https://github.com/huven/exfat-resize#safety"
-            "Windows volumes such as E: and volume-GUID paths are not supported yet"
+            "drive letter such as E:"
+            [[Physical-disk paths such as \\.\PhysicalDrive0 are not supported]]
     )
         require_text("${command_output}" "${required_text}")
     endforeach()
@@ -70,8 +71,8 @@ elseif(TEST_CASE STREQUAL "recovery-guidance")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/exfat-resize-Ω-missing.exfat")
     require_text("${command_output}" "exfat-resize-Ω-missing.exfat")
-    expect_no_write_failure("E:")
-    require_text("${command_output}" "Windows volume and device paths are not supported yet")
+    expect_no_write_failure([[\\.\PhysicalDrive0]])
+    require_text("${command_output}" "unsupported Windows device path")
     foreach(option -h --help -V --version)
         expect_success("${option}")
     endforeach()

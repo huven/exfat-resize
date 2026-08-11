@@ -101,7 +101,7 @@ jobs:
           if (Get-Command sh.exe -ErrorAction SilentlyContinue) {
             throw "sh.exe is unexpectedly available"
           }
-          cmake -S . -B build/windows -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake -S . -B build/windows -DEXFAT_RESIZE_BUILD_TESTS=ON
 
       - name: Build CLI, library, and tests
         run: cmake --build build/windows --config Release --parallel

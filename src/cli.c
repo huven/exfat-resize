@@ -15,13 +15,16 @@
 #endif
 
 #if defined(_WIN32)
-static const char target_name[] = "IMAGE";
-static const char introduction[] = "Grow an existing exFAT filesystem in a Windows image file.";
-static const char target_description[] = "Regular image file with the exFAT main boot sector\n"
-                                         "                     at sector zero";
+static const char target_name[] = "DEVICE";
+static const char introduction[] =
+    "Grow an existing exFAT filesystem in a Windows image file or logical volume.";
+static const char target_description[] =
+    "Regular image file, drive letter such as E:, or\n"
+    "                     volume-GUID path with the exFAT main boot sector\n"
+    "                     at sector zero";
 static const char documentation_lead[] = "";
 static const char platform_note[] =
-    "\nWindows volumes such as E: and volume-GUID paths are not supported yet.\n";
+    "\nPhysical-disk paths such as \\\\.\\PhysicalDrive0 are not supported.\n";
 #else
 static const char target_name[] = "DEVICE";
 static const char introduction[] = "Grow an existing exFAT filesystem.";
