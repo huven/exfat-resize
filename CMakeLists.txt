@@ -18,7 +18,9 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
 set(EXFAT_RESIZE_CLI_SUPPORTED OFF)
-if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR
+   CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+   CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(EXFAT_RESIZE_CLI_SUPPORTED ON)
 endif()
 
@@ -48,7 +50,7 @@ option(
 )
 
 if(EXFAT_RESIZE_BUILD_CLI AND NOT EXFAT_RESIZE_CLI_SUPPORTED)
-    message(FATAL_ERROR "The exfat-resize CLI supports only macOS and Linux")
+    message(FATAL_ERROR "The exfat-resize CLI supports only macOS, Linux, and Windows")
 endif()
 
 set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
@@ -127,10 +129,25 @@ target_include_directories(
 exfat_resize_configure_target(exfat_resize)
 
 if(EXFAT_RESIZE_BUILD_CLI)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(
+            EXFAT_RESIZE_CLI_SOURCES
+            src/cli.c
+            src/windows/device.c
+            src/windows/entry.c
+        )
+    else()
+        set(
+            EXFAT_RESIZE_CLI_SOURCES
+            src/cli.c
+            src/posix/device.c
+            src/posix/entry.c
+        )
+    endif()
+
     add_executable(
         exfat-resize
-        src/device.c
-        src/main.c
+        ${EXFAT_RESIZE_CLI_SOURCES}
     )
 
     target_include_directories(
@@ -154,11 +171,19 @@ if(EXFAT_RESIZE_BUILD_CLI)
 
     exfat_resize_configure_target(exfat-resize)
 
+    if(MINGW)
+        target_link_options(exfat-resize PRIVATE -municode)
+    endif()
+endif()
+
+set(EXFAT_RESIZE_INSTALL_MANPAGE OFF)
+if(EXFAT_RESIZE_BUILD_CLI AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
     configure_file(
         docs/exfat-resize.8.in
         ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
         @ONLY
     )
+    set(EXFAT_RESIZE_INSTALL_MANPAGE ON)
 endif()
 
 configure_package_config_file(
@@ -196,14 +221,16 @@ if(EXFAT_RESIZE_BUILD_CLI)
         COMPONENT
             Runtime
     )
-    install(
-        FILES
-            ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
-        DESTINATION
-            ${CMAKE_INSTALL_MANDIR}/man8
-        COMPONENT
-            Runtime
-    )
+    if(EXFAT_RESIZE_INSTALL_MANPAGE)
+        install(
+            FILES
+                ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
+            DESTINATION
+                ${CMAKE_INSTALL_MANDIR}/man8
+            COMPONENT
+                Runtime
+        )
+    endif()
 endif()
 
 install(

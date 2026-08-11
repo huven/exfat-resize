@@ -1,26 +1,39 @@
 /* SPDX-License-Identifier: MIT */
 
-#define _POSIX_C_SOURCE 200809L
+#include "cli.h"
 
 #include "device.h"
 #include "exfat_resize.h"
 
-#include <errno.h>
-#include <getopt.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #ifndef EXFAT_RESIZE_BUILD_VERSION
 #error "EXFAT_RESIZE_BUILD_VERSION must be provided by the build system"
 #endif
 
+#if defined(_WIN32)
+static const char target_name[] = "IMAGE";
+static const char introduction[] = "Grow an existing exFAT filesystem in a Windows image file.";
+static const char target_description[] = "Regular image file with the exFAT main boot sector\n"
+                                         "                     at sector zero";
+static const char documentation_lead[] = "";
+static const char platform_note[] =
+    "\nWindows volumes such as E: and volume-GUID paths are not supported yet.\n";
+#else
+static const char target_name[] = "DEVICE";
+static const char introduction[] = "Grow an existing exFAT filesystem.";
+static const char target_description[] = "Regular file or raw block device with the exFAT\n"
+                                         "                     main boot sector at sector zero";
+static const char documentation_lead[] = "  See exfat-resize(8).\n";
+static const char platform_note[] = "";
+#endif
+
 static void print_usage(FILE *stream)
 {
-	fprintf(stream, "Usage: exfat-resize DEVICE [SIZE]\n");
+	fprintf(stream, "Usage: exfat-resize %s [SIZE]\n", target_name);
 }
 
 static void print_no_write_guidance(void)
@@ -30,15 +43,21 @@ static void print_no_write_guidance(void)
 	    "appropriate\n");
 }
 
+int cli_report_startup_error(const char *message)
+{
+	fprintf(stderr, "exfat-resize: %s\n", message);
+	print_no_write_guidance();
+	return EXIT_FAILURE;
+}
+
 static void print_help(void)
 {
-	printf("Usage: exfat-resize DEVICE [SIZE]\n"
+	printf("Usage: exfat-resize %s [SIZE]\n"
 	       "\n"
-	       "Grow an existing exFAT filesystem.\n"
+	       "%s\n"
 	       "\n"
 	       "Arguments:\n"
-	       "  DEVICE             Regular file or raw block device with the exFAT\n"
-	       "                     main boot sector at sector zero\n"
+	       "  %-18s %s\n"
 	       "  SIZE               Desired filesystem size in bytes\n"
 	       "                     (default: all available space)\n"
 	       "\n"
@@ -50,10 +69,13 @@ static void print_help(void)
 	       "  Make and verify a backup before using this tool.\n"
 	       "\n"
 	       "Documentation:\n"
-	       "  See exfat-resize(8).\n"
+	       "%s"
 	       "  Read the safety requirements, supported-filesystem limitations, and\n"
 	       "  recovery instructions in README.md distributed with exfat-resize or at:\n"
-	       "    https://github.com/huven/exfat-resize#safety\n");
+	       "    https://github.com/huven/exfat-resize#safety\n"
+	       "%s",
+	    target_name, introduction, target_name, target_description, documentation_lead,
+	    platform_note);
 }
 
 static const char *resize_error(enum exfat_resize_error error)
@@ -120,70 +142,100 @@ static void deallocate_memory(void *context, void *memory, size_t size)
 
 static int parse_size(const char *text, uint64_t *value)
 {
-	char *end;
-	uintmax_t parsed;
+	uint64_t parsed = 0;
 
-	if (*text == '\0' || *text == '-' || *text == '+')
+	if (*text == '\0')
 		return -1;
-	errno = 0;
-	parsed = strtoumax(text, &end, 10);
-	if (errno == ERANGE || *end != '\0' || parsed == 0 || parsed > UINT64_MAX)
+	while (*text != '\0') {
+		uint64_t digit;
+
+		if (*text < '0' || *text > '9')
+			return -1;
+		digit = (uint64_t)(*text - '0');
+		if (parsed > (UINT64_MAX - digit) / 10)
+			return -1;
+		parsed = parsed * 10 + digit;
+		++text;
+	}
+	if (parsed == 0)
 		return -1;
-	*value = (uint64_t)parsed;
+	*value = parsed;
 	return 0;
 }
 
-int main(int argc, char **argv)
+int cli_main(int argc, char **argv)
 {
-	static const struct option long_options[] = {
-		{ "help", no_argument, NULL, 'h' },
-		{ "version", no_argument, NULL, 'V' },
-		{ NULL, 0, NULL, 0 },
-	};
 	struct exfat_resize_options options;
-	struct device device = { .fd = -1 };
+	struct device device;
 	enum exfat_resize_error result;
 	enum exfat_resize_stage stage;
+	const char *positional[2];
 	uint64_t target = 0;
 	char error[512];
-	int option;
+	char io_error[256];
+	int positional_count = 0;
+	int parse_options = 1;
 	int status = EXIT_FAILURE;
+	int index;
 
-	opterr = 0;
-	while ((option = getopt_long(argc, argv, "hV", long_options, NULL)) != -1) {
-		switch (option) {
-		case 'h':
+	for (index = 1; index < argc; ++index) {
+		if (parse_options && strcmp(argv[index], "--") == 0) {
+			parse_options = 0;
+			continue;
+		}
+		if (parse_options && strcmp(argv[index], "--help") == 0) {
 			print_help();
 			return EXIT_SUCCESS;
-		case 'V':
+		}
+		if (parse_options && strcmp(argv[index], "--version") == 0) {
 			printf("exfat-resize %s\n", EXFAT_RESIZE_BUILD_VERSION);
 			return EXIT_SUCCESS;
-		default:
+		}
+		if (parse_options && argv[index][0] == '-' && argv[index][1] != '\0' &&
+		    argv[index][1] != '-') {
+			if (argv[index][1] == 'h') {
+				print_help();
+				return EXIT_SUCCESS;
+			}
+			if (argv[index][1] == 'V') {
+				printf("exfat-resize %s\n", EXFAT_RESIZE_BUILD_VERSION);
+				return EXIT_SUCCESS;
+			}
 			print_usage(stderr);
 			print_no_write_guidance();
 			return EXIT_FAILURE;
 		}
+		if (parse_options && argv[index][0] == '-' && argv[index][1] != '\0') {
+			print_usage(stderr);
+			print_no_write_guidance();
+			return EXIT_FAILURE;
+		}
+		if (positional_count == 2) {
+			print_usage(stderr);
+			print_no_write_guidance();
+			return EXIT_FAILURE;
+		}
+		positional[positional_count++] = argv[index];
 	}
-	argc -= optind;
-	argv += optind;
-	if (argc < 1 || argc > 2) {
+	if (positional_count < 1) {
 		print_usage(stderr);
 		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
-	if (argc == 2 && parse_size(argv[1], &target) != 0) {
-		fprintf(stderr, "exfat-resize: invalid size: %s\n", argv[1]);
+	if (positional_count == 2 && parse_size(positional[1], &target) != 0) {
+		fprintf(stderr, "exfat-resize: invalid size: %s\n", positional[1]);
 		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
-	if (device_open(&device, argv[0], error, sizeof(error)) != 0) {
+
+	device_init(&device);
+	if (device_open(&device, positional[0], error, sizeof(error)) != 0) {
 		fprintf(stderr, "exfat-resize: %s\n", error);
 		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
-	if (argc != 2) {
+	if (positional_count != 2)
 		target = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
-	}
 	options.allocator.context = NULL;
 	options.allocator.allocate = allocate_memory;
 	options.allocator.deallocate = deallocate_memory;
@@ -192,8 +244,9 @@ int main(int argc, char **argv)
 	if (result != EXFAT_RESIZE_SUCCESS) {
 		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
 		if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL) {
-			fprintf(stderr, "exfat-resize: %s %s: %s\n", device.io_error_operation, argv[0],
-			    strerror(device.io_error_number));
+			device_format_io_error(&device, io_error, sizeof(io_error));
+			fprintf(stderr, "exfat-resize: %s %s: %s\n", device.io_error_operation, positional[0],
+			    io_error);
 		}
 		switch (stage) {
 		case EXFAT_RESIZE_STAGE_PREFLIGHT:
@@ -219,7 +272,7 @@ int main(int argc, char **argv)
 		}
 		goto out;
 	}
-	printf("exfat-resize: resized %s\n", argv[0]);
+	printf("exfat-resize: resized %s\n", positional[0]);
 	status = EXIT_SUCCESS;
 
 out:

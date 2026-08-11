@@ -71,6 +71,12 @@ static void record_io_error(struct device *device, const char *operation, int er
 	device->io_error_number = error_number;
 }
 
+void device_init(struct device *device)
+{
+	(void)memset(device, 0, sizeof(*device));
+	device->fd = -1;
+}
+
 int device_open(struct device *device, const char *path, char *error, size_t error_size)
 {
 	struct stat st;
@@ -191,6 +197,11 @@ void device_close(struct device *device)
 	if (device->fd >= 0)
 		(void)close(device->fd);
 	device->fd = -1;
+}
+
+void device_format_io_error(const struct device *device, char *error, size_t error_size)
+{
+	(void)snprintf(error, error_size, "%s", strerror(device->io_error_number));
 }
 
 static int transfer(

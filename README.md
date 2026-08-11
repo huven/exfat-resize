@@ -1,8 +1,9 @@
 # exfat-resize
 
 exfat-resize provides a portable C11 library and command-line tool for growing
-an existing exFAT filesystem in a regular file or raw block device. The backing
-object must be enlarged before the filesystem is resized.
+an existing exFAT filesystem in a regular file or raw block device. On Windows,
+the initial CLI support is limited to regular image files. The backing object
+must be enlarged before the filesystem is resized.
 
 ## Quick install
 
@@ -14,12 +15,12 @@ Building requires CMake 3.20 or newer and a C11 compiler.
     cmake --install build
 
 The install command may require elevated privileges depending on the destination
-prefix. Run `exfat-resize --help` for a usage summary or `man exfat-resize` for
-the complete command-line reference.
+prefix. Run `exfat-resize --help` for a usage summary. On macOS and Linux,
+`man exfat-resize` provides the complete command-line reference.
 
 For a prebuilt Linux CLI, see [Binary install](#binary-install).
 
-For a Windows library build, see [Windows](#windows) under Build and test.
+For a Windows CLI or library build, see [Windows](#windows) under Build and test.
 
 ## Safety
 
@@ -66,7 +67,8 @@ only when the command explicitly reports that it is safe.
 With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of
 bytes. It is rounded down to a whole filesystem sector. Shrinking is not
-supported.
+supported. On Windows, `device` must currently name a regular image file; drive
+letters and Windows volume or device paths are not yet accepted.
 
 Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
 to use all available space:
@@ -74,7 +76,8 @@ to use all available space:
     truncate -s +2G image.exfat
     exfat-resize image.exfat
 
-Grow the exFAT filesystem on an unmounted raw device to use all available space:
+On macOS or Linux, grow the exFAT filesystem on an unmounted raw device to use
+all available space:
 
     exfat-resize /dev/your-exfat-device
 
@@ -103,15 +106,17 @@ The filesystem must meet these prerequisites:
 The core library is designed to be portable across mainstream C11 environments
 and has no operating-system dependencies. It is continuously tested with GCC
 and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
-is a thin platform-specific wrapper around the library and is currently
-supported and tested on macOS and Linux. Porting the CLI primarily requires
-implementing device access, exclusive-access checks, and durable
-synchronization for the target platform; contributions are welcome.
+is a thin platform-specific wrapper around the library. macOS and Linux support
+regular images and raw block devices. Windows currently supports only regular
+image files; logical volumes such as `E:`, volume-GUID paths, and other Windows
+device namespaces are rejected before opening. Windows paths are accepted as
+Unicode paths.
 
 The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
-Linux. Persistence ultimately depends on the operating system and storage
-device honoring their flush requests.
+Linux. Windows image files are opened without sharing by using `CreateFileW`
+and synchronized with `FlushFileBuffers`. Persistence ultimately depends on the
+operating system and storage device honoring their flush requests.
 On macOS, platform mechanisms reject known mounted or otherwise busy backing
 objects. The CLI retains its requested locks for the complete operation;
 regular-file locks remain advisory as described above.
@@ -186,8 +191,8 @@ failure guarantees.
 
 Downstream CMake projects can use `add_subdirectory()` and link
 `exfat_resize::exfat_resize`. The install target also provides the header,
-static library, CLI executable, manual page, and CMake package files. This
-README and the exact MIT license are installed under CMake's
+static library, CLI executable, CMake package files, and a manual page on macOS
+and Linux. This README and the exact MIT license are installed under CMake's
 `CMAKE_INSTALL_DOCDIR`.
 Installed CMake packages use same-major version compatibility, so consumers
 can require a compatible 1.x release:
@@ -232,13 +237,20 @@ For a custom installation prefix:
 
 ### Windows
 
-The CLI is not currently supported on Windows, so a standalone CMake build
-includes only the library and its tests by default:
+The Windows build includes the image-file CLI and the library by default. It
+uses only native Windows APIs and does not require a POSIX compatibility layer:
 
     cmake -S . -B build
     cmake --build build --config Release
-    ctest --test-dir build --build-config Release --output-on-failure -L library
+    ctest --test-dir build --build-config Release --output-on-failure -L "library|cli|package-native"
     cmake --install build --config Release
+
+The Windows CLI accepts regular image-file paths, including Unicode paths and
+long absolute file paths. It assigns image files a 512-byte virtual sector
+size, requests exclusive file access for the complete resize, and flushes
+filesystem metadata through the Windows file API. Direct logical-volume and
+block-device access is intentionally deferred; invocations such as
+`exfat-resize E:` are not yet supported.
 
 ## Binary install
 

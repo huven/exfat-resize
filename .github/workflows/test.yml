@@ -61,7 +61,7 @@ jobs:
         run: mandoc -T lint build/exfat-resize.8
 
   windows:
-    name: Windows (MSVC, library)
+    name: Windows (MSVC)
     runs-on: windows-latest
 
     steps:
@@ -95,21 +95,21 @@ jobs:
 
           "PATH=$filteredPath" >> $env:GITHUB_ENV
 
-      - name: Configure library and tests without POSIX tools
+      - name: Configure CLI, library, and tests without POSIX tools
         shell: pwsh
         run: |
           if (Get-Command sh.exe -ErrorAction SilentlyContinue) {
             throw "sh.exe is unexpectedly available"
           }
-          cmake -S . -B build/windows -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake -S . -B build/windows -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
 
-      - name: Build library and tests
+      - name: Build CLI, library, and tests
         run: cmake --build build/windows --config Release --parallel
 
-      - name: Run library tests
+      - name: Run library and CLI tests
         run: >-
           ctest --test-dir build/windows --build-config Release
-          --output-on-failure -L library
+          --output-on-failure -L "library|cli|package-native"
 
   linux-big-endian:
     name: Linux (s390x, big endian)
