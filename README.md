@@ -103,11 +103,12 @@ example, this requests a 512 GiB partition and filesystem:
 This mode is deliberately opt-in: changing a partition table has a wider
 effect than changing metadata within the selected filesystem. It requires an
 elevated terminal, an explicit size, a single-disk-extent basic GPT or MBR data
-partition, and enough immediately trailing unallocated space. The CLI checks
-the volume-to-disk mapping and current physical partition layout before using
-Windows' documented [`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It
-never moves the partition start or another partition, and never shrinks a
-partition. It validates both exFAT boot regions before requesting the change.
+partition with no overlapping layout entry, and enough immediately trailing
+unallocated space. The CLI checks the volume-to-disk mapping and current
+physical partition layout before using Windows' documented
+[`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It never moves the
+partition start or another partition, and never shrinks a partition. It
+validates both exFAT boot regions before requesting the change.
 
 The full filesystem preflight runs after the partition is enlarged. If that
 preflight fails, the original filesystem remains authoritative inside the
@@ -169,9 +170,9 @@ and has no operating-system dependencies. It is continuously tested with GCC
 and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
 is a thin platform-specific wrapper around the library. macOS and Linux support
 regular images and raw block devices. Windows supports regular images, drive
-designators such as `E:`, and volume-GUID paths. Physical disks such as
-`\\.\PhysicalDrive0` and other Windows device namespaces remain unsupported.
-Windows paths are accepted as Unicode paths.
+designators such as `E:`, and volume-GUID paths. Physical-disk paths such as
+`\\.\PhysicalDrive0`, and device-namespace paths other than those accepted
+volume forms, remain unsupported. Windows paths are accepted as Unicode paths.
 
 The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on

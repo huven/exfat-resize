@@ -76,6 +76,8 @@ function Invoke-ExpectedFailure {
         "exfat-resize unexpectedly succeeded with arguments: $Arguments"
     Assert-Condition (($Output -join "`n") -match [regex]::Escape($ExpectedText)) `
         "exfat-resize did not report '$ExpectedText'"
+    Assert-Condition (($Output -join "`n") -notmatch 'exfat-resize: [A-Za-z]::') `
+        "exfat-resize printed duplicate punctuation after a drive designator"
 }
 
 function Test-VolumeTarget {
@@ -146,6 +148,16 @@ function Test-VolumeTarget {
             "Partition changed without --grow-partition"
 
         if ($TargetType -eq "DriveLetter") {
+            Invoke-ExpectedFailure `
+                -Arguments @(
+                    "--grow-partition", $Target, [string] ([uint64] ($Partition.Size + 1))
+                ) `
+                -ExpectedText "target does not add enough usable clusters"
+            $Partition = Get-Partition -DiskNumber $Disk.Number `
+                -PartitionNumber $Partition.PartitionNumber
+            Assert-Condition ($Partition.Size -eq 96MB) `
+                "Partition changed for a target that cannot grow the filesystem"
+
             Invoke-ExpectedFailure `
                 -Arguments @("--grow-partition", $Target, [string] ([uint64] 256MB)) `
                 -ExpectedText "not enough immediately trailing unallocated space"

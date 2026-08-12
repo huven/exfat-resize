@@ -178,13 +178,16 @@ static int parse_size(const char *text, uint64_t *value)
 	return 0;
 }
 
-static enum exfat_resize_error validate_source_boot_regions(
-    const struct exfat_resize_block_device *device)
+static enum exfat_resize_error validate_partition_growth_preflight(
+    const struct exfat_resize_block_device *device, uint64_t target_size)
 {
+	struct exfat_resize_device_geometry target_device_geometry;
 	struct exfat_resize_sector_adapter adapter;
+	struct exfat_resize_geometry target_geometry;
 	struct exfat_resize_geometry geometry;
 	enum exfat_resize_error result;
 	unsigned char *buffer;
+	uint64_t target_sector_count;
 	uint32_t filesystem_sector_size;
 
 	buffer = malloc(EXFAT_RESIZE_MAX_SECTOR_SIZE);
@@ -199,8 +202,41 @@ static enum exfat_resize_error validate_source_boot_regions(
 	if (result == EXFAT_RESIZE_SUCCESS)
 		result = exfat_resize_read_boot_regions(
 		    &adapter.device, buffer, EXFAT_RESIZE_MAX_SECTOR_SIZE, &geometry);
+	if (result == EXFAT_RESIZE_SUCCESS) {
+		target_sector_count = target_size / filesystem_sector_size;
+		if (target_sector_count <= geometry.volume_sector_count) {
+			result = EXFAT_RESIZE_INSUFFICIENT_GROWTH;
+		} else {
+			target_device_geometry.logical_sector_size = filesystem_sector_size;
+			target_device_geometry.sector_count = target_sector_count;
+			result = exfat_resize_plan_growth(
+			    &target_device_geometry, &geometry, target_sector_count, &target_geometry);
+		}
+	}
 	free(buffer);
 	return result;
+}
+
+static const char *device_error_separator(const char *path)
+{
+#if defined(_WIN32)
+	size_t length = strlen(path);
+
+	if (length != 0 && path[length - 1] == ':')
+		return " ";
+#else
+	(void)path;
+#endif
+	return ": ";
+}
+
+static void print_device_io_error(const struct device *device, const char *path)
+{
+	char error[256];
+
+	device_format_io_error(device, error, sizeof(error));
+	fprintf(stderr, "exfat-resize: %s %s%s%s\n", device->io_error_operation, path,
+	    device_error_separator(path), error);
 }
 
 static void print_partition_grown_guidance(void)
@@ -219,7 +255,6 @@ int cli_main(int argc, char **argv)
 	const char *positional[2];
 	uint64_t target = 0;
 	char error[512];
-	char io_error[256];
 	int positional_count = 0;
 	int parse_options = 1;
 	int grow_partition = 0;
@@ -315,19 +350,15 @@ int cli_main(int argc, char **argv)
 		if (target > current_size) {
 			/*
 			 * The library's complete preflight needs the requested target to fit the
-			 * device. Validate the source boot regions before changing that device's
-			 * partition, then let the normal resize perform the full preflight.
+			 * device. Validate the source boot regions and target geometry before
+			 * changing that device's partition, then run the complete preflight.
 			 */
-			result = validate_source_boot_regions(&device.block_device);
+			result = validate_partition_growth_preflight(&device.block_device, target);
 			if (result != EXFAT_RESIZE_SUCCESS) {
-				fprintf(stderr,
-				    "exfat-resize: cannot grow partition: source validation failed: %s\n",
+				fprintf(stderr, "exfat-resize: cannot grow partition: preflight failed: %s\n",
 				    resize_error(result));
-				if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL) {
-					device_format_io_error(&device, io_error, sizeof(io_error));
-					fprintf(stderr, "exfat-resize: %s %s: %s\n", device.io_error_operation,
-					    positional[0], io_error);
-				}
+				if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
+					print_device_io_error(&device, positional[0]);
 				print_no_write_guidance();
 				goto out;
 			}
@@ -354,11 +385,8 @@ int cli_main(int argc, char **argv)
 	result = exfat_resize(&device.block_device, target, &options, &stage);
 	if (result != EXFAT_RESIZE_SUCCESS) {
 		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
-		if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL) {
-			device_format_io_error(&device, io_error, sizeof(io_error));
-			fprintf(stderr, "exfat-resize: %s %s: %s\n", device.io_error_operation, positional[0],
-			    io_error);
-		}
+		if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
+			print_device_io_error(&device, positional[0]);
 		switch (stage) {
 		case EXFAT_RESIZE_STAGE_PREFLIGHT:
 			print_no_write_guidance();

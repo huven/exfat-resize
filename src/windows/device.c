@@ -59,7 +59,10 @@ static void windows_error_message(DWORD error_number, char *message, size_t size
 
 static void set_error(char *error, size_t size, const char *path, const char *message)
 {
-	(void)snprintf(error, size, "%s: %s", path, message);
+	size_t length = strlen(path);
+	const char *separator = length != 0 && path[length - 1] == ':' ? " " : ": ";
+
+	(void)snprintf(error, size, "%s%s%s", path, separator, message);
 }
 
 static void set_windows_error(char *error, size_t size, const char *path, DWORD error_number)
@@ -238,6 +241,10 @@ static int volume_sector_sizes(HANDLE handle,
 			    error, error_size, path, "cannot determine the volume sector size", GetLastError());
 			return -1;
 		}
+		if (returned < sizeof(geometry.Geometry)) {
+			set_error(error, error_size, path, "the volume returned invalid disk geometry");
+			return -1;
+		}
 		logical = geometry.Geometry.BytesPerSector;
 		physical = logical;
 	}
@@ -327,6 +334,10 @@ static int open_volume(struct device *device, const char *path, char *error, siz
 	        &returned, NULL)) {
 		set_windows_operation_error(
 		    error, error_size, path, "cannot determine the volume size", GetLastError());
+		goto fail_after_open;
+	}
+	if (returned < sizeof(length)) {
+		set_error(error, error_size, path, "the volume returned an invalid size");
 		goto fail_after_open;
 	}
 	if (length.Length.QuadPart < sector_size) {

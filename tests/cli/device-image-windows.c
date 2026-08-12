@@ -27,15 +27,20 @@ static int create_image(wchar_t *path, size_t path_size)
 	}
 	file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, TRUNCATE_EXISTING,
 	    FILE_ATTRIBUTE_NORMAL, NULL);
-	if (file == INVALID_HANDLE_VALUE)
+	if (file == INVALID_HANDLE_VALUE) {
+		(void)DeleteFileW(path);
 		return -1;
+	}
 	size.QuadPart = 4096;
 	if (!SetFilePointerEx(file, size, NULL, FILE_BEGIN) || !SetEndOfFile(file)) {
 		(void)CloseHandle(file);
+		(void)DeleteFileW(path);
 		return -1;
 	}
-	if (!CloseHandle(file))
+	if (!CloseHandle(file)) {
+		(void)DeleteFileW(path);
 		return -1;
+	}
 	return 0;
 }
 

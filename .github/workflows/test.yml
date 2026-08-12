@@ -135,7 +135,7 @@ jobs:
           sudo apt-get update && sudo apt-get install --yes
           exfatprogs exfat-fuse gdisk qemu-utils
 
-      - name: Prepare an enlarged partition with an undersized exFAT filesystem
+      - name: Prepare an exFAT partition with trailing unallocated space
         run: sh tests/cli/prepare-windows-volume.sh build/windows-volume-fixture
 
       - name: Upload Windows logical-volume fixture
