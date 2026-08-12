@@ -273,8 +273,17 @@ int cli_main(int argc, char **argv)
 		case EXFAT_RESIZE_STAGE_COMPLETED:
 			break;
 		}
+	}
+	if (device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+		fprintf(stderr, "exfat-resize: %s\n", error);
+		if (result == EXFAT_RESIZE_SUCCESS)
+			fprintf(stderr,
+			    "exfat-resize: the resize completed and was synchronized; remount the "
+			    "volume and run a filesystem checker; do not retry the resize\n");
 		goto out;
 	}
+	if (result != EXFAT_RESIZE_SUCCESS)
+		goto out;
 	printf("exfat-resize: resized %s\n", positional[0]);
 	status = EXIT_SUCCESS;
 

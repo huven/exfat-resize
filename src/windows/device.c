@@ -333,9 +333,7 @@ static int open_volume(struct device *device, const char *path, char *error, siz
 		goto fail_after_open;
 	}
 	if (volume_control(handle, FSCTL_ALLOW_EXTENDED_DASD_IO, path,
-	        "cannot enable access to the complete volume", error, error_size) != 0 ||
-	    volume_control(handle, FSCTL_DISMOUNT_VOLUME, path, "cannot dismount the volume", error,
-	        error_size) != 0)
+	        "cannot enable access to the complete volume", error, error_size) != 0)
 		goto fail_after_allocation;
 
 	configure_device(device, handle, sector_size, (uint64_t)length.Length.QuadPart / sector_size,
@@ -364,6 +362,14 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	}
 	set_error(error, error_size, path, "unsupported Windows path");
 	return -1;
+}
+
+int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
+{
+	if (device->volume_io_buffer == NULL)
+		return 0;
+	return volume_control(device->handle, FSCTL_DISMOUNT_VOLUME, path,
+	    "cannot dismount the volume after resizing", error, error_size);
 }
 
 void device_close(struct device *device)

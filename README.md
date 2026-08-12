@@ -41,11 +41,12 @@ invariants needed for the resize.
 
 Prevent all other access for the complete operation. On macOS and Linux, keep
 the filesystem unmounted. For a Windows logical volume, close all files and
-applications using it; the CLI obtains an exclusive volume lock and dismounts
-the filesystem before accessing it. When resizing a regular image file, also
-ensure it is not attached through a loop or disk-image device. Platform locking
-helps detect cooperating users, but regular-file locks are advisory and cannot
-exclude a process that ignores them.
+applications using it; the CLI obtains an exclusive volume lock, retains it
+while accessing the volume, and dismounts the filesystem before releasing the
+lock. When resizing a regular image file, also ensure it is not attached through
+a loop or disk-image device. Platform locking helps detect cooperating users,
+but regular-file locks are advisory and cannot exclude a process that ignores
+them.
 
 The backing object or partition must already be enlarged. The tool does not
 enlarge regular files or partitions. A failed or interrupted resize is not
@@ -123,9 +124,10 @@ The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
 Linux. Windows image files are opened without sharing by using `CreateFileW`
 and synchronized with `FlushFileBuffers`. Windows logical volumes are opened
-for direct I/O, locked with `FSCTL_LOCK_VOLUME`, dismounted, and kept locked for
-the complete operation. Persistence ultimately depends on the operating system
-and storage device honoring their flush requests.
+for direct I/O, locked with `FSCTL_LOCK_VOLUME`, and kept locked for the complete
+operation. After the final synchronization barrier, the CLI dismounts the
+volume before releasing the lock. Persistence ultimately depends on the
+operating system and storage device honoring their flush requests.
 On macOS, platform mechanisms reject known mounted or otherwise busy backing
 objects. The CLI retains its requested locks for the complete operation;
 regular-file locks remain advisory as described above.
@@ -263,9 +265,10 @@ Logical volumes may be named by an exact drive designator such as `E:` or by an
 exact volume-GUID path such as `\\?\Volume{GUID}\`. Run the command from an
 elevated terminal and close all files and applications using the volume. The
 CLI obtains an exclusive volume lock, determines the volume's logical and
-physical sector alignment, enables access through the final sectors, dismounts
-the filesystem, and retains the lock until the operation is complete. It does
-not modify partition tables. Physical-disk paths such as
+physical sector alignment, enables access through the final sectors, and
+retains the lock until all writes have been synchronized. It then dismounts the
+filesystem before releasing the lock. It does not modify partition tables.
+Physical-disk paths such as
 `\\.\PhysicalDrive0` remain unsupported.
 
 ## Binary install

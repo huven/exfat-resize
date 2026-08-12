@@ -192,6 +192,15 @@ fail_after_open:
 	return -1;
 }
 
+int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
+{
+	(void)device;
+	(void)path;
+	(void)error;
+	(void)error_size;
+	return 0;
+}
+
 void device_close(struct device *device)
 {
 	if (device->fd >= 0)
