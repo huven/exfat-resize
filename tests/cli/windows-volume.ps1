@@ -89,8 +89,14 @@ function Test-VolumeTarget {
             "Volume $DriveLetter`: is not exFAT"
         Assert-Condition ($Partition.Size -eq 160MB) `
             "Partition size is $($Partition.Size), expected 160 MiB"
-        Assert-Condition ($Volume.Size -eq 96MB) `
-            "Initial filesystem size is $($Volume.Size), expected 96 MiB"
+        # Get-Volume.Size is usable cluster capacity, not the exFAT VolumeLength.
+        $InitialFileSystemSize = [uint64] $Volume.Size
+        Assert-Condition (
+            $InitialFileSystemSize -ge 90MB -and $InitialFileSystemSize -le 100MB
+        ) "Initial usable filesystem capacity is $InitialFileSystemSize, expected about 94 MiB"
+        Assert-Condition (($Partition.Size - $InitialFileSystemSize) -ge 60MB) `
+            "Initial filesystem does not leave enough room to test growth"
+        Write-Host "Initial usable filesystem capacity: $InitialFileSystemSize bytes"
 
         $ActualHash = (Get-FileHash "$DriveLetter`:\payload.bin" -Algorithm SHA256).Hash
         Assert-Condition ($ActualHash -eq $PayloadHash) "Initial payload hash differs"
@@ -113,8 +119,14 @@ function Test-VolumeTarget {
         $Volume = Wait-Volume $DriveLetter
         Invoke-CleanCheck $DriveLetter
         $Volume = Wait-Volume $DriveLetter
-        Assert-Condition ($Volume.Size -eq $Partition.Size) `
-            "Filesystem size $($Volume.Size) does not match partition size $($Partition.Size)"
+        $FinalFileSystemSize = [uint64] $Volume.Size
+        Write-Host "Final usable filesystem capacity: $FinalFileSystemSize bytes"
+        Assert-Condition ($FinalFileSystemSize -ge ($InitialFileSystemSize + 60MB)) `
+            "Filesystem capacity grew by less than 60 MiB"
+        Assert-Condition ($FinalFileSystemSize -le $Partition.Size) `
+            "Filesystem capacity exceeds partition size"
+        Assert-Condition (($Partition.Size - $FinalFileSystemSize) -le 4MB) `
+            "Filesystem leaves more than 4 MiB of the partition unavailable"
 
         $ActualHash = (Get-FileHash "$DriveLetter`:\payload.bin" -Algorithm SHA256).Hash
         Assert-Condition ($ActualHash -eq $PayloadHash) `
@@ -127,7 +139,8 @@ function Test-VolumeTarget {
     finally {
         Set-Location $env:GITHUB_WORKSPACE
         if ($Mounted) {
-            Dismount-DiskImage -ImagePath $ImagePath -StorageType VHDX -ErrorAction Continue
+            Dismount-DiskImage -ImagePath $ImagePath -StorageType VHDX -ErrorAction Continue |
+                Out-Null
         }
     }
 }
