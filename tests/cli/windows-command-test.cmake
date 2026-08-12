@@ -50,6 +50,7 @@ if(TEST_CASE STREQUAL "help")
     expect_success(--help)
     foreach(required_text
             "Usage: exfat-resize DEVICE [SIZE]"
+            "exfat-resize --grow-partition DEVICE SIZE"
             "Arguments:"
             "Desired filesystem size in bytes"
             "Options:"
@@ -60,6 +61,8 @@ if(TEST_CASE STREQUAL "help")
             "README.md distributed with exfat-resize"
             "https://github.com/huven/exfat-resize#safety"
             "drive letter such as E:"
+            "--grow-partition"
+            "Grow a basic partition to explicit SIZE when needed"
             [[Physical-disk paths such as \\.\PhysicalDrive0 are not supported]]
     )
         require_text("${command_output}" "${required_text}")
@@ -67,6 +70,8 @@ if(TEST_CASE STREQUAL "help")
 elseif(TEST_CASE STREQUAL "recovery-guidance")
     expect_no_write_failure()
     expect_no_write_failure(--unknown)
+    expect_no_write_failure(--grow-partition [[E:]])
+    require_text("${command_output}" "--grow-partition requires an explicit SIZE")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 0)
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/exfat-resize-Ω-missing.exfat")

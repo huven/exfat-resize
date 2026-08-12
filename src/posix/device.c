@@ -192,6 +192,21 @@ fail_after_open:
 	return -1;
 }
 
+int device_grow_partition(struct device *device,
+    const char *path,
+    uint64_t target_size,
+    int *partition_grown,
+    char *error,
+    size_t error_size)
+{
+	(void)device;
+	(void)target_size;
+	*partition_grown = 0;
+	(void)snprintf(error, error_size,
+	    "%s: --grow-partition is supported only for logical Windows volumes", path);
+	return -1;
+}
+
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
 {
 	(void)device;

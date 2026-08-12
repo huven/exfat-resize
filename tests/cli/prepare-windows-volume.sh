@@ -34,10 +34,8 @@ done
 total_sectors=393216
 partition_start=2048
 initial_sectors=196608
-target_sectors=327680
 initial_end=$((partition_start + initial_sectors - 1))
-target_end=$((partition_start + target_sectors - 1))
-target_bytes=$((target_sectors * 512))
+initial_bytes=$((initial_sectors * 512))
 
 mkdir -p "$mountpoint"
 truncate -s "$((total_sectors * 512))" "$raw"
@@ -83,20 +81,11 @@ sync
 sudo umount "$mountpoint"
 test_mount=
 sudo fsck.exfat -n "$partition"
-detach_raw_disk
-
-sgdisk --delete=1 \
-	--new="1:${partition_start}:${target_end}" \
-	--typecode=1:0700 \
-	--change-name=1:EXRTEST "$raw" >/dev/null
-
-attach_raw_disk
 actual_bytes=$(sudo blockdev --getsize64 "$partition")
-if [ "$actual_bytes" -ne "$target_bytes" ]; then
-	echo "wrong enlarged partition size: $actual_bytes, expected $target_bytes" >&2
+if [ "$actual_bytes" -ne "$initial_bytes" ]; then
+	echo "wrong initial partition size: $actual_bytes, expected $initial_bytes" >&2
 	exit 1
 fi
-sudo fsck.exfat -n "$partition"
 sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g),ro" "$partition" "$mountpoint"
 test_mount=$mountpoint
 actual_hash=$(sha256sum "$mountpoint/payload.bin" | awk '{ print $1 }')

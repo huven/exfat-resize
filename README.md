@@ -3,7 +3,8 @@
 exfat-resize provides a portable C11 library and command-line tool for growing
 an existing exFAT filesystem in a regular file or raw block device. On Windows,
 the CLI supports regular image files and logical volumes. The backing object
-must be enlarged before the filesystem is resized.
+must normally be enlarged before the filesystem is resized; an opt-in Windows
+mode can enlarge a supported partition as part of an explicit-size resize.
 
 ## Quick install
 
@@ -31,8 +32,8 @@ For a Windows CLI or library build, see [Windows](#windows) under Build and test
 
 Verify that the supplied path resolves to the intended filesystem. Paths may
 resolve through symbolic links, and the selected device must present the exFAT
-main boot sector at sector zero; the tool does not inspect or modify partition
-tables.
+main boot sector at sector zero. The CLI does not modify partition tables unless
+the Windows-only `--grow-partition` option is explicitly supplied.
 
 Before resizing, run an appropriate exFAT filesystem checker while the
 filesystem is unmounted and ensure the check completes successfully.
@@ -48,11 +49,12 @@ a loop or disk-image device. Platform locking helps detect cooperating users,
 but regular-file locks are advisory and cannot exclude a process that ignores
 them.
 
-The backing object or partition must already be enlarged. The tool does not
-enlarge regular files or partitions. A failed or interrupted resize is not
-automatically repaired, rolled back, or resumable. Follow the recovery guidance
-printed with an error; depending on the stage reached, recovery may require a
-filesystem checker or restoring the verified backup.
+The backing object or partition must already be enlarged unless a supported
+Windows logical volume is used with `--grow-partition`. The tool never enlarges
+regular files. A failed or interrupted resize is not automatically repaired,
+rolled back, or resumable. Follow the recovery guidance printed with an error;
+depending on the stage reached, recovery may require a filesystem checker or
+restoring the verified backup.
 
 Every normal error exit prints stage-specific recovery guidance. If the command
 terminates abnormally without printing stage-specific recovery guidance, for
@@ -64,6 +66,7 @@ only when the command explicitly reports that it is safe.
 ## Usage
 
     exfat-resize device [ size ]
+    exfat-resize --grow-partition windows-volume size
     exfat-resize -h | --help
     exfat-resize -V | --version
 
@@ -88,6 +91,56 @@ On Windows, run an elevated terminal, close applications using the logical
 volume, and identify it by drive letter or volume-GUID path:
 
     exfat-resize E:
+
+### Growing a Windows partition
+
+For a logical Windows volume, `--grow-partition` asks the CLI to enlarge its
+partition when the explicit filesystem size does not currently fit. For
+example, this requests a 512 GiB partition and filesystem:
+
+    exfat-resize --grow-partition E: 549755813888
+
+This mode is deliberately opt-in: changing a partition table has a wider
+effect than changing metadata within the selected filesystem. It requires an
+elevated terminal, an explicit size, a single-disk-extent basic GPT or MBR data
+partition, and enough immediately trailing unallocated space. The CLI checks
+the volume-to-disk mapping and current physical partition layout before using
+Windows' documented [`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It
+never moves the partition start or another partition, and never shrinks a
+partition. It validates both exFAT boot regions before requesting the change.
+
+The full filesystem preflight runs after the partition is enlarged. If that
+preflight fails, the original filesystem remains authoritative inside the
+larger partition; do not shrink the partition. Correct the reported problem
+and retry the filesystem resize. Without `--grow-partition`, the CLI never
+changes a partition table.
+
+As a fallback for layouts this initial implementation does not support, boot
+[GParted Live][gparted-live], identify the whole target disk carefully, and use
+the included terminal rather than GParted's graphical exFAT resize action:
+
+```text
+sudo parted /dev/sdX
+(parted) unit s
+(parted) print free
+(parted) resizepart PARTITION_NUMBER NEW_END_SECTOR
+(parted) quit
+```
+
+[GNU Parted documents][resizepart] that `resizepart` changes the partition end
+without modifying the filesystem. Record the start sector first, select only
+an end sector in the immediately following free extent, and verify afterwards
+that the start is unchanged. Do not use this procedure to shrink exFAT.
+
+Windows DiskPart is not a substitute: its [documented `extend`
+operation][diskpart-extend] automatically extends NTFS and fails without a
+partition change for other formatted filesystems. Do not rely on claims that it
+will silently extend only an exFAT partition.
+
+[diskpart-extend]: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/extend
+[gparted-live]: https://gparted.org/livecd.php
+[resizepart]: https://www.gnu.org/software/parted/manual/html_node/resizepart.html
+[windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
 
 Only filesystems meeting the
 [compatibility requirements](#filesystem-compatibility) below are supported.
@@ -267,9 +320,10 @@ elevated terminal and close all files and applications using the volume. The
 CLI obtains an exclusive volume lock, determines the volume's logical and
 physical sector alignment, enables access through the final sectors, and
 retains the lock until all writes have been synchronized. It then dismounts the
-filesystem before releasing the lock. It does not modify partition tables.
-Physical-disk paths such as
-`\\.\PhysicalDrive0` remain unsupported.
+filesystem before releasing the lock. With an explicit size and
+`--grow-partition`, it can map a simple volume to its physical disk and request
+that Windows enlarge the containing basic partition first. Physical-disk paths
+such as `\\.\PhysicalDrive0` remain unsupported as command targets.
 
 ## Binary install
 

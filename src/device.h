@@ -29,6 +29,12 @@ struct device {
 
 void device_init(struct device *device);
 int device_open(struct device *device, const char *path, char *error, size_t error_size);
+int device_grow_partition(struct device *device,
+    const char *path,
+    uint64_t target_size,
+    int *partition_grown,
+    char *error,
+    size_t error_size);
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size);
 void device_format_io_error(const struct device *device, char *error, size_t error_size);
 void device_close(struct device *device);

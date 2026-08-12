@@ -2,9 +2,14 @@
 
 #include "cli.h"
 
+#include "block_device.h"
+#include "boot_region.h"
 #include "device.h"
 #include "exfat_resize.h"
+#include "geometry.h"
+#include "sector_adapter.h"
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +21,8 @@
 
 #if defined(_WIN32)
 static const char target_name[] = "DEVICE";
+static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n"
+                            "       exfat-resize --grow-partition DEVICE SIZE\n";
 static const char introduction[] =
     "Grow an existing exFAT filesystem in a Windows image file or logical volume.";
 static const char target_description[] =
@@ -23,20 +30,24 @@ static const char target_description[] =
     "                     volume-GUID path with the exFAT main boot sector\n"
     "                     at sector zero";
 static const char documentation_lead[] = "";
+static const char platform_options[] =
+    "  --grow-partition   Grow a basic partition to explicit SIZE when needed\n";
 static const char platform_note[] =
     "\nPhysical-disk paths such as \\\\.\\PhysicalDrive0 are not supported.\n";
 #else
 static const char target_name[] = "DEVICE";
+static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n";
 static const char introduction[] = "Grow an existing exFAT filesystem.";
 static const char target_description[] = "Regular file or raw block device with the exFAT\n"
                                          "                     main boot sector at sector zero";
 static const char documentation_lead[] = "  See exfat-resize(8).\n";
+static const char platform_options[] = "";
 static const char platform_note[] = "";
 #endif
 
 static void print_usage(FILE *stream)
 {
-	fprintf(stream, "Usage: exfat-resize %s [SIZE]\n", target_name);
+	fputs(usage, stream);
 }
 
 static void print_no_write_guidance(void)
@@ -55,7 +66,7 @@ int cli_report_startup_error(const char *message)
 
 static void print_help(void)
 {
-	printf("Usage: exfat-resize %s [SIZE]\n"
+	printf("%s"
 	       "\n"
 	       "%s\n"
 	       "\n"
@@ -65,6 +76,7 @@ static void print_help(void)
 	       "                     (default: all available space)\n"
 	       "\n"
 	       "Options:\n"
+	       "%s"
 	       "  -h, --help         Show this help message\n"
 	       "  -V, --version      Show version information\n"
 	       "\n"
@@ -77,7 +89,7 @@ static void print_help(void)
 	       "  recovery instructions in README.md distributed with exfat-resize or at:\n"
 	       "    https://github.com/huven/exfat-resize#safety\n"
 	       "%s",
-	    target_name, introduction, target_name, target_description, documentation_lead,
+	    usage, introduction, target_name, target_description, platform_options, documentation_lead,
 	    platform_note);
 }
 
@@ -166,6 +178,38 @@ static int parse_size(const char *text, uint64_t *value)
 	return 0;
 }
 
+static enum exfat_resize_error validate_source_boot_regions(
+    const struct exfat_resize_block_device *device)
+{
+	struct exfat_resize_sector_adapter adapter;
+	struct exfat_resize_geometry geometry;
+	enum exfat_resize_error result;
+	unsigned char *buffer;
+	uint32_t filesystem_sector_size;
+
+	buffer = malloc(EXFAT_RESIZE_MAX_SECTOR_SIZE);
+	if (buffer == NULL)
+		return EXFAT_RESIZE_OUT_OF_MEMORY;
+	result = exfat_resize_validate_block_device(device);
+	if (result == EXFAT_RESIZE_SUCCESS)
+		result = exfat_resize_probe_sector_size(
+		    device, buffer, EXFAT_RESIZE_MAX_SECTOR_SIZE, &filesystem_sector_size);
+	if (result == EXFAT_RESIZE_SUCCESS)
+		result = exfat_resize_adapt_block_device(device, filesystem_sector_size, &adapter);
+	if (result == EXFAT_RESIZE_SUCCESS)
+		result = exfat_resize_read_boot_regions(
+		    &adapter.device, buffer, EXFAT_RESIZE_MAX_SECTOR_SIZE, &geometry);
+	free(buffer);
+	return result;
+}
+
+static void print_partition_grown_guidance(void)
+{
+	fprintf(stderr,
+	    "exfat-resize: the partition was enlarged, but the filesystem remains unchanged; "
+	    "verify the partition size before retrying and do not shrink it\n");
+}
+
 int cli_main(int argc, char **argv)
 {
 	struct exfat_resize_options options;
@@ -178,6 +222,8 @@ int cli_main(int argc, char **argv)
 	char io_error[256];
 	int positional_count = 0;
 	int parse_options = 1;
+	int grow_partition = 0;
+	int partition_grown = 0;
 	int status = EXIT_FAILURE;
 	int index;
 
@@ -193,6 +239,10 @@ int cli_main(int argc, char **argv)
 		if (parse_options && strcmp(argv[index], "--version") == 0) {
 			printf("exfat-resize %s\n", EXFAT_RESIZE_BUILD_VERSION);
 			return EXIT_SUCCESS;
+		}
+		if (parse_options && strcmp(argv[index], "--grow-partition") == 0) {
+			grow_partition = 1;
+			continue;
 		}
 		if (parse_options && argv[index][0] == '-' && argv[index][1] != '\0' &&
 		    argv[index][1] != '-') {
@@ -230,6 +280,19 @@ int cli_main(int argc, char **argv)
 		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
+	if (grow_partition && positional_count != 2) {
+		fprintf(stderr, "exfat-resize: --grow-partition requires an explicit SIZE\n");
+		print_no_write_guidance();
+		return EXIT_FAILURE;
+	}
+#if !defined(_WIN32)
+	if (grow_partition) {
+		fprintf(stderr,
+		    "exfat-resize: --grow-partition is supported only for logical Windows volumes\n");
+		print_no_write_guidance();
+		return EXIT_FAILURE;
+	}
+#endif
 
 	device_init(&device);
 	if (device_open(&device, positional[0], error, sizeof(error)) != 0) {
@@ -239,6 +302,51 @@ int cli_main(int argc, char **argv)
 	}
 	if (positional_count != 2)
 		target = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
+	if (grow_partition) {
+		uint64_t current_size;
+
+		if (device.block_device.sector_count >
+		    UINT64_MAX / (uint64_t)device.block_device.sector_size) {
+			fprintf(stderr, "exfat-resize: logical volume size is too large\n");
+			print_no_write_guidance();
+			goto out;
+		}
+		current_size = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
+		if (target > current_size) {
+			/*
+			 * The library's complete preflight needs the requested target to fit the
+			 * device. Validate the source boot regions before changing that device's
+			 * partition, then let the normal resize perform the full preflight.
+			 */
+			result = validate_source_boot_regions(&device.block_device);
+			if (result != EXFAT_RESIZE_SUCCESS) {
+				fprintf(stderr,
+				    "exfat-resize: cannot grow partition: source validation failed: %s\n",
+				    resize_error(result));
+				if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL) {
+					device_format_io_error(&device, io_error, sizeof(io_error));
+					fprintf(stderr, "exfat-resize: %s %s: %s\n", device.io_error_operation,
+					    positional[0], io_error);
+				}
+				print_no_write_guidance();
+				goto out;
+			}
+		}
+		if (device_grow_partition(
+		        &device, positional[0], target, &partition_grown, error, sizeof(error)) != 0) {
+			fprintf(stderr, "exfat-resize: %s\n", error);
+			if (partition_grown)
+				print_partition_grown_guidance();
+			else
+				print_no_write_guidance();
+			goto out;
+		}
+		if (partition_grown) {
+			printf("exfat-resize: grew the partition containing %s to %" PRIu64 " bytes\n",
+			    positional[0],
+			    device.block_device.sector_count * (uint64_t)device.block_device.sector_size);
+		}
+	}
 	options.allocator.context = NULL;
 	options.allocator.allocate = allocate_memory;
 	options.allocator.deallocate = deallocate_memory;
@@ -254,6 +362,8 @@ int cli_main(int argc, char **argv)
 		switch (stage) {
 		case EXFAT_RESIZE_STAGE_PREFLIGHT:
 			print_no_write_guidance();
+			if (partition_grown)
+				print_partition_grown_guidance();
 			break;
 		case EXFAT_RESIZE_STAGE_PREPARING:
 			fprintf(stderr,

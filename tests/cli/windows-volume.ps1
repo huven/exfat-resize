@@ -48,14 +48,34 @@ function Invoke-CleanCheck {
 }
 
 function Invoke-Resize {
-    param([string] $Target)
+    param(
+        [string] $Target,
+        [uint64] $TargetSize
+    )
 
-    $Output = & $Program $Target 2>&1
+    $Output = & $Program --grow-partition $Target $TargetSize 2>&1
     $Status = $LASTEXITCODE
     $Output | ForEach-Object { Write-Host $_ }
     Assert-Condition ($Status -eq 0) "exfat-resize failed for $Target (exit $Status)"
     Assert-Condition (($Output -join "`n") -match "exfat-resize: resized") `
         "exfat-resize did not report success for $Target"
+    Assert-Condition (($Output -join "`n") -match "grew the partition") `
+        "exfat-resize did not report partition growth for $Target"
+}
+
+function Invoke-ExpectedFailure {
+    param(
+        [string[]] $Arguments,
+        [string] $ExpectedText
+    )
+
+    $Output = & $Program @Arguments 2>&1
+    $Status = $LASTEXITCODE
+    $Output | ForEach-Object { Write-Host $_ }
+    Assert-Condition ($Status -ne 0) `
+        "exfat-resize unexpectedly succeeded with arguments: $Arguments"
+    Assert-Condition (($Output -join "`n") -match [regex]::Escape($ExpectedText)) `
+        "exfat-resize did not report '$ExpectedText'"
 }
 
 function Test-VolumeTarget {
@@ -87,15 +107,15 @@ function Test-VolumeTarget {
         $Volume = Wait-Volume $DriveLetter
         Assert-Condition ($Volume.FileSystem -eq "exFAT") `
             "Volume $DriveLetter`: is not exFAT"
-        Assert-Condition ($Partition.Size -eq 160MB) `
-            "Partition size is $($Partition.Size), expected 160 MiB"
+        Assert-Condition ($Partition.Size -eq 96MB) `
+            "Partition size is $($Partition.Size), expected 96 MiB"
         # Get-Volume.Size is usable cluster capacity, not the exFAT VolumeLength.
         $InitialFileSystemSize = [uint64] $Volume.Size
         Assert-Condition (
             $InitialFileSystemSize -ge 90MB -and $InitialFileSystemSize -le 100MB
         ) "Initial usable filesystem capacity is $InitialFileSystemSize, expected about 94 MiB"
-        Assert-Condition (($Partition.Size - $InitialFileSystemSize) -ge 60MB) `
-            "Initial filesystem does not leave enough room to test growth"
+        Assert-Condition (($Disk.Size - $Partition.Offset - $Partition.Size) -ge 60MB) `
+            "Disk does not leave enough trailing space to test partition growth"
         Write-Host "Initial usable filesystem capacity: $InitialFileSystemSize bytes"
 
         $ActualHash = (Get-FileHash "$DriveLetter`:\payload.bin" -Algorithm SHA256).Hash
@@ -115,7 +135,33 @@ function Test-VolumeTarget {
         }
 
         Set-Location $env:GITHUB_WORKSPACE
-        Invoke-Resize $Target
+        $TargetSize = [uint64] 160MB
+        Invoke-ExpectedFailure `
+            -Arguments @($Target, [string] $TargetSize) `
+            -ExpectedText "request is outside the backing device"
+        $Volume = Wait-Volume $DriveLetter
+        $Partition = Get-Partition -DiskNumber $Disk.Number `
+            -PartitionNumber $Partition.PartitionNumber
+        Assert-Condition ($Partition.Size -eq 96MB) `
+            "Partition changed without --grow-partition"
+
+        if ($TargetType -eq "DriveLetter") {
+            Invoke-ExpectedFailure `
+                -Arguments @("--grow-partition", $Target, [string] ([uint64] 256MB)) `
+                -ExpectedText "not enough immediately trailing unallocated space"
+            $Volume = Wait-Volume $DriveLetter
+            $Partition = Get-Partition -DiskNumber $Disk.Number `
+                -PartitionNumber $Partition.PartitionNumber
+            Assert-Condition ($Partition.Size -eq 96MB) `
+                "Partition changed after an out-of-space failure"
+        }
+
+        Invoke-Resize $Target $TargetSize
+        Update-HostStorageCache
+        $Partition = Get-Partition -DiskNumber $Disk.Number `
+            -PartitionNumber $Partition.PartitionNumber
+        Assert-Condition ($Partition.Size -eq $TargetSize) `
+            "Partition size is $($Partition.Size), expected $TargetSize"
         $Volume = Wait-Volume $DriveLetter
         Invoke-CleanCheck $DriveLetter
         $Volume = Wait-Volume $DriveLetter
