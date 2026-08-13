@@ -129,7 +129,7 @@ static int checked_end(uint64_t start, uint64_t length, uint64_t *end)
 int device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
-    int *partition_grown,
+    enum device_partition_state *partition_state,
     char *error,
     size_t error_size)
 {
@@ -157,7 +157,7 @@ int device_grow_partition(struct device *device,
 	int path_length;
 	int result = -1;
 
-	*partition_grown = 0;
+	*partition_state = DEVICE_PARTITION_UNCHANGED;
 	if (device->volume_io_buffer == NULL) {
 		windows_device_set_error(
 		    error, error_size, path, "--grow-partition requires a logical Windows volume target");
@@ -323,13 +323,14 @@ int device_grow_partition(struct device *device,
 	(void)memset(&request, 0, sizeof(request));
 	request.PartitionNumber = partition_number;
 	request.BytesToGrow.QuadPart = (LONGLONG)growth;
+	*partition_state = DEVICE_PARTITION_UPDATE_ATTEMPTED;
 	if (!DeviceIoControl(
 	        disk, IOCTL_DISK_GROW_PARTITION, &request, sizeof(request), NULL, 0, &returned, NULL)) {
 		windows_device_set_operation_error(
 		    error, error_size, path, "cannot grow the partition", GetLastError());
 		goto out;
 	}
-	*partition_grown = 1;
+	*partition_state = DEVICE_PARTITION_GROWN;
 	if (!FlushFileBuffers(disk)) {
 		windows_device_set_operation_error(error, error_size, path,
 		    "cannot synchronize the enlarged partition table", GetLastError());

@@ -195,13 +195,13 @@ fail_after_open:
 int device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
-    int *partition_grown,
+    enum device_partition_state *partition_state,
     char *error,
     size_t error_size)
 {
 	(void)device;
 	(void)target_size;
-	*partition_grown = 0;
+	*partition_state = DEVICE_PARTITION_UNCHANGED;
 	(void)snprintf(error, error_size,
 	    "%s: --grow-partition is supported only for logical Windows volumes", path);
 	return -1;

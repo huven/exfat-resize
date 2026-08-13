@@ -92,6 +92,13 @@ destructive metadata updates may have started; do not retry the resize, and
 restore the verified backup. Follow a less conservative checker-and-retry path
 only when the command explicitly reports that it is safe.
 
+If `--grow-partition` reports that a partition update was attempted or that the
+partition was enlarged, follow its partition-specific guidance even though no
+filesystem write was attempted. The CLI attempts to dismount a logical volume
+after any partition-update error; prevent further access if that cleanup also
+fails. Verify the partition layout before retrying, and never shrink it as a
+recovery step.
+
 ## Usage
 
     exfat-resize device [ size ]

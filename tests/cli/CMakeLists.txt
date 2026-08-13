@@ -38,6 +38,37 @@ function(exfat_resize_add_device_test target source test_name)
     set_tests_properties(${test_name} PROPERTIES LABELS cli)
 endfunction()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND MSVC)
+    add_executable(
+        exfat_resize_partition_fault_test
+        ${PROJECT_SOURCE_DIR}/src/cli.c
+        ${PROJECT_SOURCE_DIR}/src/windows/device.c
+        ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+        ${PROJECT_SOURCE_DIR}/src/windows/entry.c
+        ${PROJECT_SOURCE_DIR}/src/windows/partition.c
+        windows-partition-fault.c
+    )
+    target_include_directories(
+        exfat_resize_partition_fault_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
+            ${PROJECT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_definitions(
+        exfat_resize_partition_fault_test
+        PRIVATE
+            EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}-partition-fault-test"
+    )
+    target_compile_options(
+        exfat_resize_partition_fault_test
+        PRIVATE
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/windows-api-redirect.h"
+    )
+    target_link_libraries(exfat_resize_partition_fault_test PRIVATE exfat_resize)
+    exfat_resize_configure_target(exfat_resize_partition_fault_test)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_executable(
         exfat_resize_windows_device_path_test
