@@ -27,12 +27,18 @@ struct device {
 	struct exfat_resize_block_device block_device;
 };
 
+enum device_partition_state {
+	DEVICE_PARTITION_UNCHANGED,
+	DEVICE_PARTITION_UPDATE_ATTEMPTED,
+	DEVICE_PARTITION_GROWN
+};
+
 void device_init(struct device *device);
 int device_open(struct device *device, const char *path, char *error, size_t error_size);
 int device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
-    int *partition_grown,
+    enum device_partition_state *partition_state,
     char *error,
     size_t error_size);
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size);

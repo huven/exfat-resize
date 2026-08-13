@@ -246,10 +246,18 @@ static void print_partition_grown_guidance(void)
 	    "verify the partition size before retrying and do not shrink it\n");
 }
 
+static void print_partition_update_uncertain_guidance(void)
+{
+	fprintf(stderr,
+	    "exfat-resize: a partition update was attempted, but its result is uncertain; "
+	    "verify the partition layout and do not retry or shrink it\n");
+}
+
 int cli_main(int argc, char **argv)
 {
 	struct exfat_resize_options options;
 	struct device device;
+	enum device_partition_state partition_state = DEVICE_PARTITION_UNCHANGED;
 	enum exfat_resize_error result;
 	enum exfat_resize_stage stage;
 	const char *positional[2];
@@ -258,7 +266,6 @@ int cli_main(int argc, char **argv)
 	int positional_count = 0;
 	int parse_options = 1;
 	int grow_partition = 0;
-	int partition_grown = 0;
 	int status = EXIT_FAILURE;
 	int index;
 
@@ -364,15 +371,24 @@ int cli_main(int argc, char **argv)
 			}
 		}
 		if (device_grow_partition(
-		        &device, positional[0], target, &partition_grown, error, sizeof(error)) != 0) {
+		        &device, positional[0], target, &partition_state, error, sizeof(error)) != 0) {
 			fprintf(stderr, "exfat-resize: %s\n", error);
-			if (partition_grown)
+			if (partition_state == DEVICE_PARTITION_GROWN)
 				print_partition_grown_guidance();
+			else if (partition_state == DEVICE_PARTITION_UPDATE_ATTEMPTED)
+				print_partition_update_uncertain_guidance();
 			else
 				print_no_write_guidance();
+			if (partition_state != DEVICE_PARTITION_UNCHANGED &&
+			    device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+				fprintf(stderr, "exfat-resize: %s\n", error);
+				fprintf(stderr,
+				    "exfat-resize: the volume may remain mounted; prevent access until the "
+				    "partition layout is verified\n");
+			}
 			goto out;
 		}
-		if (partition_grown) {
+		if (partition_state == DEVICE_PARTITION_GROWN) {
 			printf("exfat-resize: grew the partition containing %s to %" PRIu64 " bytes\n",
 			    positional[0],
 			    device.block_device.sector_count * (uint64_t)device.block_device.sector_size);
@@ -390,7 +406,7 @@ int cli_main(int argc, char **argv)
 		switch (stage) {
 		case EXFAT_RESIZE_STAGE_PREFLIGHT:
 			print_no_write_guidance();
-			if (partition_grown)
+			if (partition_state == DEVICE_PARTITION_GROWN)
 				print_partition_grown_guidance();
 			break;
 		case EXFAT_RESIZE_STAGE_PREPARING:

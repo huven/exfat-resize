@@ -180,11 +180,20 @@ jobs:
           name: windows-volume-fixture-${{ github.run_id }}
           path: build/windows-volume-fixture
 
+      - name: Build partition-growth fault-injection CLI
+        shell: pwsh
+        run: |
+          cmake -S . -B build/windows-fault -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake --build build/windows-fault --config Release --parallel `
+            --target exfat_resize_partition_fault_test
+
       - name: Resize through drive-letter and volume-GUID paths
         shell: pwsh
         run: |
           ./tests/cli/windows-volume.ps1 `
             -Program $env:EXFAT_RESIZE_WINDOWS_CLI `
+            -FaultProgram `
+              build/windows-fault/tests/cli/Release/exfat_resize_partition_fault_test.exe `
             -Fixture build/windows-volume-fixture/prepared.vhdx `
             -ExpectedHash build/windows-volume-fixture/payload.sha256
 
