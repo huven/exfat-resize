@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: MIT
+
+name: Windows binary
+
+on:
+  workflow_call:
+    inputs:
+      source_artifact_name:
+        description: Artifact containing the tested source archive
+        required: true
+        type: string
+      binary_artifact_name:
+        description: Artifact name for the tested Windows archive
+        required: true
+        type: string
+      expected_version:
+        description: Optional tag or version that the binary must match
+        required: false
+        default: ""
+        type: string
+      retention_days:
+        description: Artifact retention days; 0 uses the repository default
+        required: false
+        default: 0
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (MSVC, x86-64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+
+    steps:
+      - name: Download tested source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact_name }}
+          path: source-artifacts
+
+      - name: Record builder environment
+        shell: pwsh
+        run: |
+          Write-Host $([Environment]::OSVersion.VersionString)
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          cmake --version
+
+      - name: Build and test Windows binary archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Archives = @(Get-ChildItem source-artifacts -File -Filter "exfat-resize-*.tar.gz")
+          if ($Archives.Count -ne 1) {
+            throw "Expected one source archive, found $($Archives.Count)"
+          }
+
+          New-Item -ItemType Directory -Path source-tree | Out-Null
+          Push-Location source-tree
+          try {
+            cmake -E tar xzf $Archives[0].FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not extract the source archive"
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+          $SourceDirectories = @(Get-ChildItem source-tree -Directory `
+            -Filter "exfat-resize-*")
+          if ($SourceDirectories.Count -ne 1) {
+            throw "Expected one source directory, found $($SourceDirectories.Count)"
+          }
+          $SourceDirectory = $SourceDirectories[0].FullName
+
+          if (-not [string]::IsNullOrWhiteSpace($env:EXPECTED_VERSION)) {
+            $ExpectedVersion = $env:EXPECTED_VERSION -replace '^v', ''
+            $BuildVersion = (Get-Content `
+              (Join-Path $SourceDirectory ".tarball-version") -Raw).Trim()
+            if ($BuildVersion -ne $ExpectedVersion) {
+              throw "Source build version $BuildVersion does not match $ExpectedVersion"
+            }
+          }
+
+          & "$SourceDirectory/tools/build-windows-binary.ps1" `
+            -SourceDirectory $SourceDirectory `
+            -OutputDirectory windows-artifacts
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows binary packaging failed"
+          }
+
+          $BinaryArchives = @(Get-ChildItem windows-artifacts -File `
+            -Filter "exfat-resize-*-windows-x86_64.zip")
+          if ($BinaryArchives.Count -ne 1) {
+            throw "Expected one Windows archive, found $($BinaryArchives.Count)"
+          }
+          & "$SourceDirectory/tests/package/windows-binary-test.ps1" `
+            -Archive $BinaryArchives[0].FullName `
+            -SourceDirectory $SourceDirectory
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows binary archive test failed"
+          }
+
+      - name: Upload tested Windows archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary_artifact_name }}
+          path: windows-artifacts/exfat-resize-*-windows-x86_64.zip
+          if-no-files-found: error
+          overwrite: true
+          retention-days: ${{ inputs.retention_days }}

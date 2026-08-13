@@ -76,9 +76,20 @@ jobs:
       binary_artifact_name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
       expected_version: ${{ github.ref_name }}
 
+  build_windows:
+    name: Windows binary archive
+    needs: build_source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-binary.yml
+    with:
+      source_artifact_name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+      binary_artifact_name: windows-release-${{ github.ref_name }}-${{ github.run_id }}
+      expected_version: ${{ github.ref_name }}
+
   publish_draft:
     name: Create draft release
-    needs: [build_source, build_linux]
+    needs: [build_source, build_linux, build_windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -97,6 +108,12 @@ jobs:
           name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
+      - name: Download tested Windows archive
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: release-assets
+
       - name: Verify release asset names
         env:
           RELEASE_REF: ${{ github.ref_name }}
@@ -105,7 +122,10 @@ jobs:
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
           linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
-          expected=$(printf '%s\n%s\n' "$source_archive" "$linux_archive" | sort)
+          windows_archive=exfat-resize-$version-windows-x86_64.zip
+          expected=$(
+            printf '%s\n' "$source_archive" "$linux_archive" "$windows_archive" | sort
+          )
           actual=$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if [ "$actual" != "$expected" ]; then
             echo "workflow artifact contains an unexpected file set" >&2
@@ -123,6 +143,7 @@ jobs:
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
           linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          windows_archive=exfat-resize-$version-windows-x86_64.zip
           title="exfat-resize $version"
 
           if is_draft=$(gh release view "$RELEASE_REF" \
@@ -143,10 +164,12 @@ jobs:
               fi
             done
           gh release upload "$RELEASE_REF" \
-            "release-assets/$source_archive" "release-assets/$linux_archive"
+            "release-assets/$source_archive" \
+            "release-assets/$linux_archive" \
+            "release-assets/$windows_archive"
 
           expected=$(
-            for asset in "$source_archive" "$linux_archive"; do
+            for asset in "$source_archive" "$linux_archive" "$windows_archive"; do
               digest=$(sha256sum "release-assets/$asset" | cut -d ' ' -f 1)
               printf '%s\tsha256:%s\n' "$asset" "$digest"
             done | sort
