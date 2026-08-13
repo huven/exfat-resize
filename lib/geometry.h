@@ -38,7 +38,10 @@ enum exfat_resize_error exfat_resize_plan_growth(
 
 /*
  * Maps a cluster number from source geometry to its cluster number in target
- * growth geometry. Cluster numbers 0 and 1 are returned unchanged.
+ * growth geometry. A partial heap shift rotates the displaced prefix after the
+ * physically unchanged suffix; zero and full shifts preserve cluster numbers.
+ * The result is a permutation of the source data-cluster range. Cluster numbers
+ * 0 and 1 are returned unchanged.
  * target_cluster is modified only on success.
  */
 enum exfat_resize_error exfat_resize_map_growth_cluster(const struct exfat_resize_geometry *source,

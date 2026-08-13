@@ -187,11 +187,6 @@ static int open_image(struct device *device, const char *path, char *error, size
 		windows_device_set_error(error, error_size, path, "image file is too small");
 		goto fail_after_open;
 	}
-	if (!exfat_resize_sector_size_is_supported(sector_size)) {
-		windows_device_set_error(error, error_size, path, "unsupported virtual sector size");
-		goto fail_after_open;
-	}
-
 	configure_device(
 	    device, handle, sector_size, (uint64_t)file_size.QuadPart / sector_size, NULL, 0);
 	return 0;

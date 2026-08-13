@@ -97,6 +97,11 @@ multiple of the block device's sector size.
 Not contain Vendor Allocation directory entries, whose allocation semantics
 cannot be interpreted without recognizing their vendor GUID.
 .IP \(bu 2
+Not contain an unrecognized critical secondary directory entry or an
+unrecognized allocation-bearing benign secondary directory entry.
+These extension entries are rejected during read-only preflight because safely
+interpreting or preserving them requires recognizing their entry type.
+.IP \(bu 2
 Gain enough clusters to hold the replacement allocation bitmap in the newly
 added tail space.
 .IP \(bu 2
@@ -131,6 +136,14 @@ heap.
 Detailed allocator-backed working-memory requirements are documented in
 .I docs/TRANSACTION.md
 distributed with exfat-resize.
+The CLI supplies those allocations with
+.BR malloc (3)
+and releases them with
+.BR free (3),
+so its working set is ordinary heap memory.
+Peak heap use includes the 1 MiB I/O buffer, 768 KiB cache block, source-FAT
+snapshot, four-byte-per-target-cluster allocation model, and directory
+worklist described there.
 .SH EXAMPLES
 Enlarge a regular image by 2 GiB, then grow its filesystem to use all available
 space:

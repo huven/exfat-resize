@@ -102,40 +102,33 @@ enum windows_device_path_type windows_classify_device_path(const char *path)
 
 int windows_normalize_volume_path(const char *path, char *normalized, size_t normalized_size)
 {
+	char drive_letter;
 	size_t length = strlen(path);
 
 	if (windows_classify_device_path(path) != WINDOWS_DEVICE_PATH_VOLUME)
 		return -1;
-	if (drive_designator(path, length)) {
-		if (normalized_size < 7)
+	if (drive_designator(path, length))
+		drive_letter = path[0];
+	else if (path[2] == '.')
+		drive_letter = path[4];
+	else {
+		if (normalized_size < VOLUME_GUID_PATH_LENGTH + 1)
 			return -1;
-		normalized[0] = '\\';
-		normalized[1] = '\\';
-		normalized[2] = '.';
-		normalized[3] = '\\';
-		normalized[4] = path[0];
-		normalized[5] = ':';
-		normalized[6] = '\0';
-		return 0;
-	}
-	if (path[2] == '.') {
-		if (normalized_size < 7)
-			return -1;
-		normalized[0] = '\\';
-		normalized[1] = '\\';
-		normalized[2] = '.';
-		normalized[3] = '\\';
-		normalized[4] = path[4];
-		normalized[5] = ':';
-		normalized[6] = '\0';
+		(void)memcpy(normalized, "\\\\?\\Volume{", VOLUME_GUID_PREFIX_LENGTH);
+		(void)memcpy(normalized + VOLUME_GUID_PREFIX_LENGTH, path + VOLUME_GUID_PREFIX_LENGTH,
+		    VOLUME_GUID_LENGTH + 1);
+		normalized[VOLUME_GUID_PATH_LENGTH] = '\0';
 		return 0;
 	}
 
-	if (normalized_size < VOLUME_GUID_PATH_LENGTH + 1)
+	if (normalized_size < 7)
 		return -1;
-	(void)memcpy(normalized, "\\\\?\\Volume{", VOLUME_GUID_PREFIX_LENGTH);
-	(void)memcpy(normalized + VOLUME_GUID_PREFIX_LENGTH, path + VOLUME_GUID_PREFIX_LENGTH,
-	    VOLUME_GUID_LENGTH + 1);
-	normalized[VOLUME_GUID_PATH_LENGTH] = '\0';
+	normalized[0] = '\\';
+	normalized[1] = '\\';
+	normalized[2] = '.';
+	normalized[3] = '\\';
+	normalized[4] = drive_letter;
+	normalized[5] = ':';
+	normalized[6] = '\0';
 	return 0;
 }

@@ -244,24 +244,26 @@ install(
         Development
 )
 
-install(
-    FILES
-        LICENSE
-        README.md
-    DESTINATION
-        ${CMAKE_INSTALL_DOCDIR}
-    COMPONENT
-        Runtime
-)
+foreach(exfat_resize_document_component IN ITEMS Runtime Development)
+    install(
+        FILES
+            LICENSE
+            README.md
+        DESTINATION
+            ${CMAKE_INSTALL_DOCDIR}
+        COMPONENT
+            ${exfat_resize_document_component}
+    )
 
-install(
-    FILES
-        docs/TRANSACTION.md
-    DESTINATION
-        ${CMAKE_INSTALL_DOCDIR}/docs
-    COMPONENT
-        Runtime
-)
+    install(
+        FILES
+            docs/TRANSACTION.md
+        DESTINATION
+            ${CMAKE_INSTALL_DOCDIR}/docs
+        COMPONENT
+            ${exfat_resize_document_component}
+    )
+endforeach()
 
 install(
     EXPORT

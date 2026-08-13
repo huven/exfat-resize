@@ -102,11 +102,13 @@ enum exfat_resize_stage {
  *
  * read and write are invoked only for a nonzero sector_count and for a range
  * wholly contained in the device. The buffer is valid for at least
- * sector_count * sector_size bytes and must be the only bytes accessed.
- * Zero reports a complete transfer; later reads must observe completed writes.
- * A nonzero result reports failure, and a failed write may already have
- * modified part of the requested range. sync returns zero only after every
- * preceding completed write is durable on the backing storage.
+ * sector_count * sector_size bytes and must be the only bytes accessed. The
+ * buffer is borrowed only for that callback invocation; it must not be retained
+ * or accessed after the callback returns and may be reused immediately. Zero
+ * reports a complete transfer; later reads must observe completed writes. A
+ * nonzero result reports failure, and a failed write may already have modified
+ * part of the requested range. sync returns zero only after every preceding
+ * completed write is durable on the backing storage.
  *
  * context is the block-device context below. first_sector is the first device
  * sector of the transfer, sector_count is its length, and buffer is its source

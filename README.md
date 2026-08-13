@@ -35,7 +35,9 @@ and platform-specific setup.
 
 ### Build from source
 
-Building requires CMake 3.20 or newer and a C11 compiler.
+The checkout path below requires Git, CMake 3.20 or newer, and a C11 compiler.
+See [Build and test](#build-and-test) for platform-specific test prerequisites
+and the `PATH` setup needed when macOS CMake.app has no command-line links.
 
     git clone https://github.com/huven/exfat-resize.git
     cd exfat-resize
@@ -102,9 +104,11 @@ recovery step.
 ## Usage
 
     exfat-resize device [ size ]
+    exfat-resize --grow-partition device size
     exfat-resize -h | --help
     exfat-resize -V | --version
 
+The `--grow-partition` form is available only for Windows logical volumes.
 Run `exfat-resize --help` for a command summary. On macOS and Linux,
 `man exfat-resize` provides the complete command-line reference.
 
@@ -249,6 +253,10 @@ The filesystem must meet these prerequisites:
   a multiple of the block device's sector size.
 - Not contain Vendor Allocation directory entries, whose allocation semantics
   cannot be interpreted without recognizing their vendor GUID.
+- Not contain an unrecognized critical secondary directory entry or an
+  unrecognized allocation-bearing benign secondary directory entry. These
+  extension entries are rejected during read-only preflight because safely
+  interpreting or preserving them requires recognizing their entry type.
 - Gain enough clusters to hold the replacement allocation bitmap in the newly
   added tail space.
 - Not have a source cluster recorded as bad where the expanded FAT would
@@ -334,6 +342,10 @@ Before writing, the library snapshots the used source FAT and rebuilds a
 validated in-memory allocation model covering the target cluster heap. See the
 transaction document's [memory requirements](docs/TRANSACTION.md#memory-requirements)
 for allocator-backed working-memory sizes, lifetimes, and backing options.
+The bundled CLI supplies those allocations with `malloc`, so its working set is
+ordinary heap memory. Peak heap use includes the 1 MiB I/O buffer, 768 KiB cache
+block, source-FAT snapshot, four-byte-per-target-cluster allocation model, and
+directory worklist described there.
 
 When an error is returned, `stage` describes the recovery boundary reached:
 
@@ -433,7 +445,7 @@ as Administrator and invoke the extracted executable as described under
 ## Build and test
 
 CMake 3.20 or newer is the canonical build system for the library, CLI, and
-tests.
+tests. Package tests require Git.
 
 ### macOS and Linux
 
@@ -447,6 +459,9 @@ links, add its tools to `PATH`:
     make test
     make sanitize-test
     make release-test
+
+The complete macOS and Linux test suite also requires `ssh-keygen` for its
+release checks.
 
 `make` produces `build/exfat-resize`. `make test` builds every target and runs
 the separately labeled library, package, and CLI suites through CTest. The CLI

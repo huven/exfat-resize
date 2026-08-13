@@ -21,6 +21,19 @@ set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
 set(readme "${documentation_dir}/README.md")
 set(license "${documentation_dir}/LICENSE")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
+set(development_install_prefix "@CMAKE_CURRENT_BINARY_DIR@/development-install-tree")
+set(development_documentation_dir
+    "${development_install_prefix}/@CMAKE_INSTALL_DOCDIR@"
+)
+set(development_library
+    "${development_install_prefix}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@exfat_resize@CMAKE_STATIC_LIBRARY_SUFFIX@"
+)
+set(development_header
+    "${development_install_prefix}/@CMAKE_INSTALL_INCLUDEDIR@/exfat_resize.h"
+)
+set(development_package_dir
+    "${development_install_prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/exfat_resize"
+)
 
 file(REMOVE_RECURSE "${install_prefix}")
 set(install_command
@@ -52,6 +65,47 @@ foreach(required_file
 )
     if(NOT EXISTS "${required_file}")
         message(FATAL_ERROR "Installed package file not found at ${required_file}")
+    endif()
+endforeach()
+
+file(REMOVE_RECURSE "${development_install_prefix}")
+set(development_install_command
+    "@CMAKE_COMMAND@" --install "@PROJECT_BINARY_DIR@"
+    --prefix "${development_install_prefix}"
+)
+if(DEFINED INSTALL_CONFIG AND NOT INSTALL_CONFIG STREQUAL "")
+    list(APPEND development_install_command --config "${INSTALL_CONFIG}")
+endif()
+list(APPEND development_install_command --component Development)
+execute_process(
+    COMMAND ${development_install_command}
+    RESULT_VARIABLE
+        development_install_result
+    OUTPUT_VARIABLE
+        development_install_output
+    ERROR_VARIABLE
+        development_install_error
+)
+if(NOT development_install_result EQUAL 0)
+    message(FATAL_ERROR
+        "Development-component installation failed:\n"
+        "${development_install_output}${development_install_error}"
+    )
+endif()
+foreach(required_file
+        "${development_library}"
+        "${development_header}"
+        "${development_package_dir}/exfat_resizeTargets.cmake"
+        "${development_package_dir}/exfat_resizeConfig.cmake"
+        "${development_package_dir}/exfat_resizeConfigVersion.cmake"
+        "${development_documentation_dir}/README.md"
+        "${development_documentation_dir}/LICENSE"
+        "${development_documentation_dir}/docs/TRANSACTION.md"
+)
+    if(NOT EXISTS "${required_file}")
+        message(FATAL_ERROR
+            "Development-component package file not found at ${required_file}"
+        )
     endif()
 endforeach()
 
@@ -89,6 +143,8 @@ if("@EXFAT_RESIZE_INSTALL_MANPAGE@")
             "README.md"
             "docs/TRANSACTION.md"
             "allocator-backed working-memory requirements"
+            "unrecognized critical secondary"
+            "ordinary heap memory"
             "Enlarge a regular image by 2 GiB"
     )
         string(FIND "${manpage_contents}" "${required_text}" required_text_offset)
@@ -112,8 +168,12 @@ foreach(required_text
         "do not retry the resize"
         "restore the verified backup"
         "## Filesystem compatibility"
+        "exfat-resize --grow-partition device size"
+        "unrecognized critical secondary"
+        "unrecognized allocation-bearing benign secondary"
         "docs/TRANSACTION.md#memory-requirements"
         "allocator-backed working-memory sizes"
+        "ordinary heap memory"
 )
     string(FIND "${readme_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
@@ -168,6 +228,8 @@ foreach(required_text
         "effective-type semantics"
         "storage returned by malloc"
         "9899:2011 section 6.5"
+        "borrowed only for that callback invocation"
+        "must not be retained"
 )
     string(FIND "${header_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
