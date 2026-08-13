@@ -52,7 +52,8 @@ if(TEST_CASE STREQUAL "help")
             "Usage: exfat-resize DEVICE [SIZE]"
             "exfat-resize --grow-partition DEVICE SIZE"
             "Arguments:"
-            "Desired filesystem size in bytes"
+            "Desired filesystem size in bytes or with an optional"
+            "K, M, or G suffix (powers of 1024)"
             "Options:"
             "Safety:"
             "Documentation:"
@@ -73,6 +74,11 @@ elseif(TEST_CASE STREQUAL "recovery-guidance")
     expect_no_write_failure(--grow-partition [[E:]])
     require_text("${command_output}" "--grow-partition requires an explicit SIZE")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 0)
+    require_text("${command_output}" "invalid size: 0")
+    expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 1G)
+    require_text("${command_output}" "missing.exfat")
+    expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 1T)
+    require_text("${command_output}" "invalid size: 1T")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/exfat-resize-Ω-missing.exfat")
     require_text("${command_output}" "exfat-resize-Ω-missing.exfat")

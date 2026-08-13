@@ -6,6 +6,8 @@ set -eu
 program=$1
 temporary=${TMPDIR:-/tmp}/exfat-resize-size-test.$$
 image=$temporary/image.exfat
+kibibyte_image=$temporary/kibibyte.exfat
+mebibyte_image=$temporary/mebibyte.exfat
 
 . "$(dirname "$0")/lib.sh"
 
@@ -19,6 +21,24 @@ mkdir -p "$temporary"
 expect_failure() {
 	if "$@" >"$temporary/rejected.out" 2>&1; then
 		echo "command unexpectedly succeeded: $*" >&2
+		return 1
+	fi
+}
+
+expect_invalid_size() {
+	size=$1
+	expect_failure "$program" "$temporary/missing.exfat" "$size"
+	if ! grep -Fq "exfat-resize: invalid size: $size" "$temporary/rejected.out"; then
+		echo "size was not rejected by the parser: $size" >&2
+		return 1
+	fi
+}
+
+expect_valid_size_syntax() {
+	size=$1
+	expect_failure "$program" "$temporary/missing.exfat" "$size"
+	if grep -Fq "exfat-resize: invalid size:" "$temporary/rejected.out"; then
+		echo "valid size syntax was rejected: $size" >&2
 		return 1
 	fi
 }
@@ -53,12 +73,43 @@ if [ "$(read_volume_sector_count "$image")" -ne "$target_sectors" ]; then
 fi
 
 check_exfat_image "$image"
-expect_failure "$program" "$image" 0
-expect_failure "$program" "$image" not-a-number
 expect_failure "$program" "$image" "$target_bytes"
 expect_failure "$program" "$image" "$((target_sectors * sector_size - 1))"
 expect_failure "$program" "$image" "$((backing_bytes + sector_size))"
 expect_failure "$program" "$image" 18446744073709551615
 check_exfat_image "$image"
+
+format_exfat_image "$kibibyte_image" 65536 131072
+output=$("$program" "$kibibyte_image" 49152K)
+if [ "$output" != "exfat-resize: resized $kibibyte_image" ]; then
+	echo "unexpected K-suffix resize output: $output" >&2
+	exit 1
+fi
+if [ "$(read_volume_sector_count "$kibibyte_image")" -ne 98304 ]; then
+	echo "K-suffix size produced the wrong filesystem length" >&2
+	exit 1
+fi
+check_exfat_image "$kibibyte_image"
+
+format_exfat_image "$mebibyte_image" 65536 131072
+output=$("$program" "$mebibyte_image" 48M)
+if [ "$output" != "exfat-resize: resized $mebibyte_image" ]; then
+	echo "unexpected M-suffix resize output: $output" >&2
+	exit 1
+fi
+if [ "$(read_volume_sector_count "$mebibyte_image")" -ne 98304 ]; then
+	echo "M-suffix size produced the wrong filesystem length" >&2
+	exit 1
+fi
+check_exfat_image "$mebibyte_image"
+
+for size in 18446744073709551615 1K 1M 1G 18014398509481983K 17592186044415M \
+	17179869183G; do
+	expect_valid_size_syntax "$size"
+done
+for size in 0 0K K not-a-number 1k 1m 1g 1T 1KB 1KiB 1.5G 1GG +1G \
+	18446744073709551616 18014398509481984K 17592186044416M 17179869184G; do
+	expect_invalid_size "$size"
+done
 
 echo "explicit-size: passed"
