@@ -34,8 +34,14 @@ sector zero.
 Paths may resolve through symbolic links.
 .TP
 .I SIZE
-The desired filesystem size in bytes, written as an unsigned decimal integer
-without a unit suffix.
+The desired filesystem size, written as an unsigned decimal integer.
+An optional uppercase
+.BR K ,
+.BR M ,
+or
+.B G
+suffix multiplies the value by 1024, 1048576, or 1073741824, respectively.
+Without a suffix, the value is interpreted as bytes.
 The value must be greater than zero.
 .SH OPTIONS
 .TP

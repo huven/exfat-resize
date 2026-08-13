@@ -72,7 +72,8 @@ static void print_help(void)
 	       "\n"
 	       "Arguments:\n"
 	       "  %-18s %s\n"
-	       "  SIZE               Desired filesystem size in bytes\n"
+	       "  SIZE               Desired filesystem size in bytes or with an optional\n"
+	       "                     K, M, or G suffix (powers of 1024)\n"
 	       "                     (default: all available space)\n"
 	       "\n"
 	       "Options:\n"
@@ -157,24 +158,41 @@ static void deallocate_memory(void *context, void *memory, size_t size)
 
 static int parse_size(const char *text, uint64_t *value)
 {
+	const char *cursor = text;
+	uint64_t multiplier = 1;
 	uint64_t parsed = 0;
 
-	if (*text == '\0')
+	if (*cursor == '\0')
 		return -1;
-	while (*text != '\0') {
+	while (*cursor >= '0' && *cursor <= '9') {
 		uint64_t digit;
 
-		if (*text < '0' || *text > '9')
-			return -1;
-		digit = (uint64_t)(*text - '0');
+		digit = (uint64_t)(*cursor - '0');
 		if (parsed > (UINT64_MAX - digit) / 10)
 			return -1;
 		parsed = parsed * 10 + digit;
-		++text;
+		++cursor;
 	}
-	if (parsed == 0)
+	switch (*cursor) {
+	case '\0':
+		break;
+	case 'K':
+		multiplier = UINT64_C(1024);
+		break;
+	case 'M':
+		multiplier = UINT64_C(1024) * 1024;
+		break;
+	case 'G':
+		multiplier = UINT64_C(1024) * 1024 * 1024;
+		break;
+	default:
 		return -1;
-	*value = parsed;
+	}
+	if (*cursor != '\0' && cursor[1] != '\0')
+		return -1;
+	if (parsed == 0 || parsed > UINT64_MAX / multiplier)
+		return -1;
+	*value = parsed * multiplier;
 	return 0;
 }
 

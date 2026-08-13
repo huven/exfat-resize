@@ -18,7 +18,8 @@ require_text() {
 
 require_text "Usage: exfat-resize DEVICE [SIZE]"
 require_text "Arguments:"
-require_text "Desired filesystem size in bytes"
+require_text "Desired filesystem size in bytes or with an optional"
+require_text "K, M, or G suffix (powers of 1024)"
 require_text "Options:"
 require_text "Safety:"
 require_text "Documentation:"

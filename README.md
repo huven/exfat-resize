@@ -109,9 +109,10 @@ Run `exfat-resize --help` for a command summary. On macOS and Linux,
 `man exfat-resize` provides the complete command-line reference.
 
 With no size, the filesystem grows to the available size of the backing object.
-A specified size is the desired filesystem size as an unsigned number of
-bytes. It is rounded down to a whole filesystem sector. Shrinking is not
-supported.
+A specified size is the desired filesystem size as an unsigned number of bytes.
+It may have an uppercase `K`, `M`, or `G` suffix, which multiplies the number by
+1024, 1024 squared, or 1024 cubed, respectively. The size is rounded down to a
+whole filesystem sector. Shrinking is not supported.
 
 The backing image, device, or partition must provide enough space for the
 requested size before the command runs. The CLI never enlarges an image file.
@@ -176,14 +177,14 @@ These commands grow the filesystem to the existing volume size; they do not
 change its partition table. An explicit size may also be supplied when it fits
 inside the existing volume:
 
-    exfat-resize E: 549755813888
+    exfat-resize E: 512G
 
 #### Growing the containing partition
 
 If an explicit size does not fit inside a logical Windows volume,
 `--grow-partition` asks the CLI to enlarge the containing partition first:
 
-    exfat-resize --grow-partition E: 549755813888
+    exfat-resize --grow-partition E: 512G
 
 This example requests a 512 GiB volume and grows the filesystem to use it. If
 the requested size already fits, the partition table is left unchanged and the
