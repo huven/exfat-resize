@@ -267,28 +267,16 @@ The filesystem must meet these prerequisites:
 
 The core library is designed to be portable across mainstream C11 environments
 and has no operating-system dependencies. It is continuously tested with GCC
-and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
-is a thin platform-specific wrapper around the library.
+and Clang on Linux, Apple Clang on macOS, and MSVC on Windows.
+
+The bundled CLI
+is a thin platform-specific wrapper around the library:
 
 | Platform | Image files | Direct filesystem access | Partition growth |
 | --- | --- | --- | --- |
 | macOS | Yes | Raw block devices | Use an external partitioning tool |
 | Linux | Yes | Raw block devices | Use an external partitioning tool |
 | Windows | Yes | Drive designators and volume-GUID paths | `--grow-partition` for supported layouts |
-
-The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
-images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
-Linux. Windows image files are opened without sharing by using `CreateFileW`
-and synchronized with `FlushFileBuffers`. The Windows volume backend discovers
-the logical and physical sector alignment, enables access through the final
-volume sectors, and uses aligned direct I/O. Logical volumes are locked with
-`FSCTL_LOCK_VOLUME` and kept locked for the complete operation. After the final
-synchronization barrier, the CLI dismounts the volume before releasing the
-lock. Persistence ultimately depends on the operating system and storage device
-honoring their flush requests.
-On macOS, platform mechanisms reject known mounted or otherwise busy backing
-objects. On every platform, the CLI retains its requested locks for the
-complete operation; regular-file locks remain advisory as described above.
 
 ## C library
 
