@@ -39,9 +39,9 @@ The routine release procedure has three steps:
    it to `main`.
 2. Check out the resulting release commit and create and push its signed
    `vX.Y.Z` tag using the command below.
-3. Wait for the `Release` workflow, review its generated notes and the source
-   and Linux assets in the draft GitHub Release, then publish the draft
-   manually.
+3. Wait for the `Release` workflow, review its generated notes and the source,
+   Linux, and Windows assets in the draft GitHub Release, then publish the
+   draft manually.
 
 The maintainer does not run `make dist`, create the GitHub Release, calculate
 checksums, or upload assets during a routine release.
