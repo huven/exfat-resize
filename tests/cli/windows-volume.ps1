@@ -320,3 +320,4 @@ foreach ($Case in $FaultCases) {
     Test-PartitionFailure $FaultImage $Case[0] $Case[1] $Case[2] $PayloadHash $Case[3]
 }
 Write-Host "windows-volume: passed"
+exit 0
