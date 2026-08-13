@@ -1,10 +1,19 @@
 # SPDX-License-Identifier: MIT
 
 function(exfat_resize_add_device_test target source test_name)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(
+            device_source
+            ${PROJECT_SOURCE_DIR}/src/windows/device.c
+            ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+        )
+    else()
+        set(device_source ${PROJECT_SOURCE_DIR}/src/posix/device.c)
+    endif()
     add_executable(
         ${target}
         ${source}
-        ${PROJECT_SOURCE_DIR}/src/device.c
+        ${device_source}
     )
 
     target_include_directories(
@@ -28,6 +37,44 @@ function(exfat_resize_add_device_test target source test_name)
     )
     set_tests_properties(${test_name} PROPERTIES LABELS cli)
 endfunction()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_executable(
+        exfat_resize_windows_device_path_test
+        windows-device-path.c
+        ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+    )
+    target_include_directories(
+        exfat_resize_windows_device_path_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    exfat_resize_configure_target(exfat_resize_windows_device_path_test)
+    add_test(
+        NAME cli.windows-device-path
+        COMMAND exfat_resize_windows_device_path_test
+    )
+    set_tests_properties(cli.windows-device-path PROPERTIES LABELS cli)
+
+    exfat_resize_add_device_test(
+        exfat_resize_device_image_test
+        device-image-windows.c
+        cli.device-image
+    )
+
+    foreach(test_case help recovery-guidance)
+        add_test(
+            NAME cli.${test_case}
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DPROGRAM=$<TARGET_FILE:exfat-resize>"
+                "-DTEST_CASE=${test_case}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/windows-command-test.cmake"
+        )
+        set_tests_properties(cli.${test_case} PROPERTIES LABELS cli)
+    endforeach()
+    return()
+endif()
 
 exfat_resize_add_device_test(
     exfat_resize_device_bounds_test

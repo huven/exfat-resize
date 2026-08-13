@@ -1,25 +1,49 @@
 # exfat-resize
 
-exfat-resize provides a portable C11 library and command-line tool for growing
-an existing exFAT filesystem in a regular file or raw block device. The backing
-object must be enlarged before the filesystem is resized.
+exfat-resize provides:
 
-## Quick install
+- A portable C11 library for growing existing exFAT filesystems.
+- A command-line tool (thin wrapper around the library) for Linux, macOS,
+  and Windows.
+
+## Quick start
+
+### Prebuilt CLI binaries
+
+Prebuilt CLI binaries are provided for these platforms:
+
+- Linux x86-64 with glibc
+
+Download the prebuilt CLI from
+[GitHub Releases](https://github.com/huven/exfat-resize/releases), verify the
+SHA-256 digest shown by GitHub, then:
+
+    tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
+    cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+    sudo ./install.sh
+
+See [Installing prebuilt CLI binaries](#installing-prebuilt-cli-binaries) for
+platform compatibility, checksum verification, custom installation prefixes,
+and uninstallation.
+
+### Build from source
 
 Building requires CMake 3.20 or newer and a C11 compiler.
 
     git clone https://github.com/huven/exfat-resize.git
     cd exfat-resize
-    make
-    cmake --install build
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEXFAT_RESIZE_BUILD_TESTS=OFF
+    cmake --build build --config Release
+    cmake --install build --config Release
+
+The commands build and install both the CLI and library on Linux, macOS, and
+Windows. On other platforms, only the portable library is built by default.
 
 The install command may require elevated privileges depending on the destination
-prefix. Run `exfat-resize --help` for a usage summary or `man exfat-resize` for
-the complete command-line reference.
+prefix.
 
-For a prebuilt Linux CLI, see [Binary install](#binary-install).
-
-For a Windows library build, see [Windows](#windows) under Build and test.
+Before using the tool, read [Safety](#safety), then see [Usage](#usage)
+for supported targets and examples.
 
 ## Safety
 
@@ -30,25 +54,29 @@ For a Windows library build, see [Windows](#windows) under Build and test.
 
 Verify that the supplied path resolves to the intended filesystem. Paths may
 resolve through symbolic links, and the selected device must present the exFAT
-main boot sector at sector zero; the tool does not inspect or modify partition
-tables.
+main boot sector at sector zero. The CLI does not modify partition tables unless
+the Windows-only `--grow-partition` option is explicitly supplied.
 
 Before resizing, run an appropriate exFAT filesystem checker while the
 filesystem is unmounted and ensure the check completes successfully.
 `exfat-resize` is not a general filesystem checker; it validates only the
 invariants needed for the resize.
 
-Keep the filesystem unmounted and prevent all other access for the complete
-operation. When resizing a regular image file, also ensure it is not attached
-through a loop or disk-image device. Platform locking helps detect cooperating
-users, but regular-file locks are advisory and cannot exclude a process that
-ignores them.
+Prevent all other access for the complete operation. On macOS and Linux, keep
+the filesystem unmounted. For a Windows logical volume, close all files and
+applications using it; the CLI obtains an exclusive volume lock, retains it
+while accessing the volume, and dismounts the filesystem before releasing the
+lock. When resizing a regular image file, also ensure it is not attached through
+a loop or disk-image device. Platform locking helps detect cooperating users,
+but regular-file locks are advisory and cannot exclude a process that ignores
+them.
 
-The backing object or partition must already be enlarged. The tool does not
-enlarge regular files or partitions. A failed or interrupted resize is not
-automatically repaired, rolled back, or resumable. Follow the recovery guidance
-printed with an error; depending on the stage reached, recovery may require a
-filesystem checker or restoring the verified backup.
+The backing object or partition must already be enlarged unless a supported
+Windows logical volume is used with `--grow-partition`. The tool never enlarges
+regular files. A failed or interrupted resize is not automatically repaired,
+rolled back, or resumable. Follow the recovery guidance printed with an error;
+depending on the stage reached, recovery may require a filesystem checker or
+restoring the verified backup.
 
 Every normal error exit prints stage-specific recovery guidance. If the command
 terminates abnormally without printing stage-specific recovery guidance, for
@@ -63,10 +91,27 @@ only when the command explicitly reports that it is safe.
     exfat-resize -h | --help
     exfat-resize -V | --version
 
+Run `exfat-resize --help` for a command summary. On macOS and Linux,
+`man exfat-resize` provides the complete command-line reference.
+
 With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of
 bytes. It is rounded down to a whole filesystem sector. Shrinking is not
 supported.
+
+The backing image, device, or partition must provide enough space for the
+requested size before the command runs. The CLI never enlarges an image file.
+On Windows, [`--grow-partition`](#growing-the-containing-partition) can
+optionally enlarge a supported partition as part of an explicit-size resize.
+
+Only filesystems meeting the
+[compatibility requirements](#filesystem-compatibility) below are supported.
+
+### macOS and Linux
+
+`device` may be a regular image file or an unmounted raw block device. Prevent
+all other access to it for the complete operation. In particular, do not leave
+an image attached through a loop or disk-image device while resizing it.
 
 Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
 to use all available space:
@@ -74,12 +119,109 @@ to use all available space:
     truncate -s +2G image.exfat
     exfat-resize image.exfat
 
-Grow the exFAT filesystem on an unmounted raw device to use all available space:
+After enlarging the partition or other backing storage with the appropriate
+platform tool, grow the filesystem on an unmounted raw device:
 
     exfat-resize /dev/your-exfat-device
 
-Only filesystems meeting the
-[compatibility requirements](#filesystem-compatibility) below are supported.
+Regular-file locks are advisory and cannot exclude a process that ignores them.
+On macOS, the CLI rejects known mounted or otherwise busy backing objects. Keep
+the image or raw device unavailable to other processes until the command has
+finished.
+
+### Windows
+
+`device` may be:
+
+- A regular image-file path, including a Unicode path.
+- An exact drive designator such as `E:`.
+- An exact volume-GUID path such as `\\?\Volume{GUID}\`.
+
+Physical-disk paths such as `\\.\PhysicalDrive0` and other Windows device
+namespace forms are not supported as command targets.
+
+An image file must already have the desired length and is presented to the
+filesystem as a device with 512-byte sectors. Resizing an image normally does
+not require Administrator privileges, although the account running the command
+must have exclusive read/write access to the file:
+
+    exfat-resize C:\path\to\image.exfat
+
+For a logical volume, open an elevated terminal and close all files and
+applications using it. The CLI locks the volume exclusively before reading or
+writing it, retains the lock for the complete operation, synchronizes all
+writes, and dismounts the filesystem before releasing the lock. If the volume
+cannot be locked, the resize does not start.
+
+Use either its drive designator or volume-GUID path:
+
+    exfat-resize E:
+    exfat-resize \\?\Volume{GUID}\
+
+These commands grow the filesystem to the existing volume size; they do not
+change its partition table. An explicit size may also be supplied when it fits
+inside the existing volume:
+
+    exfat-resize E: 549755813888
+
+#### Growing the containing partition
+
+If an explicit size does not fit inside a logical Windows volume,
+`--grow-partition` asks the CLI to enlarge the containing partition first:
+
+    exfat-resize --grow-partition E: 549755813888
+
+This example requests a 512 GiB volume and grows the filesystem to use it. If
+the requested size already fits, the partition table is left unchanged and the
+filesystem resize proceeds normally.
+
+Partition growth is deliberately opt-in because changing a partition table has
+a wider effect than changing metadata within the selected filesystem. It
+requires:
+
+- An elevated terminal and an explicit size.
+- A logical volume that maps to one complete physical-disk extent.
+- A basic GPT or MBR data partition with no overlapping layout entry.
+- Enough unallocated space immediately after the partition.
+
+Before changing the partition table, the CLI validates both exFAT boot regions,
+checks that the filesystem can grow to the requested size, and verifies the
+volume-to-disk mapping and physical partition layout. It then uses Windows'
+documented [`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It never moves
+a partition start or another partition, and never shrinks a partition.
+
+The full filesystem preflight runs after the partition is enlarged. If that
+preflight fails, the original filesystem remains authoritative inside the
+larger partition; do not shrink the partition. Correct the reported problem
+and retry the filesystem resize. Without `--grow-partition`, the CLI never
+changes a partition table.
+
+For a layout that this mode does not support, one open-source alternative is to
+boot [GParted Live][gparted-live], identify the whole target disk carefully, and
+use the included terminal rather than GParted's graphical exFAT resize action:
+
+```text
+sudo parted /dev/sdX
+(parted) unit s
+(parted) print free
+(parted) resizepart PARTITION_NUMBER NEW_END_SECTOR
+(parted) quit
+```
+
+[GNU Parted documents][resizepart] that `resizepart` changes the partition end
+without modifying the filesystem. Record the start sector first, select only
+an end sector in the immediately following free extent, and verify afterwards
+that the start is unchanged. Do not use this procedure to shrink exFAT.
+
+Windows DiskPart is not a substitute: its [documented `extend`
+operation][diskpart-extend] automatically extends NTFS and fails without a
+partition change for other formatted filesystems. Do not rely on claims that it
+will silently extend only an exFAT partition.
+
+[diskpart-extend]: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/extend
+[gparted-live]: https://gparted.org/livecd.php
+[resizepart]: https://www.gnu.org/software/parted/manual/html_node/resizepart.html
+[windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
 
 ## Filesystem compatibility
 
@@ -103,18 +245,27 @@ The filesystem must meet these prerequisites:
 The core library is designed to be portable across mainstream C11 environments
 and has no operating-system dependencies. It is continuously tested with GCC
 and Clang on Linux, Apple Clang on macOS, and MSVC on Windows. The bundled CLI
-is a thin platform-specific wrapper around the library and is currently
-supported and tested on macOS and Linux. Porting the CLI primarily requires
-implementing device access, exclusive-access checks, and durable
-synchronization for the target platform; contributions are welcome.
+is a thin platform-specific wrapper around the library.
+
+| Platform | Image files | Direct filesystem access | Partition growth |
+| --- | --- | --- | --- |
+| macOS | Yes | Raw block devices | Use an external partitioning tool |
+| Linux | Yes | Raw block devices | Use an external partitioning tool |
+| Windows | Yes | Drive designators and volume-GUID paths | `--grow-partition` for supported layouts |
 
 The CLI implements synchronization barriers with `F_FULLFSYNC` for regular
 images and `DKIOCSYNCHRONIZE` for raw devices on macOS, and with `fsync` on
-Linux. Persistence ultimately depends on the operating system and storage
-device honoring their flush requests.
+Linux. Windows image files are opened without sharing by using `CreateFileW`
+and synchronized with `FlushFileBuffers`. The Windows volume backend discovers
+the logical and physical sector alignment, enables access through the final
+volume sectors, and uses aligned direct I/O. Logical volumes are locked with
+`FSCTL_LOCK_VOLUME` and kept locked for the complete operation. After the final
+synchronization barrier, the CLI dismounts the volume before releasing the
+lock. Persistence ultimately depends on the operating system and storage device
+honoring their flush requests.
 On macOS, platform mechanisms reject known mounted or otherwise busy backing
-objects. The CLI retains its requested locks for the complete operation;
-regular-file locks remain advisory as described above.
+objects. On every platform, the CLI retains its requested locks for the
+complete operation; regular-file locks remain advisory as described above.
 
 ## C library
 
@@ -186,8 +337,8 @@ failure guarantees.
 
 Downstream CMake projects can use `add_subdirectory()` and link
 `exfat_resize::exfat_resize`. The install target also provides the header,
-static library, CLI executable, manual page, and CMake package files. This
-README and the exact MIT license are installed under CMake's
+static library, CLI executable, CMake package files, and a manual page on macOS
+and Linux. This README and the exact MIT license are installed under CMake's
 `CMAKE_INSTALL_DOCDIR`.
 Installed CMake packages use same-major version compatibility, so consumers
 can require a compatible 1.x release:
@@ -201,46 +352,9 @@ between separately compiled artifacts from different releases or deliberately
 different compiler ABIs is not promised. Incompatible source changes require a
 new major release.
 
-## Build and test
+## Installing prebuilt CLI binaries
 
-CMake 3.20 or newer is the canonical build system for the library, CLI, and
-tests. The top-level Makefile is a convenience wrapper around CMake and the
-release scripts. If the macOS CMake application is installed without
-command-line links, add its tools to `PATH`:
-
-    export PATH=/Applications/CMake.app/Contents/bin:$PATH
-
-    make
-    make test
-    make sanitize-test
-    make release-test
-
-`make` produces `build/exfat-resize`. `make test` builds every target and runs
-the separately labeled library, package, and CLI suites through CTest. The CLI
-tests use newfs_exfat and fsck_exfat on macOS, or mkfs.exfat and fsck.exfat on
-Linux. The sanitizer target runs all suites with AddressSanitizer and
-UndefinedBehaviorSanitizer in a separate build directory. It also builds and
-runs C and C++ `add_subdirectory()` consumers to verify the sanitized static
-library's runtime link requirements.
-The release target creates and verifies the source archive from committed
-`HEAD`, installs it into a temporary prefix, and builds C and C++ consumers
-using both `find_package()` and `add_subdirectory()`.
-
-For a custom installation prefix:
-
-    cmake --install build --prefix /your/prefix
-
-### Windows
-
-The CLI is not currently supported on Windows, so a standalone CMake build
-includes only the library and its tests by default:
-
-    cmake -S . -B build
-    cmake --build build --config Release
-    ctest --test-dir build --build-config Release --output-on-failure -L library
-    cmake --install build --config Release
-
-## Binary install
+### Linux
 
 GitHub Releases provide a prebuilt CLI archive expected to run on all conventional
 `x86_64` Linux distributions using glibc 2.28 or newer. It is built on
@@ -274,3 +388,46 @@ installed files:
 For a custom prefix, remove it with:
 
     PREFIX=/your/prefix ./uninstall.sh
+
+## Build and test
+
+CMake 3.20 or newer is the canonical build system for the library, CLI, and
+tests.
+
+### macOS and Linux
+
+The top-level Makefile is a convenience wrapper around CMake and the release
+scripts. If the macOS CMake application is installed without command-line
+links, add its tools to `PATH`:
+
+    export PATH=/Applications/CMake.app/Contents/bin:$PATH
+
+    make
+    make test
+    make sanitize-test
+    make release-test
+
+`make` produces `build/exfat-resize`. `make test` builds every target and runs
+the separately labeled library, package, and CLI suites through CTest. The CLI
+tests use newfs_exfat and fsck_exfat on macOS, or mkfs.exfat and fsck.exfat on
+Linux. The sanitizer target runs all suites with AddressSanitizer and
+UndefinedBehaviorSanitizer in a separate build directory. It also builds and
+runs C and C++ `add_subdirectory()` consumers to verify the sanitized static
+library's runtime link requirements.
+The release target creates and verifies the source archive from committed
+`HEAD`, installs it into a temporary prefix, and builds C and C++ consumers
+using both `find_package()` and `add_subdirectory()`.
+
+For a custom installation prefix:
+
+    cmake --install build --prefix /your/prefix
+
+### Windows build
+
+The Windows build includes the CLI and library by default. It uses only native
+Windows APIs and does not require a POSIX compatibility layer:
+
+    cmake -S . -B build
+    cmake --build build --config Release
+    ctest --test-dir build --build-config Release --output-on-failure -L "library|cli|package-native"
+    cmake --install build --config Release

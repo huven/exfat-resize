@@ -71,6 +71,12 @@ static void record_io_error(struct device *device, const char *operation, int er
 	device->io_error_number = error_number;
 }
 
+void device_init(struct device *device)
+{
+	(void)memset(device, 0, sizeof(*device));
+	device->fd = -1;
+}
+
 int device_open(struct device *device, const char *path, char *error, size_t error_size)
 {
 	struct stat st;
@@ -186,11 +192,40 @@ fail_after_open:
 	return -1;
 }
 
+int device_grow_partition(struct device *device,
+    const char *path,
+    uint64_t target_size,
+    int *partition_grown,
+    char *error,
+    size_t error_size)
+{
+	(void)device;
+	(void)target_size;
+	*partition_grown = 0;
+	(void)snprintf(error, error_size,
+	    "%s: --grow-partition is supported only for logical Windows volumes", path);
+	return -1;
+}
+
+int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
+{
+	(void)device;
+	(void)path;
+	(void)error;
+	(void)error_size;
+	return 0;
+}
+
 void device_close(struct device *device)
 {
 	if (device->fd >= 0)
 		(void)close(device->fd);
 	device->fd = -1;
+}
+
+void device_format_io_error(const struct device *device, char *error, size_t error_size)
+{
+	(void)snprintf(error, error_size, "%s", strerror(device->io_error_number));
 }
 
 static int transfer(

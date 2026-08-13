@@ -23,9 +23,14 @@ set(license "${documentation_dir}/LICENSE")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
 
 file(REMOVE_RECURSE "${install_prefix}")
+set(install_command
+    "@CMAKE_COMMAND@" --install "@PROJECT_BINARY_DIR@" --prefix "${install_prefix}"
+)
+if(DEFINED INSTALL_CONFIG AND NOT INSTALL_CONFIG STREQUAL "")
+    list(APPEND install_command --config "${INSTALL_CONFIG}")
+endif()
 execute_process(
-    COMMAND
-        "@CMAKE_COMMAND@" --install "@PROJECT_BINARY_DIR@" --prefix "${install_prefix}"
+    COMMAND ${install_command}
     RESULT_VARIABLE
         install_result
     OUTPUT_VARIABLE
@@ -51,11 +56,9 @@ foreach(required_file
 endforeach()
 
 if("@EXFAT_RESIZE_BUILD_CLI@")
-    foreach(required_cli_file "${installed_cli}" "${installed_manpage}")
-        if(NOT EXISTS "${required_cli_file}")
-            message(FATAL_ERROR "Installed CLI file not found at ${required_cli_file}")
-        endif()
-    endforeach()
+    if(NOT EXISTS "${installed_cli}")
+        message(FATAL_ERROR "Installed CLI file not found at ${installed_cli}")
+    endif()
     execute_process(
         COMMAND "${installed_cli}" --version
         RESULT_VARIABLE cli_result
@@ -68,6 +71,12 @@ if("@EXFAT_RESIZE_BUILD_CLI@")
         message(FATAL_ERROR
             "Installed CLI version check failed:\n${cli_output}${cli_error}"
         )
+    endif()
+endif()
+
+if("@EXFAT_RESIZE_INSTALL_MANPAGE@")
+    if(NOT EXISTS "${installed_manpage}")
+        message(FATAL_ERROR "Installed manual page not found at ${installed_manpage}")
     endif()
     file(READ "${installed_manpage}" manpage_contents)
     foreach(required_text

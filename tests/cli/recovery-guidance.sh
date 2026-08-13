@@ -5,7 +5,8 @@ set -eu
 
 program=$1
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/exfat-resize-guidance.XXXXXX")
-no_write_guidance="exfat-resize: no filesystem write was attempted; correct the error and retry when appropriate"
+no_write_guidance="exfat-resize: no filesystem write was attempted;"
+no_write_guidance="$no_write_guidance correct the error and retry when appropriate"
 
 cleanup() {
 	rm -rf "$temporary"
@@ -54,6 +55,12 @@ trap cleanup EXIT HUP INT TERM
 
 expect_no_write_failure missing-target
 expect_no_write_failure unknown-option --unknown
+expect_no_write_failure grow-partition --grow-partition "$temporary/missing" 1
+if ! grep -F "supported only for logical Windows volumes" \
+	"$temporary/grow-partition.out" >/dev/null; then
+	echo "grow-partition did not report its platform restriction" >&2
+	exit 1
+fi
 expect_no_write_failure invalid-size "$temporary/missing" 0
 expect_no_write_failure target-open "$temporary/missing"
 
