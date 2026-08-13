@@ -13,18 +13,25 @@ exfat-resize provides:
 Prebuilt CLI binaries are provided for these platforms:
 
 - Linux x86-64 with glibc
+- Windows x86-64
 
 Download the prebuilt CLI from
-[GitHub Releases](https://github.com/huven/exfat-resize/releases), verify the
-SHA-256 digest shown by GitHub, then:
+[GitHub Releases](https://github.com/huven/exfat-resize/releases) and verify the
+SHA-256 digest shown by GitHub. On Linux:
 
     tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
     cd exfat-resize-X.Y.Z-linux-x86_64-glibc
     sudo ./install.sh
 
+On Windows PowerShell, no installation is required:
+
+    Expand-Archive exfat-resize-X.Y.Z-windows-x86_64.zip -DestinationPath .
+    cd exfat-resize-X.Y.Z-windows-x86_64
+    .\exfat-resize.exe --help
+
 See [Installing prebuilt CLI binaries](#installing-prebuilt-cli-binaries) for
 platform compatibility, checksum verification, custom installation prefixes,
-and uninstallation.
+and platform-specific setup.
 
 ### Build from source
 
@@ -388,6 +395,32 @@ installed files:
 For a custom prefix, remove it with:
 
     PREFIX=/your/prefix ./uninstall.sh
+
+### Windows
+
+GitHub Releases provide a self-contained x86-64 Windows CLI archive. The
+executable is built with MSVC's C runtime linked statically, so it does not
+require a separate Visual C++ Redistributable installation.
+
+Download `exfat-resize-X.Y.Z-windows-x86_64.zip` from the corresponding
+[GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
+an immutable SHA-256 digest beside the asset; compare it with the `Hash` shown
+by PowerShell:
+
+    Get-FileHash exfat-resize-X.Y.Z-windows-x86_64.zip -Algorithm SHA256
+
+Replace `X.Y.Z` with the release version, then extract the archive and run the
+CLI from the extracted directory:
+
+    Expand-Archive exfat-resize-X.Y.Z-windows-x86_64.zip -DestinationPath .
+    cd exfat-resize-X.Y.Z-windows-x86_64
+    .\exfat-resize.exe --version
+
+The archive also contains the license, this README, and the resize-transaction
+documentation. Resizing an image file normally does not require elevation. To
+access a logical volume or grow its partition, open PowerShell or Command Prompt
+as Administrator and invoke the extracted executable as described under
+[Windows usage](#windows).
 
 ## Build and test
 

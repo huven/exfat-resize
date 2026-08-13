@@ -111,15 +111,6 @@ jobs:
           ctest --test-dir build/windows --build-config Release
           --output-on-failure -L "library|cli|package-native"
 
-      - name: Upload Windows CLI for logical-volume testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-cli-${{ github.run_id }}
-          path: build/windows/Release/exfat-resize.exe
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 1
-
   windows-volume-fixture:
     name: Prepare Windows logical-volume fixture
     runs-on: ubuntu-latest
@@ -150,7 +141,7 @@ jobs:
   windows-volume:
     name: Windows logical volumes
     needs:
-      - windows
+      - windows-binary
       - windows-volume-fixture
     runs-on: windows-latest
 
@@ -160,11 +151,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download Windows CLI
+      - name: Download tested Windows archive
         uses: actions/download-artifact@v4
         with:
-          name: windows-cli-${{ github.run_id }}
-          path: build/windows-volume-program
+          name: windows-binary-ci-${{ github.run_id }}
+          path: build/windows-binary
+
+      - name: Extract Windows CLI
+        shell: pwsh
+        run: |
+          $Archives = @(Get-ChildItem build/windows-binary -File `
+            -Filter "exfat-resize-*-windows-x86_64.zip")
+          if ($Archives.Count -ne 1) {
+            throw "Expected one Windows archive, found $($Archives.Count)"
+          }
+          Expand-Archive -LiteralPath $Archives[0].FullName `
+            -DestinationPath build/windows-volume-program
+          $Programs = @(Get-ChildItem build/windows-volume-program -Recurse -File `
+            -Filter "exfat-resize.exe")
+          if ($Programs.Count -ne 1) {
+            throw "Expected one Windows CLI, found $($Programs.Count)"
+          }
+          "EXFAT_RESIZE_WINDOWS_CLI=$($Programs[0].FullName)" >> $env:GITHUB_ENV
 
       - name: Download Windows logical-volume fixture
         uses: actions/download-artifact@v4
@@ -176,7 +184,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/cli/windows-volume.ps1 `
-            -Program build/windows-volume-program/exfat-resize.exe `
+            -Program $env:EXFAT_RESIZE_WINDOWS_CLI `
             -Fixture build/windows-volume-fixture/prepared.vhdx `
             -ExpectedHash build/windows-volume-fixture/payload.sha256
 
@@ -270,4 +278,13 @@ jobs:
     with:
       source_artifact_name: source-ci-${{ github.run_id }}
       binary_artifact_name: linux-binary-ci-${{ github.run_id }}
+      retention_days: 1
+
+  windows-binary:
+    name: Windows binary archive
+    needs: release-package
+    uses: ./.github/workflows/windows-binary.yml
+    with:
+      source_artifact_name: source-ci-${{ github.run_id }}
+      binary_artifact_name: windows-binary-ci-${{ github.run_id }}
       retention_days: 1
