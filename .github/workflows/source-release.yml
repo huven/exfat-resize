@@ -278,6 +278,14 @@ jobs:
       - name: Upload verified macOS archive and remove signing handoff
         run: |
           set -euo pipefail
+          require_draft_release() {
+            is_draft=$(gh release view "$RELEASE_REF" --json isDraft --jq .isDraft)
+            if [ "$is_draft" != true ]; then
+              echo "refusing to modify published release $RELEASE_REF" >&2
+              exit 1
+            fi
+          }
+
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
           linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
@@ -286,6 +294,7 @@ jobs:
           signed_executable=exfat-resize-$version-macos-arm64.signed
           archive_path=final-release-assets/$macos_archive
 
+          require_draft_release
           gh release upload "$RELEASE_REF" "$archive_path" --clobber
           archive_sha256=$(shasum -a 256 "$archive_path" | awk '{ print $1 }')
           published_digest=$(
@@ -306,4 +315,5 @@ jobs:
           fi
 
           printf 'verified macOS release archive SHA-256: %s\n' "$archive_sha256"
+          require_draft_release
           gh release delete-asset "$RELEASE_REF" "$signed_executable" --yes
