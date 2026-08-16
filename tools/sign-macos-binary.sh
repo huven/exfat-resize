@@ -60,8 +60,8 @@ else
 	fi
 fi
 
-if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
-	fail "signing requires macOS ARM64"
+if [ "$(uname -s)" != Darwin ]; then
+	fail "signing requires macOS"
 fi
 
 input_archive=$1
@@ -112,10 +112,6 @@ binary=$temporary/exfat-resize
 COPYFILE_DISABLE=1 tar -xOzf "$archive" "$binary_entry" >"$binary"
 chmod 0755 "$binary"
 
-if [ "$("$binary" --version)" != "exfat-resize $build_version" ]; then
-	fail "archived CLI version is incorrect"
-fi
-"$binary" --help >/dev/null
 architectures=$(lipo -archs "$binary")
 [ "$architectures" = arm64 ] || fail "unexpected Mach-O architecture set: $architectures"
 build_info=$(xcrun vtool -show-build "$binary")
@@ -181,10 +177,6 @@ entitlements=$(codesign -d --entitlements - "$binary" 2>/dev/null)
 if [ -n "$entitlements" ]; then
 	fail "signed CLI has unexpected entitlements"
 fi
-if [ "$("$binary" --version)" != "exfat-resize $build_version" ]; then
-	fail "signed CLI version is incorrect"
-fi
-
 notary_archive=$temporary/$package-notarization.zip
 COPYFILE_DISABLE=1 ditto -c -k --keepParent "$binary" "$notary_archive"
 submission=$temporary/notarization-submission.json

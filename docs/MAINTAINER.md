@@ -54,11 +54,12 @@ manually; the workflow removes it after constructing the final archive.
 
 The workflow creates or updates a draft release; it never modifies an already
 published release. If assembly or verification fails, use **Re-run failed jobs**
-to retain the uploaded executable. **Re-run all jobs** also reruns draft creation,
-which deletes every existing draft asset; upload the same signed executable again
-when the workflow returns to the approval. Neither case requires replacing the
-release tag. Review the generated notes and assets before publishing the draft
-manually.
+to retain and reuse the uploaded executable. **Re-run all jobs** rebuilds the
+unsigned archive and reruns draft creation, which deletes every existing draft
+asset. Download and verify the new workflow artifact, sign it again, and upload
+its new `.signed` executable when the workflow returns to the approval. Neither
+case requires replacing the release tag. Review the generated notes and assets
+before publishing the draft manually.
 
 The repository must have a protected GitHub environment named `macos-release`
 with the maintainer as a required reviewer. Do not enable prevention of
@@ -102,14 +103,15 @@ directory:
         exfat-resize-X.Y.Z-macos-arm64.tar.gz signed
 
 Before accessing the signing identity, the helper selectively extracts exactly
-one regular CLI entry and validates its version, architecture, deployment target,
-dependencies, and ad-hoc signature. It then signs the CLI with the hardened
-runtime and a secure timestamp, submits a temporary ZIP to Apple, retrieves the
-notarization log, and writes `exfat-resize-X.Y.Z-macos-arm64.signed` alongside
-that log. Because Apple does not support stapling a ticket to a standalone
-executable, the helper verifies the ticket with the online notarization check
-supported by `codesign`. Upload only the `.signed` executable to the draft GitHub
-Release, then approve the pending `macos-release` environment job.
+one regular CLI entry and validates the archive version, architecture, deployment
+target, dependencies, and ad-hoc signature without executing the downloaded CLI.
+It then signs the CLI with the hardened runtime and a secure timestamp, submits a
+temporary ZIP to Apple, retrieves the notarization log, and writes
+`exfat-resize-X.Y.Z-macos-arm64.signed` alongside that log. Because Apple does not
+support stapling a ticket to a standalone executable, the helper verifies the
+ticket with the online notarization check supported by `codesign`. Upload only the
+`.signed` executable to the draft GitHub Release, then approve the pending
+`macos-release` environment job.
 
 The approved job downloads that exact draft asset and its own tested unsigned
 archive on a fresh macOS runner. It verifies that removing and canonicalizing the
