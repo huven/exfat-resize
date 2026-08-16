@@ -71,17 +71,10 @@ archive=$archive_directory/$input_name
 [ -f "$archive" ] || fail "archive does not exist: $archive"
 
 case $input_name in
-	exfat-resize-*-macos-arm64.tar.gz)
-		package=${input_name%.tar.gz}
-		gzip -t "$archive"
-		content_sha256=$(gzip -dc "$archive" | shasum -a 256 | awk '{ print $1 }')
-		;;
-	exfat-resize-*-macos-arm64.tar)
-		package=${input_name%.tar}
-		content_sha256=$(shasum -a 256 "$archive" | awk '{ print $1 }')
-		;;
+	exfat-resize-*-macos-arm64.tar.gz) package=${input_name%.tar.gz} ;;
 	*) fail "unexpected unsigned archive name: $input_name" ;;
 esac
+gzip -t "$archive"
 
 tool_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 package_version=$(sed -n '1p' "$tool_root/VERSION")
@@ -100,32 +93,14 @@ esac
 
 input_sha256=$(shasum -a 256 "$archive" | awk '{ print $1 }')
 printf 'input archive SHA-256: %s\n' "$input_sha256"
-printf 'uncompressed tar SHA-256: %s\n' "$content_sha256"
 
-expected_entries=$(
-	printf '%s\n' \
-		"$package/" \
-		"$package/LICENSE" \
-		"$package/README.md" \
-		"$package/docs/" \
-		"$package/docs/TRANSACTION.md" \
-		"$package/exfat-resize" \
-		"$package/exfat-resize.8" \
-		"$package/install.sh" \
-		"$package/uninstall.sh" |
-		sort
-)
-actual_entries=$(LC_ALL=C tar -tf "$archive" | sort)
-if [ "$actual_entries" != "$expected_entries" ]; then
-	fail "archive contains an unexpected file set"
-fi
-unexpected_types=$(LC_ALL=C tar -tvf "$archive" |
-	awk 'substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { print }')
-if [ -n "$unexpected_types" ]; then
-	echo "archive contains an unexpected entry type:" >&2
-	printf '%s\n' "$unexpected_types" >&2
-	exit 1
-fi
+binary_entry=$package/exfat-resize
+binary_entry_count=$(LC_ALL=C tar -tf "$archive" |
+	awk -v expected="$binary_entry" '$0 == expected { count++ } END { print count + 0 }')
+[ "$binary_entry_count" -eq 1 ] || fail "archive must contain exactly one $binary_entry"
+binary_type=$(LC_ALL=C tar -tvf "$archive" "$binary_entry" |
+	awk 'NR == 1 { print substr($1, 1, 1) }')
+[ "$binary_type" = - ] || fail "archived CLI is not a regular file"
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/exfat-resize-macos-sign.XXXXXX")
 cleanup() {
@@ -133,30 +108,9 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-mkdir "$temporary/extracted"
-COPYFILE_DISABLE=1 tar -xf "$archive" -C "$temporary/extracted"
-package_directory=$temporary/extracted/$package
-binary=$package_directory/exfat-resize
-if [ ! -d "$package_directory" ] || [ ! -x "$binary" ]; then
-	fail "archive extraction is incomplete"
-fi
-if [ "$(stat -f '%Lp' "$binary")" != 755 ] ||
-	[ "$(stat -f '%Lp' "$package_directory/install.sh")" != 755 ] ||
-	[ "$(stat -f '%Lp' "$package_directory/uninstall.sh")" != 755 ]; then
-	fail "archive executable modes are incorrect"
-fi
-if [ "$(stat -f '%Lp' "$package_directory/exfat-resize.8")" != 644 ] ||
-	[ "$(stat -f '%Lp' "$package_directory/LICENSE")" != 644 ] ||
-	[ "$(stat -f '%Lp' "$package_directory/README.md")" != 644 ] ||
-	[ "$(stat -f '%Lp' "$package_directory/docs/TRANSACTION.md")" != 644 ]; then
-	fail "archive data-file modes are incorrect"
-fi
-
-cmp "$tool_root/LICENSE" "$package_directory/LICENSE"
-cmp "$tool_root/README.md" "$package_directory/README.md"
-cmp "$tool_root/docs/TRANSACTION.md" "$package_directory/docs/TRANSACTION.md"
-cmp "$tool_root/packaging/linux/install.sh" "$package_directory/install.sh"
-cmp "$tool_root/packaging/linux/uninstall.sh" "$package_directory/uninstall.sh"
+binary=$temporary/exfat-resize
+COPYFILE_DISABLE=1 tar -xOzf "$archive" "$binary_entry" >"$binary"
+chmod 0755 "$binary"
 
 if [ "$("$binary" --version)" != "exfat-resize $build_version" ]; then
 	fail "archived CLI version is incorrect"
@@ -190,11 +144,10 @@ fi
 output_directory_input=$2
 mkdir -p "$output_directory_input"
 output_directory=$(CDPATH= cd -- "$output_directory_input" && pwd)
-output_name=$package.tar.gz
-output_archive=$output_directory/$output_name
+output_name=$package.signed
+output_binary=$output_directory/$output_name
 output_log=$output_directory/$output_name.notarization.json
-[ "$output_archive" != "$archive" ] || fail "output would overwrite the unsigned input"
-[ ! -e "$output_archive" ] || fail "output archive already exists: $output_archive"
+[ ! -e "$output_binary" ] || fail "output executable already exists: $output_binary"
 [ ! -e "$output_log" ] || fail "notarization log already exists: $output_log"
 
 identities=$(security find-identity -v -p codesigning)
@@ -203,11 +156,14 @@ if ! printf '%s\n' "$identities" | grep -F "$identity" >/dev/null; then
 	fail "code-signing identity is not available: $identity"
 fi
 
-codesign --force --options runtime --timestamp --sign "$identity" "$binary"
+codesign --force --identifier exfat-resize --options runtime --timestamp \
+	--sign "$identity" "$binary"
 codesign --verify --strict --verbose=2 "$binary"
 signing_details=$(codesign -dvvv "$binary" 2>&1)
+identifier=$(printf '%s\n' "$signing_details" | sed -n 's/^Identifier=//p')
 authority=$(printf '%s\n' "$signing_details" | sed -n 's/^Authority=//p' | sed -n '1p')
 team_identifier=$(printf '%s\n' "$signing_details" | sed -n 's/^TeamIdentifier=//p')
+[ "$identifier" = exfat-resize ] || fail "signed CLI has an unexpected identifier: $identifier"
 case $authority in
 	"Developer ID Application: "*) ;;
 	*) fail "CLI was not signed with a Developer ID Application certificate" ;;
@@ -218,15 +174,19 @@ fi
 if ! printf '%s\n' "$signing_details" | grep -E '^Timestamp=.' >/dev/null; then
 	fail "signed CLI does not have a secure timestamp"
 fi
-if ! printf '%s\n' "$signing_details" | grep -E '^CodeDirectory .*\(.*runtime.*\)' >/dev/null; then
-	fail "signed CLI does not enable the hardened runtime"
+if ! printf '%s\n' "$signing_details" | grep -F 'flags=0x10000(runtime)' >/dev/null; then
+	fail "signed CLI does not have only the hardened-runtime code-signing flag"
+fi
+entitlements=$(codesign -d --entitlements - "$binary" 2>/dev/null)
+if [ -n "$entitlements" ]; then
+	fail "signed CLI has unexpected entitlements"
 fi
 if [ "$("$binary" --version)" != "exfat-resize $build_version" ]; then
 	fail "signed CLI version is incorrect"
 fi
 
 notary_archive=$temporary/$package-notarization.zip
-COPYFILE_DISABLE=1 ditto -c -k --keepParent "$package_directory" "$notary_archive"
+COPYFILE_DISABLE=1 ditto -c -k --keepParent "$binary" "$notary_archive"
 submission=$temporary/notarization-submission.json
 notary_exit=0
 xcrun notarytool submit "$notary_archive" \
@@ -247,33 +207,23 @@ fi
 [ -n "$submission_id" ] || fail "notarization response did not contain a submission ID"
 [ "$notary_status" = Accepted ] || fail "notarization status is $notary_status"
 
-candidate_archive=$temporary/$output_name
-COPYFILE_DISABLE=1 tar -czf "$candidate_archive" -C "$temporary/extracted" "$package"
-
-mkdir "$temporary/final-check"
-COPYFILE_DISABLE=1 tar -xzf "$candidate_archive" -C "$temporary/final-check"
-final_binary=$temporary/final-check/$package/exfat-resize
-codesign --verify --strict --verbose=2 "$final_binary"
-if [ "$("$final_binary" --version)" != "exfat-resize $build_version" ]; then
-	fail "final archived CLI version is incorrect"
-fi
 notarization_attempt=1
 while ! notarization_check=$(codesign -vvvv -R=notarized \
-	--check-notarization "$final_binary" 2>&1); do
+	--check-notarization "$binary" 2>&1); do
 	if [ "$notarization_attempt" -ge 6 ]; then
 		printf '%s\n' "$notarization_check" >&2
-		fail "notarization ticket is unavailable for the final CLI"
+		fail "notarization ticket is unavailable for the signed CLI"
 	fi
 	notarization_attempt=$((notarization_attempt + 1))
 	sleep 5
 done
 printf '%s\n' "$notarization_check"
 
-install -m 0644 "$candidate_archive" "$output_archive"
+install -m 0755 "$binary" "$output_binary"
 install -m 0644 "$notary_log" "$output_log"
-output_sha256=$(shasum -a 256 "$output_archive" | awk '{ print $1 }')
-printf 'built signed and notarized archive: %s\n' "$output_archive"
+output_sha256=$(shasum -a 256 "$output_binary" | awk '{ print $1 }')
+printf 'built signed and notarized executable: %s\n' "$output_binary"
 printf 'notarization log: %s\n' "$output_log"
 printf 'Developer ID authority: %s\n' "$authority"
 printf 'Team Identifier: %s\n' "$team_identifier"
-printf 'output archive SHA-256: %s\n' "$output_sha256"
+printf 'output executable SHA-256: %s\n' "$output_sha256"

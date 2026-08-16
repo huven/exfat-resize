@@ -390,7 +390,9 @@ GitHub Releases provide two Unix CLI archives:
 
 Download the archive for the target platform from the corresponding
 [GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
-an immutable SHA-256 digest beside each asset. On macOS, compare it with:
+an immutable SHA-256 digest beside each asset. When using Safari, Option-click
+the macOS asset link so Safari downloads it without automatically opening and
+decompressing it. Compare the retained `.tar.gz` with GitHub's digest:
 
     shasum -a 256 exfat-resize-X.Y.Z-macos-arm64.tar.gz
 

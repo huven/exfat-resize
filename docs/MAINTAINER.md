@@ -43,40 +43,47 @@ The routine release procedure has six steps:
    the `macos-release` environment approval.
 4. Download the unsigned macOS workflow artifact, then sign and notarize it as
    described below.
-5. Upload the signed macOS archive to the draft and approve the waiting
+5. Upload the signed macOS executable to the draft and approve the waiting
    `macos-release` job.
-6. Wait for signed-archive verification, review the generated notes and all
-   assets, then publish the draft manually.
+6. Wait for GitHub to assemble and verify the signed archive, review the
+   generated notes and all assets, then publish the draft manually.
 
 The maintainer does not run `make dist`, create the GitHub Release, or calculate
-release checksums. The signed macOS archive is the only asset uploaded manually.
+release checksums. A temporary signed macOS executable is the only file uploaded
+manually; the workflow removes it after constructing the final archive.
 
 The workflow creates or updates a draft release; it never modifies an already
-published release. A failed run can therefore be rerun safely. Review the
-generated notes and assets before publishing the draft manually.
+published release. If assembly or verification fails, use **Re-run failed jobs**
+to retain the uploaded executable. **Re-run all jobs** also reruns draft creation,
+which deletes every existing draft asset; upload the same signed executable again
+when the workflow returns to the approval. Neither case requires replacing the
+release tag. Review the generated notes and assets before publishing the draft
+manually.
 
 The repository must have a protected GitHub environment named `macos-release`
 with the maintainer as a required reviewer. Do not enable prevention of
 self-review for a release initiated by that maintainer. The environment stores
 no signing credentials; it only holds the verification job until the signed
-archive has been uploaded to the draft.
+executable has been uploaded to the draft.
 
-## Signing the macOS binary archive
+## Signing the macOS executable
 
 The `Test` and `Release` workflows retain the tested, ad-hoc-signed macOS
 archive as a workflow artifact. Download that artifact separately; do not give
-the signing helper GitHub credentials. The build log prints both the compressed
-archive SHA-256 and the SHA-256 of its uncompressed tar stream. The latter
-remains comparable if Safari automatically expands the `.tar.gz` to `.tar`.
+the signing helper GitHub credentials. When using Safari, Option-click the
+artifact download link so Safari downloads it without automatically opening and
+decompressing it. GitHub displays the SHA-256 of the downloaded artifact ZIP on
+the workflow run page.
 
-Before signing, compare the reported digest and run the local preflight:
+Before extracting the artifact, compare that displayed digest with the ZIP, then
+extract it and run the local preflight:
 
-    shasum -a 256 exfat-resize-X.Y.Z-macos-arm64.tar
-    tools/sign-macos-binary.sh --check exfat-resize-X.Y.Z-macos-arm64.tar
+    shasum -a 256 macos-unsigned-vX.Y.Z-RUN_ID.zip
+    unzip macos-unsigned-vX.Y.Z-RUN_ID.zip
+    tools/sign-macos-binary.sh --check exfat-resize-X.Y.Z-macos-arm64.tar.gz
 
-The helper accepts either `.tar.gz` or a Safari-expanded `.tar`. Its
-`uncompressed tar SHA-256` output must match the corresponding value in the
-workflow log.
+The ZIP digest must match the value on the artifact download page. Because the
+artifact is immutable, that check also authenticates the enclosed `.tar.gz`.
 
 Signing requires a Developer ID Application certificate in the login Keychain
 and notarization credentials stored under a `notarytool` Keychain profile. List
@@ -86,28 +93,34 @@ signing run:
     security find-identity -v -p codesigning
     xcrun notarytool store-credentials exfat-resize-notary
 
-Sign and notarize the archive into a separate output directory:
+Sign and notarize the executable from the archive into a separate output
+directory:
 
     tools/sign-macos-binary.sh \
         --identity "Developer ID Application: NAME (TEAMID)" \
         --notary-profile exfat-resize-notary \
-        exfat-resize-X.Y.Z-macos-arm64.tar signed
+        exfat-resize-X.Y.Z-macos-arm64.tar.gz signed
 
-The helper validates the complete unsigned package before accessing the signing
-identity. It then signs only the CLI with the hardened runtime and a secure
-timestamp, submits a temporary ZIP to Apple, retrieves the notarization log,
-and creates the final `.tar.gz`. Because Apple does not support stapling a ticket
-to a standalone executable, the helper verifies the ticket with the online
-notarization check supported by `codesign`. The output directory receives the
-final archive and its notarization log. Upload only the archive to the draft
-GitHub Release, then approve the pending `macos-release` environment job.
+Before accessing the signing identity, the helper selectively extracts exactly
+one regular CLI entry and validates its version, architecture, deployment target,
+dependencies, and ad-hoc signature. It then signs the CLI with the hardened
+runtime and a secure timestamp, submits a temporary ZIP to Apple, retrieves the
+notarization log, and writes `exfat-resize-X.Y.Z-macos-arm64.signed` alongside
+that log. Because Apple does not support stapling a ticket to a standalone
+executable, the helper verifies the ticket with the online notarization check
+supported by `codesign`. Upload only the `.signed` executable to the draft GitHub
+Release, then approve the pending `macos-release` environment job.
 
-The approved job downloads the exact draft asset on a fresh macOS runner. It
-checks the GitHub asset digest, package version and contents, ARM64 architecture,
-deployment target, dependencies, Developer ID team, secure timestamp, hardened
-runtime, and online notarization ticket. It also exercises installation and
-uninstallation and performs an actual exFAT resize. The job never publishes the
-draft; publication remains a separate manual action after all checks pass.
+The approved job downloads that exact draft asset and its own tested unsigned
+archive on a fresh macOS runner. It verifies that removing and canonicalizing the
+signatures leaves the same executable GitHub built, then replaces only the CLI in
+the trusted unsigned archive. It checks the GitHub asset digests, package version
+and contents, ARM64 architecture, deployment target, dependencies, Developer ID
+team, code-signing identifier, secure timestamp, hardened runtime, absence of
+entitlements, and online notarization ticket. It also exercises installation and
+uninstallation and performs an actual exFAT resize. After uploading the verified
+final archive, it removes the temporary `.signed` asset. The job never publishes
+the draft; publication remains a separate manual action after all checks pass.
 
 ## Creating a signed release tag
 

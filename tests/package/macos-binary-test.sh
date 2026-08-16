@@ -166,6 +166,14 @@ if ! codesign --verify --strict "$binary"; then
 	exit 1
 fi
 signature=$(codesign -dvvv "$binary" 2>&1)
+identifier=$(printf '%s\n' "$signature" | sed -n 's/^Identifier=//p')
+if [ "$identifier" != exfat-resize ]; then
+	fail "CLI has an unexpected code-signing identifier: $identifier"
+fi
+entitlements=$(codesign -d --entitlements - "$binary" 2>/dev/null)
+if [ -n "$entitlements" ]; then
+	fail "CLI has unexpected code-signing entitlements"
+fi
 if [ -z "$developer_id_team" ]; then
 	if ! printf '%s\n' "$signature" | grep -Fx 'Signature=adhoc' >/dev/null; then
 		echo "archived CLI does not have an ad-hoc signature" >&2
@@ -186,9 +194,8 @@ else
 	if ! printf '%s\n' "$signature" | grep -E '^Timestamp=.' >/dev/null; then
 		fail "Developer ID signature does not have a secure timestamp"
 	fi
-	if ! printf '%s\n' "$signature" |
-		grep -E '^CodeDirectory .*\(.*runtime.*\)' >/dev/null; then
-		fail "Developer ID signature does not enable the hardened runtime"
+	if ! printf '%s\n' "$signature" | grep -F 'flags=0x10000(runtime)' >/dev/null; then
+		fail "Developer ID signature does not have only the hardened-runtime flag"
 	fi
 	if ! codesign -vvvv -R=notarized --check-notarization "$binary"; then
 		fail "CLI does not satisfy Apple's notarized code requirement"

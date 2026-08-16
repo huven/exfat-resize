@@ -81,10 +81,20 @@ jobs:
           test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
           "$source_directory/tests/package/macos-binary-test.sh" \
             "$binary_archive" "$source_directory"
-          archive_sha256=$(shasum -a 256 "$binary_archive" | awk '{ print $1 }')
-          content_sha256=$(gzip -dc "$binary_archive" | shasum -a 256 | awk '{ print $1 }')
-          printf 'unsigned archive SHA-256: %s\n' "$archive_sha256"
-          printf 'uncompressed tar SHA-256: %s\n' "$content_sha256"
+
+          package=$(basename "$binary_archive" .tar.gz)
+          mkdir -p signing-probe/extracted assembled-probe
+          tar -xzf "$binary_archive" -C signing-probe/extracted
+          signed_executable=signing-probe/$package.signed
+          install -m 0755 \
+            "signing-probe/extracted/$package/exfat-resize" "$signed_executable"
+          codesign --force --identifier exfat-resize --options runtime \
+            --sign - "$signed_executable"
+          "$source_directory/tools/assemble-macos-binary.sh" \
+            "$binary_archive" "$signed_executable" assembled-probe
+          assembled_archive=assembled-probe/$package.tar.gz
+          "$source_directory/tests/package/macos-binary-test.sh" \
+            "$assembled_archive" "$source_directory"
 
       - name: Upload tested unsigned macOS archive
         uses: actions/upload-artifact@v4

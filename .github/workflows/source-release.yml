@@ -197,15 +197,15 @@ jobs:
           fi
 
   verify_macos_release:
-    name: Verify signed macOS release asset
-    needs: [build_source, publish_draft]
+    name: Assemble signed macOS release asset
+    needs: [build_source, build_macos, publish_draft]
     runs-on: macos-15
     timeout-minutes: 30
     environment:
       name: macos-release
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
     permissions:
-      contents: read
+      contents: write
     env:
       EXPECTED_TEAM_ID: X5X5M4XA99
       GH_REPO: ${{ github.repository }}
@@ -219,30 +219,38 @@ jobs:
           name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: source-artifacts
 
-      - name: Download signed macOS archive from draft release
+      - name: Download tested unsigned macOS archive
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-unsigned-${{ github.ref_name }}-${{ github.run_id }}
+          path: macos-artifacts
+
+      - name: Download signed macOS executable from draft release
         run: |
           set -euo pipefail
           is_draft=$(gh release view "$RELEASE_REF" --json isDraft --jq .isDraft)
           test "$is_draft" = true
           version=${RELEASE_REF#v}
-          archive=exfat-resize-$version-macos-arm64.tar.gz
+          executable=exfat-resize-$version-macos-arm64.signed
           mkdir signed-release-assets
-          gh release download "$RELEASE_REF" --pattern "$archive" --dir signed-release-assets
-          test -f "signed-release-assets/$archive"
+          gh release download "$RELEASE_REF" --pattern "$executable" \
+            --dir signed-release-assets
+          test -f "signed-release-assets/$executable"
 
-          archive_sha256=$(shasum -a 256 "signed-release-assets/$archive" | awk '{ print $1 }')
+          executable_sha256=$(
+            shasum -a 256 "signed-release-assets/$executable" | awk '{ print $1 }'
+          )
           published_digest=$(
             gh release view "$RELEASE_REF" --json assets \
-              --jq ".assets[] | select(.name == \"$archive\") | .digest"
+              --jq ".assets[] | select(.name == \"$executable\") | .digest"
           )
-          test "$published_digest" = "sha256:$archive_sha256"
-          printf 'signed release archive SHA-256: %s\n' "$archive_sha256"
+          test "$published_digest" = "sha256:$executable_sha256"
+          printf 'signed executable SHA-256: %s\n' "$executable_sha256"
 
-      - name: Verify signed macOS archive
+      - name: Assemble and verify signed macOS archive
         run: |
           set -euo pipefail
           version=${RELEASE_REF#v}
-          archive=signed-release-assets/exfat-resize-$version-macos-arm64.tar.gz
           source_archive=$(find source-artifacts -maxdepth 1 -type f \
             -name 'exfat-resize-*.tar.gz' -print)
           test -n "$source_archive"
@@ -256,5 +264,46 @@ jobs:
           test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
           test "$(sed -n '1p' "$source_directory/.tarball-version")" = "$version"
 
+          unsigned_archive=$(find macos-artifacts -maxdepth 1 -type f \
+            -name "exfat-resize-$version-macos-arm64.tar.gz" -print)
+          test -n "$unsigned_archive"
+          test "$(printf '%s\n' "$unsigned_archive" | wc -l)" -eq 1
+          signed_executable=signed-release-assets/exfat-resize-$version-macos-arm64.signed
+          "$source_directory/tools/assemble-macos-binary.sh" \
+            "$unsigned_archive" "$signed_executable" final-release-assets
+          archive=final-release-assets/exfat-resize-$version-macos-arm64.tar.gz
           "$source_directory/tests/package/macos-binary-test.sh" \
             --developer-id-team "$EXPECTED_TEAM_ID" "$archive" "$source_directory"
+
+      - name: Upload verified macOS archive and remove signing handoff
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          source_archive=exfat-resize-$version.tar.gz
+          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          windows_archive=exfat-resize-$version-windows-x86_64.zip
+          macos_archive=exfat-resize-$version-macos-arm64.tar.gz
+          signed_executable=exfat-resize-$version-macos-arm64.signed
+          archive_path=final-release-assets/$macos_archive
+
+          gh release upload "$RELEASE_REF" "$archive_path" --clobber
+          archive_sha256=$(shasum -a 256 "$archive_path" | awk '{ print $1 }')
+          published_digest=$(
+            gh release view "$RELEASE_REF" --json assets \
+              --jq ".assets[] | select(.name == \"$macos_archive\") | .digest"
+          )
+          test "$published_digest" = "sha256:$archive_sha256"
+
+          expected=$(
+            printf '%s\n' "$source_archive" "$linux_archive" "$windows_archive" \
+              "$macos_archive" "$signed_executable" | sort
+          )
+          actual=$(gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' | sort)
+          if [ "$actual" != "$expected" ]; then
+            echo "draft release contains an unexpected asset set" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
+          printf 'verified macOS release archive SHA-256: %s\n' "$archive_sha256"
+          gh release delete-asset "$RELEASE_REF" "$signed_executable" --yes
