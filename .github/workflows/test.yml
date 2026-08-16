@@ -289,6 +289,15 @@ jobs:
       binary_artifact_name: linux-binary-ci-${{ github.run_id }}
       retention_days: 1
 
+  macos-binary:
+    name: macOS binary archive
+    needs: release-package
+    uses: ./.github/workflows/macos-binary.yml
+    with:
+      source_artifact_name: source-ci-${{ github.run_id }}
+      binary_artifact_name: macos-binary-ci-${{ github.run_id }}
+      retention_days: 1
+
   windows-binary:
     name: Windows binary archive
     needs: release-package
