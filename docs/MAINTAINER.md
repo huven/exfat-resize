@@ -33,22 +33,81 @@ present in the checkout. The archive stores that identity in
 
 ## Release procedure
 
-The routine release procedure has three steps:
+The routine release procedure has six steps:
 
 1. Update `VERSION` in a pull request, wait for all required checks, and merge
    it to `main`.
 2. Check out the resulting release commit and create and push its signed
    `vX.Y.Z` tag using the command below.
-3. Wait for the `Release` workflow, review its generated notes and the source,
-   Linux, and Windows assets in the draft GitHub Release, then publish the
-   draft manually.
+3. Wait for the `Release` workflow to create the draft GitHub Release and reach
+   the `macos-release` environment approval.
+4. Download the unsigned macOS workflow artifact, then sign and notarize it as
+   described below.
+5. Upload the signed macOS archive to the draft and approve the waiting
+   `macos-release` job.
+6. Wait for signed-archive verification, review the generated notes and all
+   assets, then publish the draft manually.
 
-The maintainer does not run `make dist`, create the GitHub Release, calculate
-checksums, or upload assets during a routine release.
+The maintainer does not run `make dist`, create the GitHub Release, or calculate
+release checksums. The signed macOS archive is the only asset uploaded manually.
 
 The workflow creates or updates a draft release; it never modifies an already
 published release. A failed run can therefore be rerun safely. Review the
 generated notes and assets before publishing the draft manually.
+
+The repository must have a protected GitHub environment named `macos-release`
+with the maintainer as a required reviewer. Do not enable prevention of
+self-review for a release initiated by that maintainer. The environment stores
+no signing credentials; it only holds the verification job until the signed
+archive has been uploaded to the draft.
+
+## Signing the macOS binary archive
+
+The `Test` and `Release` workflows retain the tested, ad-hoc-signed macOS
+archive as a workflow artifact. Download that artifact separately; do not give
+the signing helper GitHub credentials. The build log prints both the compressed
+archive SHA-256 and the SHA-256 of its uncompressed tar stream. The latter
+remains comparable if Safari automatically expands the `.tar.gz` to `.tar`.
+
+Before signing, compare the reported digest and run the local preflight:
+
+    shasum -a 256 exfat-resize-X.Y.Z-macos-arm64.tar
+    tools/sign-macos-binary.sh --check exfat-resize-X.Y.Z-macos-arm64.tar
+
+The helper accepts either `.tar.gz` or a Safari-expanded `.tar`. Its
+`uncompressed tar SHA-256` output must match the corresponding value in the
+workflow log.
+
+Signing requires a Developer ID Application certificate in the login Keychain
+and notarization credentials stored under a `notarytool` Keychain profile. List
+the available signing identities and create the profile before the first
+signing run:
+
+    security find-identity -v -p codesigning
+    xcrun notarytool store-credentials exfat-resize-notary
+
+Sign and notarize the archive into a separate output directory:
+
+    tools/sign-macos-binary.sh \
+        --identity "Developer ID Application: NAME (TEAMID)" \
+        --notary-profile exfat-resize-notary \
+        exfat-resize-X.Y.Z-macos-arm64.tar signed
+
+The helper validates the complete unsigned package before accessing the signing
+identity. It then signs only the CLI with the hardened runtime and a secure
+timestamp, submits a temporary ZIP to Apple, retrieves the notarization log,
+and creates the final `.tar.gz`. Because Apple does not support stapling a ticket
+to a standalone executable, the helper verifies the ticket with the online
+notarization check supported by `codesign`. The output directory receives the
+final archive and its notarization log. Upload only the archive to the draft
+GitHub Release, then approve the pending `macos-release` environment job.
+
+The approved job downloads the exact draft asset on a fresh macOS runner. It
+checks the GitHub asset digest, package version and contents, ARM64 architecture,
+deployment target, dependencies, Developer ID team, secure timestamp, hardened
+runtime, and online notarization ticket. It also exercises installation and
+uninstallation and performs an actual exFAT resize. The job never publishes the
+draft; publication remains a separate manual action after all checks pass.
 
 ## Creating a signed release tag
 

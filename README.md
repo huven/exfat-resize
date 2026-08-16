@@ -13,6 +13,7 @@ exfat-resize provides:
 Prebuilt CLI binaries are provided for these platforms:
 
 - Linux x86-64 with glibc
+- macOS 11 or newer on Apple silicon (ARM64)
 - Windows x86-64
 
 Download the prebuilt CLI from
@@ -21,6 +22,12 @@ SHA-256 digest shown by GitHub. On Linux:
 
     tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
     cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+    sudo ./install.sh
+
+On macOS:
+
+    tar -xzf exfat-resize-X.Y.Z-macos-arm64.tar.gz
+    cd exfat-resize-X.Y.Z-macos-arm64
     sudo ./install.sh
 
 On Windows PowerShell, no installation is required:
@@ -369,25 +376,38 @@ new major release.
 
 ## Installing prebuilt CLI binaries
 
-### Linux
+### Linux and macOS
 
-GitHub Releases provide a prebuilt CLI archive expected to run on all conventional
-`x86_64` Linux distributions using glibc 2.28 or newer. It is built on
-AlmaLinux 8.10 and tested by performing an exFAT resize on Debian 12 and Ubuntu
-22.04 LTS. Musl-based distributions such as Alpine, non-FHS systems such as
-NixOS, and other CPU architectures require a different build or compatibility
-setup.
+GitHub Releases provide two Unix CLI archives:
 
-Download `exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz` from the corresponding
+- `exfat-resize-X.Y.Z-macos-arm64.tar.gz` supports macOS 11 or newer on Apple
+  silicon. It is ARM64-only, Developer ID-signed, and notarized by Apple.
+- `exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz` supports conventional `x86_64`
+  Linux distributions using glibc 2.28 or newer. It is built on AlmaLinux 8.10
+  and tested by performing an exFAT resize on Debian 12 and Ubuntu 22.04 LTS.
+  Musl-based distributions such as Alpine, non-FHS systems such as NixOS, and
+  other CPU architectures require a different build or compatibility setup.
+
+Download the archive for the target platform from the corresponding
 [GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
-an immutable SHA-256 digest beside the asset; compare it with the output of:
+an immutable SHA-256 digest beside each asset. On macOS, compare it with:
+
+    shasum -a 256 exfat-resize-X.Y.Z-macos-arm64.tar.gz
+
+Then extract the macOS archive and enter its directory:
+
+    tar -xzf exfat-resize-X.Y.Z-macos-arm64.tar.gz
+    cd exfat-resize-X.Y.Z-macos-arm64
+
+On Linux, compare and extract with:
 
     sha256sum exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
-
-Replace `X.Y.Z` below with the release version, then extract and install it:
-
     tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
     cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+
+Replace `X.Y.Z` with the release version. From the extracted directory on
+either platform, install the CLI, manual page, and documentation with:
+
     sudo ./install.sh
 
 The installer defaults to `/usr/local`. To use another absolute prefix, set
@@ -403,6 +423,10 @@ installed files:
 For a custom prefix, remove it with:
 
     PREFIX=/your/prefix ./uninstall.sh
+
+Apple does not support attaching a notarization ticket directly to a standalone
+command-line executable. A Mac therefore needs network access when Gatekeeper
+first checks a newly downloaded copy of the macOS binary.
 
 ### Windows
 

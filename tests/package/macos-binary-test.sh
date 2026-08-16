@@ -4,9 +4,40 @@
 set -eu
 set -f
 
+usage() {
+	printf '%s\n' \
+		"usage: $0 [--developer-id-team TEAM_ID] MACOS_ARCHIVE SOURCE_DIRECTORY"
+}
+
+fail() {
+	echo "macos-binary-test: $*" >&2
+	exit 1
+}
+
+developer_id_team=
+while [ "$#" -gt 0 ]; do
+	case $1 in
+		--developer-id-team)
+			[ "$#" -ge 2 ] || fail "--developer-id-team requires a value"
+			developer_id_team=$2
+			shift 2
+			;;
+		--)
+			shift
+			break
+			;;
+		-*) fail "unknown option: $1" ;;
+		*) break ;;
+	esac
+done
+
 if [ "$#" -ne 2 ]; then
-	echo "usage: $0 MACOS_ARCHIVE SOURCE_DIRECTORY" >&2
+	usage >&2
 	exit 2
+fi
+if [ -n "$developer_id_team" ] &&
+	! printf '%s\n' "$developer_id_team" | grep -E '^[A-Z0-9]{10}$' >/dev/null; then
+	fail "invalid Developer ID team: $developer_id_team"
 fi
 
 archive=$1
@@ -34,6 +65,31 @@ build_version=$(sed -n '1p' "$source_directory/.tarball-version")
 package=exfat-resize-$build_version-macos-arm64
 if [ "$archive_name" != "$package.tar.gz" ]; then
 	echo "macOS archive and source build versions disagree" >&2
+	exit 1
+fi
+
+expected_entries=$(
+	printf '%s\n' \
+		"$package/" \
+		"$package/LICENSE" \
+		"$package/README.md" \
+		"$package/docs/" \
+		"$package/docs/TRANSACTION.md" \
+		"$package/exfat-resize" \
+		"$package/exfat-resize.8" \
+		"$package/install.sh" \
+		"$package/uninstall.sh" |
+		sort
+)
+actual_entries=$(LC_ALL=C tar -tf "$archive" | sort)
+if [ "$actual_entries" != "$expected_entries" ]; then
+	fail "macOS archive contains an unexpected entry set"
+fi
+unexpected_types=$(LC_ALL=C tar -tvf "$archive" |
+	awk 'substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { print }')
+if [ -n "$unexpected_types" ]; then
+	echo "macOS archive contains an unexpected entry type:" >&2
+	printf '%s\n' "$unexpected_types" >&2
 	exit 1
 fi
 
@@ -106,14 +162,38 @@ if [ "$dependencies" != /usr/lib/libSystem.B.dylib ]; then
 	exit 1
 fi
 if ! codesign --verify --strict "$binary"; then
-	echo "archived CLI has an invalid ad-hoc signature" >&2
+	echo "archived CLI has an invalid signature" >&2
 	exit 1
 fi
-signature=$(codesign -dvv "$binary" 2>&1)
-if ! printf '%s\n' "$signature" | grep -Fx 'Signature=adhoc' >/dev/null; then
-	echo "archived CLI does not have an ad-hoc signature" >&2
-	printf '%s\n' "$signature" >&2
-	exit 1
+signature=$(codesign -dvvv "$binary" 2>&1)
+if [ -z "$developer_id_team" ]; then
+	if ! printf '%s\n' "$signature" | grep -Fx 'Signature=adhoc' >/dev/null; then
+		echo "archived CLI does not have an ad-hoc signature" >&2
+		printf '%s\n' "$signature" >&2
+		exit 1
+	fi
+	signature_description=ad-hoc
+else
+	authority=$(printf '%s\n' "$signature" | sed -n 's/^Authority=//p' | sed -n '1p')
+	team_identifier=$(printf '%s\n' "$signature" | sed -n 's/^TeamIdentifier=//p')
+	case $authority in
+		"Developer ID Application: "*) ;;
+		*) fail "CLI was not signed with a Developer ID Application certificate" ;;
+	esac
+	if [ "$team_identifier" != "$developer_id_team" ]; then
+		fail "unexpected Developer ID team: $team_identifier"
+	fi
+	if ! printf '%s\n' "$signature" | grep -E '^Timestamp=.' >/dev/null; then
+		fail "Developer ID signature does not have a secure timestamp"
+	fi
+	if ! printf '%s\n' "$signature" |
+		grep -E '^CodeDirectory .*\(.*runtime.*\)' >/dev/null; then
+		fail "Developer ID signature does not enable the hardened runtime"
+	fi
+	if ! codesign -vvvv -R=notarized --check-notarization "$binary"; then
+		fail "CLI does not satisfy Apple's notarized code requirement"
+	fi
+	signature_description="Developer ID team $team_identifier"
 fi
 
 DESTDIR=$temporary/install-root "$package_directory/install.sh"
@@ -132,6 +212,13 @@ fi
 if [ "$(find "$install_prefix" -type f | wc -l)" -ne 5 ]; then
 	echo "installer created an unexpected file set" >&2
 	exit 1
+fi
+if ! codesign --verify --strict "$installed_binary"; then
+	fail "installed CLI has an invalid signature"
+fi
+if [ -n "$developer_id_team" ] &&
+	! codesign -vvvv -R=notarized --check-notarization "$installed_binary"; then
+	fail "installed CLI does not satisfy Apple's notarized code requirement"
 fi
 
 touch "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.8" \
@@ -156,3 +243,4 @@ done
 
 echo "macOS binary archive test: passed"
 echo "minimum macOS version: $minimum_macos"
+echo "signature: $signature_description"

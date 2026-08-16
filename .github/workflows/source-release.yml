@@ -195,3 +195,66 @@ jobs:
             printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
             exit 1
           fi
+
+  verify_macos_release:
+    name: Verify signed macOS release asset
+    needs: [build_source, publish_draft]
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment:
+      name: macos-release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      contents: read
+    env:
+      EXPECTED_TEAM_ID: X5X5M4XA99
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REF: ${{ github.ref_name }}
+
+    steps:
+      - name: Download tested source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+          path: source-artifacts
+
+      - name: Download signed macOS archive from draft release
+        run: |
+          set -euo pipefail
+          is_draft=$(gh release view "$RELEASE_REF" --json isDraft --jq .isDraft)
+          test "$is_draft" = true
+          version=${RELEASE_REF#v}
+          archive=exfat-resize-$version-macos-arm64.tar.gz
+          mkdir signed-release-assets
+          gh release download "$RELEASE_REF" --pattern "$archive" --dir signed-release-assets
+          test -f "signed-release-assets/$archive"
+
+          archive_sha256=$(shasum -a 256 "signed-release-assets/$archive" | awk '{ print $1 }')
+          published_digest=$(
+            gh release view "$RELEASE_REF" --json assets \
+              --jq ".assets[] | select(.name == \"$archive\") | .digest"
+          )
+          test "$published_digest" = "sha256:$archive_sha256"
+          printf 'signed release archive SHA-256: %s\n' "$archive_sha256"
+
+      - name: Verify signed macOS archive
+        run: |
+          set -euo pipefail
+          version=${RELEASE_REF#v}
+          archive=signed-release-assets/exfat-resize-$version-macos-arm64.tar.gz
+          source_archive=$(find source-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*.tar.gz' -print)
+          test -n "$source_archive"
+          test "$(printf '%s\n' "$source_archive" | wc -l)" -eq 1
+
+          mkdir source-tree
+          tar -xzf "$source_archive" -C source-tree
+          source_directory=$(find source-tree -mindepth 1 -maxdepth 1 \
+            -type d -name 'exfat-resize-*' -print)
+          test -n "$source_directory"
+          test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
+          test "$(sed -n '1p' "$source_directory/.tarball-version")" = "$version"
+
+          "$source_directory/tests/package/macos-binary-test.sh" \
+            --developer-id-team "$EXPECTED_TEAM_ID" "$archive" "$source_directory"
