@@ -87,9 +87,20 @@ jobs:
       binary_artifact_name: windows-release-${{ github.ref_name }}-${{ github.run_id }}
       expected_version: ${{ github.ref_name }}
 
+  build_macos:
+    name: Unsigned macOS binary archive
+    needs: build_source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/macos-binary.yml
+    with:
+      source_artifact_name: source-release-${{ github.ref_name }}-${{ github.run_id }}
+      binary_artifact_name: macos-unsigned-${{ github.ref_name }}-${{ github.run_id }}
+      expected_version: ${{ github.ref_name }}
+
   publish_draft:
     name: Create draft release
-    needs: [build_source, build_linux, build_windows]
+    needs: [build_source, build_linux, build_windows, build_macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

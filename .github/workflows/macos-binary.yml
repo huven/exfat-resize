@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MIT
+
+name: macOS binary
+
+on:
+  workflow_call:
+    inputs:
+      source_artifact_name:
+        description: Artifact containing the tested source archive
+        required: true
+        type: string
+      binary_artifact_name:
+        description: Artifact name for the tested unsigned macOS archive
+        required: true
+        type: string
+      expected_version:
+        description: Optional tag or version that the binary must match
+        required: false
+        default: ""
+        type: string
+      retention_days:
+        description: Artifact retention days; 0 uses the repository default
+        required: false
+        default: 0
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (Apple Clang, ARM64, macOS 11 target)
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+
+    steps:
+      - name: Download tested source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact_name }}
+          path: source-artifacts
+
+      - name: Record builder environment
+        run: |
+          sw_vers
+          uname -a
+          clang --version
+          cmake --version
+          xcrun --show-sdk-version
+
+      - name: Build and test unsigned macOS binary archive
+        run: |
+          set -eu
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          archive=$(find source-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*.tar.gz' -print)
+          test -n "$archive"
+          test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
+
+          mkdir source-tree
+          tar -xzf "$archive" -C source-tree
+          source_directory=$(find source-tree -mindepth 1 -maxdepth 1 \
+            -type d -name 'exfat-resize-*' -print)
+          test -n "$source_directory"
+          test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
+
+          if [ -n "$EXPECTED_VERSION" ]; then
+            expected_version=${EXPECTED_VERSION#v}
+            actual_version=$(sed -n '1p' "$source_directory/.tarball-version")
+            test "$actual_version" = "$expected_version"
+          fi
+
+          "$source_directory/tools/build-macos-binary.sh" \
+            "$source_directory" macos-artifacts
+          binary_archive=$(find macos-artifacts -maxdepth 1 -type f \
+            -name 'exfat-resize-*-macos-arm64.tar.gz' -print)
+          test -n "$binary_archive"
+          test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
+          "$source_directory/tests/package/macos-binary-test.sh" \
+            "$binary_archive" "$source_directory"
+
+      - name: Upload tested unsigned macOS archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary_artifact_name }}
+          path: macos-artifacts/exfat-resize-*-macos-arm64.tar.gz
+          if-no-files-found: error
+          overwrite: true
+          retention-days: ${{ inputs.retention_days }}
