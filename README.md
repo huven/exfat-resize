@@ -260,17 +260,13 @@ will silently extend only an exFAT partition.
 
 The filesystem must meet these prerequisites:
 
-- Use exFAT revision 1.00 with a single FAT; TexFAT/two-FAT volumes are not
-  supported.
+- Conform to exFAT revision 1.00 with a single FAT; TexFAT/two-FAT volumes are
+  not supported.
 - Be clean and not have the exFAT media-failure flag set.
 - When accessed through a block device, have a filesystem sector size that is
   a multiple of the block device's sector size.
 - Not contain Vendor Allocation directory entries, whose allocation semantics
   cannot be interpreted without recognizing their vendor GUID.
-- Not contain an unrecognized critical secondary directory entry or an
-  unrecognized allocation-bearing benign secondary directory entry. These
-  extension entries are rejected during read-only preflight because safely
-  interpreting or preserving them requires recognizing their entry type.
 - Gain enough clusters to hold the replacement allocation bitmap in the newly
   added tail space.
 - Not have a source cluster recorded as bad where the expanded FAT would

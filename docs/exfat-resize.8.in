@@ -86,7 +86,7 @@ explicitly reports that it is safe.
 .SH "FILESYSTEM COMPATIBILITY"
 The filesystem must meet all of the following prerequisites:
 .IP \(bu 2
-Use exFAT revision 1.00 with a single FAT.
+Conform to exFAT revision 1.00 with a single FAT.
 TexFAT and other two-FAT volumes are not supported.
 .IP \(bu 2
 Be clean and not have the exFAT media-failure flag set.
@@ -96,11 +96,6 @@ multiple of the block device's sector size.
 .IP \(bu 2
 Not contain Vendor Allocation directory entries, whose allocation semantics
 cannot be interpreted without recognizing their vendor GUID.
-.IP \(bu 2
-Not contain an unrecognized critical secondary directory entry or an
-unrecognized allocation-bearing benign secondary directory entry.
-These extension entries are rejected during read-only preflight because safely
-interpreting or preserving them requires recognizing their entry type.
 .IP \(bu 2
 Gain enough clusters to hold the replacement allocation bitmap in the newly
 added tail space.
