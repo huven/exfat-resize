@@ -45,6 +45,10 @@ int exfat_fixture_add_child_directories(
     struct exfat_fixture *fixture, uint32_t first_cluster, uint32_t count);
 int exfat_fixture_add_directory_chain(
     struct exfat_fixture *fixture, uint32_t first_cluster, uint32_t count);
+int exfat_fixture_add_contiguous_child_directory(struct exfat_fixture *fixture,
+    uint32_t directory_first_cluster,
+    uint32_t directory_cluster_count,
+    uint32_t data_first_cluster);
 
 int exfat_fixture_read_sector(
     struct exfat_fixture *fixture, uint64_t sector, void *buffer, size_t buffer_size);
