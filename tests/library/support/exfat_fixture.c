@@ -241,7 +241,8 @@ static void set_bitmap_cluster(unsigned char *bitmap, uint32_t cluster)
 	bitmap[bit / 8] |= (unsigned char)(1u << (bit % 8));
 }
 
-static int write_bitmap_cluster(struct exfat_fixture *fixture, uint32_t cluster)
+static int write_bitmap_cluster_state(
+    struct exfat_fixture *fixture, uint32_t cluster, int allocated)
 {
 	unsigned char sector[SECTOR_SIZE];
 	uint32_t bit;
@@ -262,8 +263,16 @@ static int write_bitmap_cluster(struct exfat_fixture *fixture, uint32_t cluster)
 	    sector_in_cluster;
 	if (fixture->memory.device.read(fixture->memory.device.context, sector_number, 1, sector) != 0)
 		return -1;
-	sector[bit / 8 % SECTOR_SIZE] |= (unsigned char)(1u << (bit % 8));
+	if (allocated)
+		sector[bit / 8 % SECTOR_SIZE] |= (unsigned char)(1u << (bit % 8));
+	else
+		sector[bit / 8 % SECTOR_SIZE] &= (unsigned char)~(1u << (bit % 8));
 	return write_sectors(fixture, sector_number, 1, sector);
+}
+
+static int write_bitmap_cluster(struct exfat_fixture *fixture, uint32_t cluster)
+{
+	return write_bitmap_cluster_state(fixture, cluster, 1);
 }
 
 static int initialize_bitmap(struct exfat_fixture *fixture)
@@ -524,6 +533,69 @@ static int write_cluster_pattern(struct exfat_fixture *fixture, uint32_t cluster
 		if (write_sectors(fixture,
 		        exfat_fixture_cluster_sector(&fixture->geometry, cluster) + sector_index, 1,
 		        sector) != 0)
+			return -1;
+	}
+	return 0;
+}
+
+int exfat_fixture_add_contiguous_child_directory(struct exfat_fixture *fixture,
+    uint32_t directory_first_cluster,
+    uint32_t directory_cluster_count,
+    uint32_t data_first_cluster)
+{
+	unsigned char entry_set[SECTOR_SIZE] = { 0 };
+	unsigned char root[SECTOR_SIZE];
+	uint64_t directory_data_length;
+	uint32_t index;
+	size_t offset = 0;
+
+	if (fixture->geometry.sectors_per_cluster != 1 || directory_cluster_count == 0 ||
+	    directory_cluster_count > 26 || directory_first_cluster < 2 || data_first_cluster < 2 ||
+	    (uint64_t)directory_first_cluster + directory_cluster_count >
+	        (uint64_t)fixture->geometry.cluster_count + 2 ||
+	    (uint64_t)data_first_cluster + directory_cluster_count >
+	        (uint64_t)fixture->geometry.cluster_count + 2 ||
+	    ((uint64_t)directory_first_cluster <
+	            (uint64_t)data_first_cluster + directory_cluster_count &&
+	        (uint64_t)data_first_cluster <
+	            (uint64_t)directory_first_cluster + directory_cluster_count))
+		return -1;
+	directory_data_length = (uint64_t)directory_cluster_count * SECTOR_SIZE;
+	if (exfat_fixture_read_sector(fixture,
+	        exfat_fixture_cluster_sector(
+	            &fixture->geometry, fixture->geometry.root_directory_cluster),
+	        root, sizeof(root)) != 0 ||
+	    append_file_set(entry_set, &offset, DIRECTORY_ATTRIBUTE, directory_first_cluster,
+	        directory_data_length, 1, 'D') != 0)
+		return -1;
+	memcpy(root + ENTRY_SIZE * 5, entry_set, ENTRY_SIZE * 3);
+	if (write_sectors(fixture,
+	        exfat_fixture_cluster_sector(
+	            &fixture->geometry, fixture->geometry.root_directory_cluster),
+	        1, root) != 0 ||
+	    write_bitmap_cluster_state(fixture, 6, 0) != 0 ||
+	    write_bitmap_cluster_state(fixture, 8, 0) != 0)
+		return -1;
+
+	for (index = 0; index < directory_cluster_count; ++index) {
+		unsigned char directory[SECTOR_SIZE] = { 0 };
+
+		offset = 0;
+		if (append_file_set(directory, &offset, ARCHIVE_ATTRIBUTE, data_first_cluster + index,
+		        SECTOR_SIZE, 1, (unsigned char)('a' + index)) != 0)
+			return -1;
+		if (index + 1 < directory_cluster_count) {
+			while (offset < sizeof(directory)) {
+				directory[offset] = 1;
+				offset += ENTRY_SIZE;
+			}
+		}
+		if (write_sectors(fixture,
+		        exfat_fixture_cluster_sector(&fixture->geometry, directory_first_cluster + index),
+		        1, directory) != 0 ||
+		    write_bitmap_cluster(fixture, directory_first_cluster + index) != 0 ||
+		    write_bitmap_cluster(fixture, data_first_cluster + index) != 0 ||
+		    write_cluster_pattern(fixture, data_first_cluster + index) != 0)
 			return -1;
 	}
 	return 0;

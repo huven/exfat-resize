@@ -92,6 +92,26 @@ static enum exfat_resize_error plan_fixture_growth(struct exfat_fixture *fixture
 	    &device_geometry, &fixture->geometry, target_sector_count, target);
 }
 
+static uint32_t expected_displaced_cluster_count(
+    const struct exfat_resize_geometry *source, const struct exfat_resize_geometry *target)
+{
+	uint64_t heap_movement = (uint64_t)target->cluster_heap_offset - source->cluster_heap_offset;
+	uint64_t displaced = heap_movement / source->sectors_per_cluster;
+
+	return displaced > source->cluster_count ? source->cluster_count : (uint32_t)displaced;
+}
+
+static uint32_t expected_mapped_cluster(const struct exfat_resize_geometry *source,
+    const struct exfat_resize_geometry *target,
+    uint32_t source_cluster)
+{
+	uint32_t displaced = expected_displaced_cluster_count(source, target);
+	uint32_t remaining = source->cluster_count - displaced;
+	uint32_t source_index = source_cluster - 2;
+
+	return source_index < displaced ? remaining + 2 + source_index : 2 + source_index - displaced;
+}
+
 static void *tracked_allocate(void *context, size_t size)
 {
 	struct allocator_state *state = context;
@@ -2082,6 +2102,137 @@ static void test_deep_directory_tree(void)
 	exfat_fixture_destroy(&fixture);
 }
 
+static void run_multi_cluster_no_fat_chain_child_directory(
+    uint64_t target_sector_count, int crosses_mapping_boundary)
+{
+	enum { DIRECTORY_CLUSTER_COUNT = 3, DATA_FIRST_CLUSTER = 2000 };
+	struct exfat_resize_geometry target;
+	struct exfat_resize_options options = resize_options();
+	struct exfat_fixture fixture;
+	unsigned char source_directories[DIRECTORY_CLUSTER_COUNT][SECTOR_SIZE];
+	unsigned char target_directory[SECTOR_SIZE];
+	unsigned char root[SECTOR_SIZE];
+	enum exfat_resize_error error;
+	uint64_t directory_data_length = DIRECTORY_CLUSTER_COUNT * (uint64_t)SECTOR_SIZE;
+	uint32_t bitmap_cluster = 0;
+	uint32_t boundary;
+	uint32_t directory_first_cluster;
+	uint32_t index;
+	uint32_t parent_first_cluster = 0;
+	uint64_t parent_data_length = 0;
+	uint16_t stored_checksum = 0;
+
+	CHECK(exfat_fixture_initialize(&fixture, target_sector_count) == 0);
+	error = plan_fixture_growth(&fixture, target_sector_count, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS) {
+		exfat_fixture_destroy(&fixture);
+		return;
+	}
+	boundary = expected_displaced_cluster_count(&fixture.geometry, &target) + 2;
+	if (crosses_mapping_boundary)
+		CHECK(boundary > fixture.crossing_first_cluster + fixture.crossing_cluster_count);
+	CHECK(boundary + DIRECTORY_CLUSTER_COUNT <= fixture.geometry.cluster_count + 2);
+	directory_first_cluster = crosses_mapping_boundary ? boundary - 1 : 500;
+	if (crosses_mapping_boundary) {
+		CHECK(directory_first_cluster < boundary);
+		CHECK(directory_first_cluster + DIRECTORY_CLUSTER_COUNT > boundary);
+	} else {
+		CHECK(directory_first_cluster >= boundary ||
+		    directory_first_cluster + DIRECTORY_CLUSTER_COUNT <= boundary);
+	}
+	CHECK(exfat_fixture_add_contiguous_child_directory(
+	          &fixture, directory_first_cluster, DIRECTORY_CLUSTER_COUNT, DATA_FIRST_CLUSTER) == 0);
+	for (index = 0; index < DIRECTORY_CLUSTER_COUNT; ++index) {
+		CHECK(exfat_fixture_read_sector(&fixture,
+		          exfat_fixture_cluster_sector(&fixture.geometry, directory_first_cluster + index),
+		          source_directories[index], sizeof(source_directories[index])) == 0);
+	}
+	memory_block_device_clear_operations(&fixture.memory);
+
+	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &options, NULL);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS) {
+		exfat_fixture_destroy(&fixture);
+		return;
+	}
+	for (index = 0; index < DIRECTORY_CLUSTER_COUNT; ++index) {
+		uint32_t target_cluster =
+		    expected_mapped_cluster(&fixture.geometry, &target, directory_first_cluster + index);
+		uint64_t target_sector = exfat_fixture_cluster_sector(&target, target_cluster);
+
+		CHECK(sector_operation_count(&fixture, MEMORY_OPERATION_READ, target_sector) != 0);
+		CHECK(sector_operation_count(&fixture, MEMORY_OPERATION_WRITE, target_sector) != 0);
+	}
+
+	CHECK(exfat_fixture_read_sector(&fixture,
+	          exfat_fixture_cluster_sector(&target,
+	              expected_mapped_cluster(
+	                  &fixture.geometry, &target, fixture.geometry.root_directory_cluster)),
+	          root, sizeof(root)) == 0);
+	CHECK(root[5 * 32] == ENTRY_FILE);
+	CHECK(root[6 * 32] == ENTRY_STREAM);
+	CHECK(((root[6 * 32 + 1] & NO_FAT_CHAIN) != 0) == !crosses_mapping_boundary);
+	CHECK(exfat_resize_load_le16(root + 5 * 32, sizeof(root) - 5 * 32, 2, &stored_checksum) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(stored_checksum == entry_set_checksum(root + 5 * 32));
+	CHECK(exfat_resize_load_le32(root + 6 * 32, sizeof(root) - 6 * 32, 20, &parent_first_cluster) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(parent_first_cluster ==
+	    expected_mapped_cluster(&fixture.geometry, &target, directory_first_cluster));
+	CHECK(exfat_resize_load_le64(root + 6 * 32, sizeof(root) - 6 * 32, 24, &parent_data_length) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(parent_data_length == directory_data_length);
+	CHECK(exfat_resize_load_le32(root, sizeof(root), 20, &bitmap_cluster) == EXFAT_RESIZE_SUCCESS);
+
+	for (index = 0; index < DIRECTORY_CLUSTER_COUNT; ++index) {
+		uint32_t source_data_cluster = DATA_FIRST_CLUSTER + index;
+		uint32_t target_data_cluster =
+		    expected_mapped_cluster(&fixture.geometry, &target, source_data_cluster);
+		uint32_t target_directory_cluster =
+		    expected_mapped_cluster(&fixture.geometry, &target, directory_first_cluster + index);
+		uint32_t expected_next = 0;
+		uint32_t stored_data_cluster = 0;
+
+		CHECK(exfat_fixture_read_sector(&fixture,
+		          exfat_fixture_cluster_sector(&target, target_directory_cluster), target_directory,
+		          sizeof(target_directory)) == 0);
+		check_file_primary_entries_preserved(source_directories[index], target_directory);
+		CHECK(target_directory[0] == ENTRY_FILE);
+		CHECK(target_directory[32] == ENTRY_STREAM);
+		CHECK((target_directory[32 + 1] & NO_FAT_CHAIN) != 0);
+		CHECK(exfat_resize_load_le16(target_directory, sizeof(target_directory), 2,
+		          &stored_checksum) == EXFAT_RESIZE_SUCCESS);
+		CHECK(stored_checksum == entry_set_checksum(target_directory));
+		CHECK(exfat_resize_load_le32(target_directory + 32, sizeof(target_directory) - 32, 20,
+		          &stored_data_cluster) == EXFAT_RESIZE_SUCCESS);
+		CHECK(stored_data_cluster == target_data_cluster);
+		check_cluster_pattern(&fixture, &target, source_data_cluster, target_data_cluster);
+		CHECK(bitmap_cluster_is_set(&fixture, &target, bitmap_cluster, target_directory_cluster));
+		CHECK(bitmap_cluster_is_set(&fixture, &target, bitmap_cluster, target_data_cluster));
+		CHECK(load_fat_entry(&fixture, &target, target_data_cluster) == 0);
+
+		if (crosses_mapping_boundary) {
+			expected_next = index + 1 == DIRECTORY_CLUSTER_COUNT
+			    ? UINT32_C(0xffffffff)
+			    : expected_mapped_cluster(
+			          &fixture.geometry, &target, directory_first_cluster + index + 1);
+		}
+		CHECK(load_fat_entry(&fixture, &target, target_directory_cluster) == expected_next);
+	}
+	exfat_fixture_destroy(&fixture);
+}
+
+static void test_multi_cluster_no_fat_chain_child_directory(void)
+{
+	run_multi_cluster_no_fat_chain_child_directory(TARGET_SECTOR_COUNT, 0);
+}
+
+static void test_crossing_multi_cluster_no_fat_chain_child_directory(void)
+{
+	run_multi_cluster_no_fat_chain_child_directory(UINT32_C(131072), 1);
+}
+
 static void test_identity_mapping_rewrites_only_bitmap(void)
 {
 	static const struct {
@@ -2714,6 +2865,8 @@ int main(void)
 	test_directory_worklist_growth();
 	test_directory_worklist_allocation_failure();
 	test_deep_directory_tree();
+	test_multi_cluster_no_fat_chain_child_directory();
+	test_crossing_multi_cluster_no_fat_chain_child_directory();
 	test_identity_mapping_rewrites_only_bitmap();
 	test_no_fat_chain_ignores_stale_fat();
 	test_failure_leaves_volume_dirty();
