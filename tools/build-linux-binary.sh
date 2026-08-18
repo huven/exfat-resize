@@ -70,11 +70,12 @@ mkdir -p "$temporary/build" "$temporary/stage" "$output_directory"
 binary=$temporary/stage/usr/local/bin/exfat-resize
 manual=$temporary/stage/usr/local/share/man/man8/exfat-resize.8
 documentation=$temporary/stage/usr/local/share/doc/exfat_resize
+contributing=$documentation/CONTRIBUTING.md
 license=$documentation/LICENSE
 readme=$documentation/README.md
 transaction=$documentation/docs/TRANSACTION.md
 if [ ! -x "$binary" ] || [ ! -f "$manual" ] || [ ! -f "$license" ] ||
-	[ ! -f "$readme" ] || [ ! -f "$transaction" ]; then
+	[ ! -f "$contributing" ] || [ ! -f "$readme" ] || [ ! -f "$transaction" ]; then
 	echo "CMake runtime installation is incomplete" >&2
 	exit 1
 fi
@@ -111,6 +112,7 @@ package_directory=$temporary/$package
 mkdir -p "$package_directory/docs"
 install -m 0755 "$binary" "$package_directory/exfat-resize"
 install -m 0644 "$manual" "$package_directory/exfat-resize.8"
+install -m 0644 "$contributing" "$package_directory/CONTRIBUTING.md"
 install -m 0644 "$license" "$package_directory/LICENSE"
 install -m 0644 "$readme" "$package_directory/README.md"
 install -m 0644 "$transaction" "$package_directory/docs/TRANSACTION.md"

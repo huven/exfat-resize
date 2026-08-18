@@ -43,8 +43,6 @@ and platform-specific setup.
 ### Build from source
 
 The checkout path below requires Git, CMake 3.20 or newer, and a C11 compiler.
-See [Build and test](#build-and-test) for platform-specific test prerequisites
-and the `PATH` setup needed when macOS CMake.app has no command-line links.
 
     git clone https://github.com/huven/exfat-resize.git
     cd exfat-resize
@@ -57,6 +55,15 @@ Windows. On other platforms, only the portable library is built by default.
 
 The install command may require elevated privileges depending on the destination
 prefix.
+
+For a custom installation prefix:
+
+    cmake --install build --config Release --prefix /your/prefix
+
+On macOS, if CMake.app is installed without command-line links, add its tools to
+`PATH`:
+
+    export PATH=/Applications/CMake.app/Contents/bin:$PATH
 
 Before using the tool, read [Safety](#safety), then see [Usage](#usage)
 for supported targets and examples.
@@ -450,54 +457,13 @@ CLI from the extracted directory:
     cd exfat-resize-X.Y.Z-windows-x86_64
     .\exfat-resize.exe --version
 
-The archive also contains the license, this README, and the resize-transaction
-documentation. Resizing an image file normally does not require elevation. To
-access a logical volume or grow its partition, open PowerShell or Command Prompt
-as Administrator and invoke the extracted executable as described under
-[Windows usage](#windows).
+The archive also contains the license, this README, the contribution guide, and
+the resize-transaction documentation. Resizing an image file normally does not
+require elevation. To access a logical volume or grow its partition, open
+PowerShell or Command Prompt as Administrator and invoke the extracted
+executable as described under [Windows usage](#windows).
 
-## Build and test
+## Contributing
 
-CMake 3.20 or newer is the canonical build system for the library, CLI, and
-tests. Package tests require Git.
-
-### macOS and Linux
-
-The top-level Makefile is a convenience wrapper around CMake and the release
-scripts. If the macOS CMake application is installed without command-line
-links, add its tools to `PATH`:
-
-    export PATH=/Applications/CMake.app/Contents/bin:$PATH
-
-    make
-    make test
-    make sanitize-test
-    make release-test
-
-The complete macOS and Linux test suite also requires `ssh-keygen` for its
-release checks.
-
-`make` produces `build/exfat-resize`. `make test` builds every target and runs
-the separately labeled library, package, and CLI suites through CTest. The CLI
-tests use newfs_exfat and fsck_exfat on macOS, or mkfs.exfat and fsck.exfat on
-Linux. The sanitizer target runs all suites with AddressSanitizer and
-UndefinedBehaviorSanitizer in a separate build directory. It also builds and
-runs C and C++ `add_subdirectory()` consumers to verify the sanitized static
-library's runtime link requirements.
-The release target creates and verifies the source archive from committed
-`HEAD`, installs it into a temporary prefix, and builds C and C++ consumers
-using both `find_package()` and `add_subdirectory()`.
-
-For a custom installation prefix:
-
-    cmake --install build --prefix /your/prefix
-
-### Windows build
-
-The Windows build includes the CLI and library by default. It uses only native
-Windows APIs and does not require a POSIX compatibility layer:
-
-    cmake -S . -B build
-    cmake --build build --config Release
-    ctest --test-dir build --build-config Release --output-on-failure -L "library|cli|package-native"
-    cmake --install build --config Release
+See [Contributing](CONTRIBUTING.md) for the development setup, test suites,
+sanitizer and release checks, and source conventions.

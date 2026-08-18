@@ -18,6 +18,7 @@ set(installed_version_config
     "${install_prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/exfat_resize/exfat_resizeConfigVersion.cmake"
 )
 set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
+set(contributing "${documentation_dir}/CONTRIBUTING.md")
 set(readme "${documentation_dir}/README.md")
 set(license "${documentation_dir}/LICENSE")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
@@ -59,6 +60,7 @@ foreach(required_file
         "${installed_header}"
         "${installed_config}"
         "${installed_version_config}"
+        "${contributing}"
         "${readme}"
         "${license}"
         "${transaction_document}"
@@ -98,6 +100,7 @@ foreach(required_file
         "${development_package_dir}/exfat_resizeTargets.cmake"
         "${development_package_dir}/exfat_resizeConfig.cmake"
         "${development_package_dir}/exfat_resizeConfigVersion.cmake"
+        "${development_documentation_dir}/CONTRIBUTING.md"
         "${development_documentation_dir}/README.md"
         "${development_documentation_dir}/LICENSE"
         "${development_documentation_dir}/docs/TRANSACTION.md"
