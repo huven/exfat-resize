@@ -1600,6 +1600,12 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	context->io_sector_capacity = EXFAT_IO_BUFFER_SIZE / context->sector_size;
+	device_geometry.logical_sector_size = context->device->sector_size;
+	device_geometry.sector_count = context->device->sector_count;
+	error = exfat_resize_plan_growth(
+	    &device_geometry, &context->source, target_sector_count, &context->target);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 
 	error = load_source_fat(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
@@ -1609,12 +1615,6 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 		return error;
 	error = exfat_resize_checked_multiply_u64(
 	    context->source.sectors_per_cluster, context->sector_size, &context->cluster_size);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
-	device_geometry.logical_sector_size = context->device->sector_size;
-	device_geometry.sector_count = context->device->sector_count;
-	error = exfat_resize_plan_growth(
-	    &device_geometry, &context->source, target_sector_count, &context->target);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
