@@ -247,6 +247,7 @@ install(
 foreach(exfat_resize_document_component IN ITEMS Runtime Development)
     install(
         FILES
+            CONTRIBUTING.md
             LICENSE
             README.md
         DESTINATION

@@ -23,6 +23,7 @@ esac
 
 install_root=$destdir$prefix
 rm -f "$install_root/bin/exfat-resize" "$install_root/share/man/man8/exfat-resize.8" \
+	"$install_root/share/doc/exfat-resize/CONTRIBUTING.md" \
 	"$install_root/share/doc/exfat-resize/LICENSE" \
 	"$install_root/share/doc/exfat-resize/README.md" \
 	"$install_root/share/doc/exfat-resize/docs/TRANSACTION.md"

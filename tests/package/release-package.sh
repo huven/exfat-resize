@@ -122,6 +122,8 @@ fi
 "$cmake_command" --build "$temporary/package-build" --parallel
 "$cmake_command" --install "$temporary/package-build"
 
+cmp "$source_tree/CONTRIBUTING.md" \
+	"$temporary/prefix/share/doc/exfat_resize/CONTRIBUTING.md"
 cmp "$source_tree/LICENSE" "$temporary/prefix/share/doc/exfat_resize/LICENSE"
 cmp "$source_tree/README.md" "$temporary/prefix/share/doc/exfat_resize/README.md"
 installed_cli_version=$("$temporary/prefix/bin/exfat-resize" --version)

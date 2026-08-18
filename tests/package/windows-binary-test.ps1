@@ -86,6 +86,7 @@ try {
         $_.FullName.Substring($PackageDirectory.Length + 1).Replace('\', '/')
     } | Sort-Object)
     $Expected = @(
+        "CONTRIBUTING.md",
         "docs",
         "docs/TRANSACTION.md",
         "exfat-resize.exe",
@@ -102,6 +103,8 @@ try {
     & $Binary --help | Out-Null
     Assert-Condition ($LASTEXITCODE -eq 0) "Archived CLI help command failed"
 
+    Assert-SameFile (Join-Path $SourceDirectory "CONTRIBUTING.md") `
+        (Join-Path $PackageDirectory "CONTRIBUTING.md")
     Assert-SameFile (Join-Path $SourceDirectory "LICENSE") `
         (Join-Path $PackageDirectory "LICENSE")
     Assert-SameFile (Join-Path $SourceDirectory "README.md") `
