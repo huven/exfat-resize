@@ -48,7 +48,6 @@ struct exfat_boot_values {
 	uint8_t sectors_per_cluster_shift;
 	uint8_t number_of_fats;
 	uint8_t percent_in_use;
-	uint32_t checksum;
 };
 
 static enum exfat_resize_error load_boot_values(
@@ -273,7 +272,6 @@ static enum exfat_resize_error read_boot_region(const struct exfat_resize_block_
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	result.checksum = checksum;
 	error = validate_boot_values(device, &result, is_main);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
@@ -287,8 +285,7 @@ static int boot_regions_are_consistent(
 	const struct exfat_resize_geometry *left = &main->geometry;
 	const struct exfat_resize_geometry *right = &backup->geometry;
 
-	return main->checksum == backup->checksum &&
-	    left->volume_sector_count == right->volume_sector_count &&
+	return left->volume_sector_count == right->volume_sector_count &&
 	    left->sectors_per_cluster == right->sectors_per_cluster &&
 	    left->fat_offset == right->fat_offset && left->fat_length == right->fat_length &&
 	    left->cluster_heap_offset == right->cluster_heap_offset &&

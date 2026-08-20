@@ -265,6 +265,30 @@ static void test_stale_backup_fields(void)
 	destroy_fixture(&fixture);
 }
 
+static void test_independent_region_checksums(void)
+{
+	struct exfat_resize_geometry geometry;
+	struct boot_fixture fixture;
+	enum exfat_resize_error error;
+
+	initialize_fixture(&fixture, 512);
+	if (fixture.image == NULL) {
+		destroy_fixture(&fixture);
+		return;
+	}
+
+	fixture_sector(&fixture, BACKUP_BOOT_REGION + 9)[0] = 1;
+	set_region_checksum(&fixture, BACKUP_BOOT_REGION);
+	write_fixture(&fixture);
+
+	error = read_fixture(&fixture, &geometry);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error == EXFAT_RESIZE_SUCCESS)
+		check_geometry(&fixture, &geometry);
+
+	destroy_fixture(&fixture);
+}
+
 static void check_parse_failure(struct boot_fixture *fixture, enum exfat_resize_error expected)
 {
 	struct exfat_resize_geometry geometry;
@@ -596,6 +620,7 @@ int main(void)
 	test_valid_boot_regions(2048);
 	test_valid_boot_regions(4096);
 	test_stale_backup_fields();
+	test_independent_region_checksums();
 	test_checksums_and_region_consistency();
 	test_required_boot_structures();
 	test_unsupported_boot_values();
