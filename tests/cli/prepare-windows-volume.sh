@@ -33,14 +33,17 @@ done
 
 total_sectors=393216
 partition_start=2048
-initial_sectors=196608
-initial_end=$((partition_start + initial_sectors - 1))
-initial_bytes=$((initial_sectors * 512))
+filesystem_sectors=131072
+filesystem_end=$((partition_start + filesystem_sectors - 1))
+filesystem_bytes=$((filesystem_sectors * 512))
+partition_sectors=196608
+partition_end=$((partition_start + partition_sectors - 1))
+partition_bytes=$((partition_sectors * 512))
 
 mkdir -p "$mountpoint"
 truncate -s "$((total_sectors * 512))" "$raw"
 sgdisk --clear \
-	--new="1:${partition_start}:${initial_end}" \
+	--new="1:${partition_start}:${filesystem_end}" \
 	--typecode=1:0700 \
 	--change-name=1:EXRTEST "$raw" >/dev/null
 
@@ -82,10 +85,25 @@ sudo umount "$mountpoint"
 test_mount=
 sudo fsck.exfat -n "$partition"
 actual_bytes=$(sudo blockdev --getsize64 "$partition")
-if [ "$actual_bytes" -ne "$initial_bytes" ]; then
-	echo "wrong initial partition size: $actual_bytes, expected $initial_bytes" >&2
+if [ "$actual_bytes" -ne "$filesystem_bytes" ]; then
+	echo "wrong filesystem partition size: $actual_bytes, expected $filesystem_bytes" >&2
 	exit 1
 fi
+detach_raw_disk
+
+sgdisk --delete=1 "$raw" >/dev/null
+sgdisk \
+	--new="1:${partition_start}:${partition_end}" \
+	--typecode=1:0700 \
+	--change-name=1:EXRTEST "$raw" >/dev/null
+
+attach_raw_disk
+actual_bytes=$(sudo blockdev --getsize64 "$partition")
+if [ "$actual_bytes" -ne "$partition_bytes" ]; then
+	echo "wrong enlarged partition size: $actual_bytes, expected $partition_bytes" >&2
+	exit 1
+fi
+sudo fsck.exfat -n "$partition"
 sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g),ro" "$partition" "$mountpoint"
 test_mount=$mountpoint
 actual_hash=$(sha256sum "$mountpoint/payload.bin" | awk '{ print $1 }')

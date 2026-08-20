@@ -197,7 +197,9 @@ static int parse_size(const char *text, uint64_t *value)
 }
 
 static enum exfat_resize_error validate_partition_growth_preflight(
-    const struct exfat_resize_block_device *device, uint64_t target_size)
+    const struct exfat_resize_block_device *device,
+    uint64_t target_size,
+    uint64_t *effective_target_size)
 {
 	struct exfat_resize_device_geometry target_device_geometry;
 	struct exfat_resize_sector_adapter adapter;
@@ -222,6 +224,7 @@ static enum exfat_resize_error validate_partition_growth_preflight(
 		    &adapter.device, buffer, EXFAT_RESIZE_MAX_SECTOR_SIZE, &geometry);
 	if (result == EXFAT_RESIZE_SUCCESS) {
 		target_sector_count = target_size / filesystem_sector_size;
+		*effective_target_size = target_sector_count * (uint64_t)filesystem_sector_size;
 		if (target_sector_count <= geometry.volume_sector_count) {
 			result = EXFAT_RESIZE_INSUFFICIENT_GROWTH;
 		} else {
@@ -372,23 +375,23 @@ int cli_main(int argc, char **argv)
 			goto out;
 		}
 		current_size = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
-		if (target > current_size) {
-			/*
-			 * The library's complete preflight needs the requested target to fit the
-			 * device. Validate the source boot regions and target geometry before
-			 * changing that device's partition, then run the complete preflight.
-			 */
-			result = validate_partition_growth_preflight(&device.block_device, target);
-			if (result != EXFAT_RESIZE_SUCCESS) {
-				fprintf(stderr, "exfat-resize: cannot grow partition: preflight failed: %s\n",
-				    resize_error(result));
-				if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
-					print_device_io_error(&device, positional[0]);
-				print_no_write_guidance();
-				goto out;
-			}
+		/*
+		 * The library's complete preflight cannot run until a requested target
+		 * beyond the current device fits. Validate the source and planned geometry
+		 * first, and use its filesystem-sector-rounded target for every subsequent
+		 * decision.
+		 */
+		result = validate_partition_growth_preflight(&device.block_device, target, &target);
+		if (result != EXFAT_RESIZE_SUCCESS) {
+			fprintf(stderr, "exfat-resize: cannot grow partition: preflight failed: %s\n",
+			    resize_error(result));
+			if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
+				print_device_io_error(&device, positional[0]);
+			print_no_write_guidance();
+			goto out;
 		}
-		if (device_grow_partition(
+		if (target > current_size &&
+		    device_grow_partition(
 		        &device, positional[0], target, &partition_state, error, sizeof(error)) != 0) {
 			fprintf(stderr, "exfat-resize: %s\n", error);
 			if (partition_state == DEVICE_PARTITION_GROWN)

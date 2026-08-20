@@ -53,7 +53,8 @@ function Invoke-CleanCheck {
 function Invoke-Resize {
     param(
         [string] $Target,
-        [uint64] $TargetSize
+        [uint64] $TargetSize,
+        [bool] $ExpectPartitionGrowth = $true
     )
 
     $Output = & $Program --grow-partition $Target $TargetSize 2>&1
@@ -62,8 +63,13 @@ function Invoke-Resize {
     Assert-Condition ($Status -eq 0) "exfat-resize failed for $Target (exit $Status)"
     Assert-Condition (($Output -join "`n") -match "exfat-resize: resized") `
         "exfat-resize did not report success for $Target"
-    Assert-Condition (($Output -join "`n") -match "grew the partition") `
-        "exfat-resize did not report partition growth for $Target"
+    if ($ExpectPartitionGrowth) {
+        Assert-Condition (($Output -join "`n") -match "grew the partition") `
+            "exfat-resize did not report partition growth for $Target"
+    } else {
+        Assert-Condition (($Output -join "`n") -notmatch "grew the partition") `
+            "exfat-resize unexpectedly reported partition growth for $Target"
+    }
 }
 
 function Invoke-ExpectedFailure {
@@ -193,8 +199,8 @@ function Test-VolumeTarget {
         # Get-Volume.Size is usable cluster capacity, not the exFAT VolumeLength.
         $InitialFileSystemSize = [uint64] $Volume.Size
         Assert-Condition (
-            $InitialFileSystemSize -ge 90MB -and $InitialFileSystemSize -le 100MB
-        ) "Initial usable filesystem capacity is $InitialFileSystemSize, expected about 94 MiB"
+            $InitialFileSystemSize -ge 58MB -and $InitialFileSystemSize -le 68MB
+        ) "Initial usable filesystem capacity is $InitialFileSystemSize, expected about 62 MiB"
         Assert-Condition (($Disk.Size - $Partition.Offset - $Partition.Size) -ge 60MB) `
             "Disk does not leave enough trailing space to test partition growth"
         Write-Host "Initial usable filesystem capacity: $InitialFileSystemSize bytes"
@@ -229,7 +235,7 @@ function Test-VolumeTarget {
         if ($TargetType -eq "DriveLetter") {
             Invoke-ExpectedFailure `
                 -Arguments @(
-                    "--grow-partition", $Target, [string] ([uint64] ($Partition.Size + 1))
+                    "--grow-partition", $Target, [string] ([uint64] (64MB + 1))
                 ) `
                 -ExpectedText "target does not add enough usable clusters"
             $Partition = Get-Partition -DiskNumber $Disk.Number `
@@ -246,6 +252,34 @@ function Test-VolumeTarget {
             Assert-Condition ($Partition.Size -eq 96MB) `
                 "Partition changed after an out-of-space failure"
         }
+
+        $OriginalPartitionSize = [uint64] $Partition.Size
+        if ($TargetType -eq "DriveLetter") {
+            $UnalignedIncrement = [uint64] 1
+        } else {
+            $UnalignedIncrement = [uint64] 511
+        }
+        $UnalignedTargetSize = $OriginalPartitionSize + $UnalignedIncrement
+        Invoke-Resize `
+            -Target $Target `
+            -TargetSize $UnalignedTargetSize `
+            -ExpectPartitionGrowth $false
+        Update-HostStorageCache
+        $Partition = Get-Partition -DiskNumber $Disk.Number `
+            -PartitionNumber $Partition.PartitionNumber
+        Assert-Condition ($Partition.Size -eq $OriginalPartitionSize) `
+            "Partition changed for a target that rounds down to its existing size"
+        $Volume = Wait-Volume $DriveLetter
+        Invoke-CleanCheck $DriveLetter
+        $Volume = Wait-Volume $DriveLetter
+        $IntermediateFileSystemSize = [uint64] $Volume.Size
+        Write-Host "Intermediate usable filesystem capacity: $IntermediateFileSystemSize bytes"
+        Assert-Condition ($IntermediateFileSystemSize -ge ($InitialFileSystemSize + 20MB)) `
+            "Filesystem did not grow into the existing partition"
+        Assert-Condition ($IntermediateFileSystemSize -le $Partition.Size) `
+            "Filesystem capacity exceeds the unchanged partition size"
+        Assert-Condition (($Partition.Size - $IntermediateFileSystemSize) -le 4MB) `
+            "Filesystem leaves more than 4 MiB of the unchanged partition unavailable"
 
         Invoke-Resize $Target $TargetSize
         Update-HostStorageCache
