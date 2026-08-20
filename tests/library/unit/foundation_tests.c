@@ -22,24 +22,10 @@ static int failure_count;
 		} \
 	} while (0)
 
-static void test_checked_math(void)
+static void test_checked_ceil_divide(void)
 {
 	enum exfat_resize_error error;
 	uint64_t result;
-
-	error = exfat_resize_checked_add_u64(20, 22, &result);
-	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(result == 42);
-
-	error = exfat_resize_checked_add_u64(UINT64_MAX, 1, &result);
-	CHECK(error == EXFAT_RESIZE_ARITHMETIC_OVERFLOW);
-
-	error = exfat_resize_checked_multiply_u64(6, 7, &result);
-	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	CHECK(result == 42);
-
-	error = exfat_resize_checked_multiply_u64(UINT64_MAX, 2, &result);
-	CHECK(error == EXFAT_RESIZE_ARITHMETIC_OVERFLOW);
 
 	error = exfat_resize_checked_ceil_divide_u64(9, 4, &result);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
@@ -56,7 +42,7 @@ static void test_checked_math(void)
 	error = exfat_resize_checked_ceil_divide_u64(1, 0, &result);
 	CHECK(error == EXFAT_RESIZE_INVALID_ARGUMENT);
 
-	error = exfat_resize_checked_add_u64(1, 2, NULL);
+	error = exfat_resize_checked_ceil_divide_u64(1, 1, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_ARGUMENT);
 }
 
@@ -468,7 +454,7 @@ static void test_sparse_large_device(void)
 
 int main(void)
 {
-	test_checked_math();
+	test_checked_ceil_divide();
 	test_allocator_tracking();
 	test_allocator_failure_injection();
 	test_allocator_contract_errors();

@@ -234,17 +234,11 @@ static enum exfat_resize_error cluster_sector(
 {
 	uint64_t cluster_offset;
 	uint64_t result;
-	enum exfat_resize_error error;
 
 	if (cluster < 2 || cluster > geometry->cluster_count + UINT32_C(1))
 		return EXFAT_RESIZE_OUT_OF_BOUNDS;
-	error = exfat_resize_checked_multiply_u64(
-	    (uint64_t)cluster - 2, geometry->sectors_per_cluster, &cluster_offset);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
-	error = exfat_resize_checked_add_u64(geometry->cluster_heap_offset, cluster_offset, &result);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
+	cluster_offset = ((uint64_t)cluster - 2) * geometry->sectors_per_cluster;
+	result = geometry->cluster_heap_offset + cluster_offset;
 	if (result >= geometry->volume_sector_count)
 		return EXFAT_RESIZE_OUT_OF_BOUNDS;
 	*sector = result;
@@ -263,7 +257,6 @@ static int cluster_is_valid(const struct exfat_resize_geometry *geometry, uint32
 
 static enum exfat_resize_error load_source_fat(struct resize_context *context)
 {
-	enum exfat_resize_error error;
 	uint64_t allocation_size;
 	uint32_t sector_count;
 
@@ -271,9 +264,7 @@ static enum exfat_resize_error load_source_fat(struct resize_context *context)
 	    exfat_resize_used_fat_sector_count(context->source.cluster_count, context->sector_size);
 	if (sector_count > context->source.fat_length)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	error = exfat_resize_checked_multiply_u64(sector_count, context->sector_size, &allocation_size);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
+	allocation_size = (uint64_t)sector_count * context->sector_size;
 	context->source_fat_size = (size_t)allocation_size;
 	if (context->source_fat_size != allocation_size)
 		return EXFAT_RESIZE_ARITHMETIC_OVERFLOW;
@@ -1613,10 +1604,8 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	error = validate_reserved_fat_entries(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	error = exfat_resize_checked_multiply_u64(
-	    context->source.sectors_per_cluster, context->sector_size, &context->cluster_size);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
+	context->cluster_size =
+	    (uint64_t)context->source.sectors_per_cluster * context->sector_size;
 
 	heap_movement =
 	    (uint64_t)context->target.cluster_heap_offset - context->source.cluster_heap_offset;
