@@ -2087,18 +2087,112 @@ static void test_directory_worklist_allocation_failure(void)
 	}
 }
 
+static int check_directory_link(struct exfat_fixture *fixture,
+    const struct exfat_resize_geometry *target,
+    uint32_t directory_cluster,
+    size_t entry_offset,
+    uint32_t expected_child_cluster)
+{
+	unsigned char directory[SECTOR_SIZE] = { 0 };
+	enum exfat_resize_error error;
+	uint32_t stored_child_cluster = 0;
+	uint16_t calculated_checksum;
+	uint16_t stored_checksum = 0;
+	int read_result;
+
+	read_result = exfat_fixture_read_sector(fixture,
+	    exfat_fixture_cluster_sector(target, directory_cluster), directory, sizeof(directory));
+	CHECK(read_result == 0);
+	if (read_result != 0)
+		return 0;
+	CHECK(entry_offset <= sizeof(directory) - 3 * 32);
+	if (entry_offset > sizeof(directory) - 3 * 32)
+		return 0;
+	CHECK(directory[entry_offset] == ENTRY_FILE);
+	CHECK(directory[entry_offset + 32] == ENTRY_STREAM);
+	CHECK(directory[entry_offset + 64] == ENTRY_FILE_NAME);
+	if (directory[entry_offset] != ENTRY_FILE || directory[entry_offset + 32] != ENTRY_STREAM ||
+	    directory[entry_offset + 64] != ENTRY_FILE_NAME)
+		return 0;
+	error = exfat_resize_load_le16(directory + entry_offset, 32, 2, &stored_checksum);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return 0;
+	error = exfat_resize_load_le32(directory + entry_offset + 32, 32, 20, &stored_child_cluster);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return 0;
+	calculated_checksum = entry_set_checksum(directory + entry_offset);
+	CHECK(stored_checksum == calculated_checksum);
+	CHECK(stored_child_cluster == expected_child_cluster);
+	return stored_checksum == calculated_checksum && stored_child_cluster == expected_child_cluster;
+}
+
+static int check_directory_is_empty(struct exfat_fixture *fixture,
+    const struct exfat_resize_geometry *target,
+    uint32_t directory_cluster)
+{
+	unsigned char directory[SECTOR_SIZE] = { 0 };
+	int read_result;
+
+	read_result = exfat_fixture_read_sector(fixture,
+	    exfat_fixture_cluster_sector(target, directory_cluster), directory, sizeof(directory));
+	CHECK(read_result == 0);
+	if (read_result != 0)
+		return 0;
+	CHECK(directory[0] == 0);
+	return directory[0] == 0;
+}
+
 static void test_deep_directory_tree(void)
 {
+	enum { FIRST_CLUSTER = 500, DIRECTORY_COUNT = 2048 };
 	struct exfat_resize_options options;
+	struct exfat_resize_geometry source;
+	struct exfat_resize_geometry target;
 	struct exfat_fixture fixture;
 	enum exfat_resize_error error;
+	uint32_t index;
+	int fixture_result;
 
-	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
-	CHECK(exfat_fixture_add_directory_chain(&fixture, 500, 2048) == 0);
+	fixture_result = exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT);
+	CHECK(fixture_result == 0);
+	if (fixture_result != 0)
+		return;
+	source = fixture.geometry;
+	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS) {
+		exfat_fixture_destroy(&fixture);
+		return;
+	}
+	fixture_result = exfat_fixture_add_directory_chain(&fixture, FIRST_CLUSTER, DIRECTORY_COUNT);
+	CHECK(fixture_result == 0);
+	if (fixture_result != 0)
+		goto done;
 	memory_block_device_clear_operations(&fixture.memory);
 	options = resize_options();
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &options, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error == EXFAT_RESIZE_SUCCESS) {
+		if (!check_directory_link(&fixture, &target, target.root_directory_cluster, 5 * 32,
+		        expected_mapped_cluster(&source, &target, 6)))
+			goto done;
+		if (!check_directory_link(&fixture, &target,
+		        expected_mapped_cluster(&source, &target, 6), 3 * 32,
+		        expected_mapped_cluster(&source, &target, FIRST_CLUSTER)))
+			goto done;
+		for (index = 0; index + 1 < DIRECTORY_COUNT; ++index) {
+			if (!check_directory_link(&fixture, &target,
+			        expected_mapped_cluster(&source, &target, FIRST_CLUSTER + index), 0,
+			        expected_mapped_cluster(&source, &target, FIRST_CLUSTER + index + 1)))
+				goto done;
+		}
+		(void)check_directory_is_empty(&fixture, &target,
+		    expected_mapped_cluster(&source, &target, FIRST_CLUSTER + DIRECTORY_COUNT - 1));
+	}
+
+done:
 	exfat_fixture_destroy(&fixture);
 }
 
