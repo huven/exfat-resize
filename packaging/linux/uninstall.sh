@@ -26,6 +26,7 @@ rm -f "$install_root/bin/exfat-resize" "$install_root/share/man/man8/exfat-resiz
 	"$install_root/share/doc/exfat-resize/CONTRIBUTING.md" \
 	"$install_root/share/doc/exfat-resize/LICENSE" \
 	"$install_root/share/doc/exfat-resize/README.md" \
+	"$install_root/share/doc/exfat-resize/docs/PARTITIONING.md" \
 	"$install_root/share/doc/exfat-resize/docs/TRANSACTION.md"
 rmdir "$install_root/share/doc/exfat-resize/docs" 2>/dev/null || true
 rmdir "$install_root/share/doc/exfat-resize" 2>/dev/null || true

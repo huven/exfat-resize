@@ -152,8 +152,10 @@ to use all available space:
     truncate -s +2G image.exfat
     exfat-resize image.exfat
 
-After enlarging the partition or other backing storage with the appropriate
-platform tool, grow the filesystem on an unmounted raw device:
+First enlarge the partition or other backing storage with the appropriate
+platform tool. See [Partition growth outside
+`exfat-resize`](docs/PARTITIONING.md) for starting points. Then grow the
+filesystem on an unmounted raw device:
 
     exfat-resize /dev/your-exfat-device
 
@@ -217,6 +219,11 @@ requires:
 - A basic GPT or MBR data partition with no overlapping layout entry.
 - Enough unallocated space immediately after the partition.
 
+Other layouts require enlarging the containing partition separately before
+running `exfat-resize`. See [Partition growth outside
+`exfat-resize`](docs/PARTITIONING.md) for external tools and rescue
+environments.
+
 Before changing the partition table, the CLI validates both exFAT boot regions,
 checks that the filesystem can grow to the requested size, and verifies the
 volume-to-disk mapping and physical partition layout. It then uses Windows'
@@ -229,31 +236,6 @@ larger partition; do not shrink the partition. Correct the reported problem
 and retry the filesystem resize. Without `--grow-partition`, the CLI never
 changes a partition table.
 
-For a layout that this mode does not support, one open-source alternative is to
-boot [GParted Live][gparted-live], identify the whole target disk carefully, and
-use the included terminal rather than GParted's graphical exFAT resize action:
-
-```text
-sudo parted /dev/sdX
-(parted) unit s
-(parted) print free
-(parted) resizepart PARTITION_NUMBER NEW_END_SECTOR
-(parted) quit
-```
-
-[GNU Parted documents][resizepart] that `resizepart` changes the partition end
-without modifying the filesystem. Record the start sector first, select only
-an end sector in the immediately following free extent, and verify afterwards
-that the start is unchanged. Do not use this procedure to shrink exFAT.
-
-Windows DiskPart is not a substitute: its [documented `extend`
-operation][diskpart-extend] automatically extends NTFS and fails without a
-partition change for other formatted filesystems. Do not rely on claims that it
-will silently extend only an exFAT partition.
-
-[diskpart-extend]: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/extend
-[gparted-live]: https://gparted.org/livecd.php
-[resizepart]: https://www.gnu.org/software/parted/manual/html_node/resizepart.html
 [windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
 
 ## Filesystem compatibility
@@ -453,11 +435,11 @@ CLI from the extracted directory:
     cd exfat-resize-X.Y.Z-windows-x86_64
     .\exfat-resize.exe --version
 
-The archive also contains the license, this README, the contribution guide, and
-the resize-transaction documentation. Resizing an image file normally does not
-require elevation. To access a logical volume or grow its partition, open
-PowerShell or Command Prompt as Administrator and invoke the extracted
-executable as described under [Windows usage](#windows).
+The archive also contains the license, this README, the contribution guide,
+and the resize-transaction and partition-growth documentation. Resizing an
+image file normally does not require elevation. To access a logical volume or
+grow its partition, open PowerShell or Command Prompt as Administrator and
+invoke the extracted executable as described under [Windows usage](#windows).
 
 ## Contributing
 
