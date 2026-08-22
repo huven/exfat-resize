@@ -75,6 +75,7 @@ expected_entries=$(
 		"$package/LICENSE" \
 		"$package/README.md" \
 		"$package/docs/" \
+		"$package/docs/PARTITIONING.md" \
 		"$package/docs/TRANSACTION.md" \
 		"$package/exfat-resize" \
 		"$package/exfat-resize.8" \
@@ -113,8 +114,9 @@ if [ "$actual" != "$expected" ]; then
 	printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
 	exit 1
 fi
-documentation=$(find "$package_directory/docs" -mindepth 1 -maxdepth 1 -exec basename {} \;)
-if [ "$documentation" != TRANSACTION.md ]; then
+expected_documentation=$(printf '%s\n' PARTITIONING.md TRANSACTION.md | sort)
+documentation=$(find "$package_directory/docs" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort)
+if [ "$documentation" != "$expected_documentation" ]; then
 	echo "macOS archive contains an unexpected documentation file set" >&2
 	exit 1
 fi
@@ -128,6 +130,7 @@ if [ "$(stat -f '%Lp' "$package_directory/exfat-resize.8")" != 644 ] ||
 	[ "$(stat -f '%Lp' "$package_directory/CONTRIBUTING.md")" != 644 ] ||
 	[ "$(stat -f '%Lp' "$package_directory/LICENSE")" != 644 ] ||
 	[ "$(stat -f '%Lp' "$package_directory/README.md")" != 644 ] ||
+	[ "$(stat -f '%Lp' "$package_directory/docs/PARTITIONING.md")" != 644 ] ||
 	[ "$(stat -f '%Lp' "$package_directory/docs/TRANSACTION.md")" != 644 ]; then
 	echo "macOS archive data-file modes are incorrect" >&2
 	exit 1
@@ -145,6 +148,7 @@ fi
 cmp "$source_directory/CONTRIBUTING.md" "$package_directory/CONTRIBUTING.md"
 cmp "$source_directory/LICENSE" "$package_directory/LICENSE"
 cmp "$source_directory/README.md" "$package_directory/README.md"
+cmp "$source_directory/docs/PARTITIONING.md" "$package_directory/docs/PARTITIONING.md"
 cmp "$source_directory/docs/TRANSACTION.md" "$package_directory/docs/TRANSACTION.md"
 
 architectures=$(lipo -archs "$binary")
@@ -214,15 +218,16 @@ installed_manual=$install_prefix/share/man/man8/exfat-resize.8
 installed_contributing=$install_prefix/share/doc/exfat-resize/CONTRIBUTING.md
 installed_license=$install_prefix/share/doc/exfat-resize/LICENSE
 installed_readme=$install_prefix/share/doc/exfat-resize/README.md
+installed_partitioning=$install_prefix/share/doc/exfat-resize/docs/PARTITIONING.md
 installed_transaction=$install_prefix/share/doc/exfat-resize/docs/TRANSACTION.md
 if [ "$("$installed_binary" --version)" != "exfat-resize $build_version" ] ||
 	[ ! -f "$installed_manual" ] || [ ! -f "$installed_license" ] ||
 	[ ! -f "$installed_contributing" ] || [ ! -f "$installed_readme" ] ||
-	[ ! -f "$installed_transaction" ]; then
+	[ ! -f "$installed_partitioning" ] || [ ! -f "$installed_transaction" ]; then
 	echo "installed macOS archive is incomplete" >&2
 	exit 1
 fi
-if [ "$(find "$install_prefix" -type f | wc -l)" -ne 6 ]; then
+if [ "$(find "$install_prefix" -type f | wc -l)" -ne 7 ]; then
 	echo "installer created an unexpected file set" >&2
 	exit 1
 fi
@@ -240,7 +245,7 @@ touch "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.
 DESTDIR=$temporary/install-root "$package_directory/uninstall.sh"
 if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ] ||
 	[ -e "$installed_contributing" ] || [ -e "$installed_readme" ] ||
-	[ -e "$installed_transaction" ]; then
+	[ -e "$installed_partitioning" ] || [ -e "$installed_transaction" ]; then
 	echo "uninstaller left an installed project file behind" >&2
 	exit 1
 fi

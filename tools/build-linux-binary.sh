@@ -73,9 +73,11 @@ documentation=$temporary/stage/usr/local/share/doc/exfat_resize
 contributing=$documentation/CONTRIBUTING.md
 license=$documentation/LICENSE
 readme=$documentation/README.md
+partitioning=$documentation/docs/PARTITIONING.md
 transaction=$documentation/docs/TRANSACTION.md
 if [ ! -x "$binary" ] || [ ! -f "$manual" ] || [ ! -f "$license" ] ||
-	[ ! -f "$contributing" ] || [ ! -f "$readme" ] || [ ! -f "$transaction" ]; then
+	[ ! -f "$contributing" ] || [ ! -f "$readme" ] || [ ! -f "$partitioning" ] ||
+	[ ! -f "$transaction" ]; then
 	echo "CMake runtime installation is incomplete" >&2
 	exit 1
 fi
@@ -115,6 +117,7 @@ install -m 0644 "$manual" "$package_directory/exfat-resize.8"
 install -m 0644 "$contributing" "$package_directory/CONTRIBUTING.md"
 install -m 0644 "$license" "$package_directory/LICENSE"
 install -m 0644 "$readme" "$package_directory/README.md"
+install -m 0644 "$partitioning" "$package_directory/docs/PARTITIONING.md"
 install -m 0644 "$transaction" "$package_directory/docs/TRANSACTION.md"
 install -m 0755 "$source_directory/packaging/linux/install.sh" "$package_directory/install.sh"
 install -m 0755 "$source_directory/packaging/linux/uninstall.sh" "$package_directory/uninstall.sh"

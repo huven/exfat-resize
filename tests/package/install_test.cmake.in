@@ -21,6 +21,7 @@ set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
 set(contributing "${documentation_dir}/CONTRIBUTING.md")
 set(readme "${documentation_dir}/README.md")
 set(license "${documentation_dir}/LICENSE")
+set(partitioning_document "${documentation_dir}/docs/PARTITIONING.md")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
 set(development_install_prefix "@CMAKE_CURRENT_BINARY_DIR@/development-install-tree")
 set(development_documentation_dir
@@ -63,6 +64,7 @@ foreach(required_file
         "${contributing}"
         "${readme}"
         "${license}"
+        "${partitioning_document}"
         "${transaction_document}"
 )
     if(NOT EXISTS "${required_file}")
@@ -103,6 +105,7 @@ foreach(required_file
         "${development_documentation_dir}/CONTRIBUTING.md"
         "${development_documentation_dir}/README.md"
         "${development_documentation_dir}/LICENSE"
+        "${development_documentation_dir}/docs/PARTITIONING.md"
         "${development_documentation_dir}/docs/TRANSACTION.md"
 )
     if(NOT EXISTS "${required_file}")
@@ -175,6 +178,7 @@ foreach(required_text
         "exfat-resize --grow-partition device size"
         "Conform to exFAT revision 1.00"
         "Vendor Allocation directory entries"
+        "docs/PARTITIONING.md"
         "docs/TRANSACTION.md#memory-requirements"
         "allocator-backed working-memory sizes"
         "ordinary heap memory"
@@ -195,6 +199,29 @@ foreach(readme_link IN LISTS readme_links)
     if(NOT EXISTS "${documentation_dir}/${link_path}")
         message(FATAL_ERROR
             "Installed README link does not resolve: ${link_target}"
+        )
+    endif()
+endforeach()
+
+file(READ "${partitioning_document}" partitioning_contents)
+foreach(required_text
+        "# Partition growth outside exfat-resize"
+        "focused on growing exFAT filesystems correctly"
+        "Apart from that explicit option"
+        "## growpart"
+        "growpart --dry-run /dev/sdX PARTITION_NUMBER"
+        "## GParted Live"
+        "resizepart PARTITION_NUMBER NEW_END_SECTOR"
+        "## Other architectures"
+        "Debian installer rescue mode"
+        "Ubuntu Server alternative-architecture images"
+        "## Windows DiskPart"
+        "Windows DiskPart is not a substitute"
+)
+    string(FIND "${partitioning_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Installed partitioning document does not contain: ${required_text}"
         )
     endif()
 endforeach()

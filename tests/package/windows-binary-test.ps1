@@ -88,6 +88,7 @@ try {
     $Expected = @(
         "CONTRIBUTING.md",
         "docs",
+        "docs/PARTITIONING.md",
         "docs/TRANSACTION.md",
         "exfat-resize.exe",
         "LICENSE",
@@ -109,6 +110,8 @@ try {
         (Join-Path $PackageDirectory "LICENSE")
     Assert-SameFile (Join-Path $SourceDirectory "README.md") `
         (Join-Path $PackageDirectory "README.md")
+    Assert-SameFile (Join-Path $SourceDirectory "docs/PARTITIONING.md") `
+        (Join-Path $PackageDirectory "docs/PARTITIONING.md")
     Assert-SameFile (Join-Path $SourceDirectory "docs/TRANSACTION.md") `
         (Join-Path $PackageDirectory "docs/TRANSACTION.md")
 
