@@ -144,7 +144,6 @@ struct resize_context {
 	struct exfat_resize_allocator allocator;
 	struct exfat_resize_monitor monitor;
 	enum exfat_resize_stage stage;
-	int cancellation_latched;
 	struct exfat_resize_geometry source;
 	struct exfat_resize_geometry target;
 	struct allocation_stream old_bitmap;
@@ -199,10 +198,10 @@ static void enter_stage(
 
 static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)
 {
-	if (!context->cancellation_latched && context->monitor.cancellation_requested != NULL &&
+	if (context->monitor.cancellation_requested != NULL &&
 	    context->monitor.cancellation_requested(context->monitor.context) != 0)
-		context->cancellation_latched = 1;
-	return context->cancellation_latched ? EXFAT_RESIZE_CANCELLED : EXFAT_RESIZE_SUCCESS;
+		return EXFAT_RESIZE_CANCELLED;
+	return EXFAT_RESIZE_SUCCESS;
 }
 
 /* Sector I/O */

@@ -185,15 +185,16 @@ struct exfat_resize_allocator {
  *
  * Both callbacks are optional, quick, nonblocking observations of an active
  * call and may be invoked repeatedly. cancellation_requested returns zero to
- * continue or nonzero to request cancellation at the next safe boundary.
- * report_event cannot report an error or replace the library result. Its event
- * pointer is borrowed only for the callback; unknown event codes must be
- * tolerated. A monitor callback must not reenter the active resize.
+ * continue or nonzero to abort the resize with EXFAT_RESIZE_CANCELLED at the
+ * current checkpoint. report_event cannot report an error or replace the
+ * library result. Its event pointer is borrowed only for the callback; unknown
+ * event codes must be tolerated. A monitor callback must not reenter the active
+ * resize.
  */
 struct exfat_resize_monitor {
 	/* Opaque caller value passed unchanged to both monitor callbacks. */
 	void *context;
-	/* Returns zero to continue or nonzero to request cancellation. */
+	/* Returns zero to continue or nonzero to abort at this checkpoint. */
 	int (*cancellation_requested)(void *context);
 	/* Observes one borrowed event for the duration of this callback only. */
 	void (*report_event)(void *context, const struct exfat_resize_event *event);
@@ -213,9 +214,9 @@ struct exfat_resize_monitor {
  * each callback in a nonnull monitor is independently optional. Cancellation
  * is cooperative: exfat_resize() returns EXFAT_RESIZE_CANCELLED at the next
  * safe checkpoint without preempting the callback or transaction step then in
- * progress. The first observed request is latched. Concrete operation failures
- * take precedence, and cancellation requested at COMPLETED does not replace
- * success.
+ * progress. A nonzero cancellation result aborts the resize through its normal
+ * error path. Concrete operation failures take precedence, and cancellation
+ * requested at COMPLETED does not replace success.
  *
  * A STAGE_ENTERED event is reported at INFO level for PREFLIGHT and every
  * subsequent stage. Its value is zero except at COMPLETED, where it is the

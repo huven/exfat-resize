@@ -23,6 +23,7 @@ struct monitor_state {
 	enum exfat_resize_stage request_stage;
 	int request_on_stage;
 	int cancellation_requested;
+	int one_shot_cancellation;
 };
 
 #define CHECK(expression) \
@@ -36,9 +37,13 @@ struct monitor_state {
 static int cancellation_callback(void *context)
 {
 	struct monitor_state *state = context;
+	int requested;
 
 	++state->cancellation_calls;
-	return state->cancellation_requested;
+	requested = state->cancellation_requested;
+	if (requested && state->one_shot_cancellation)
+		state->cancellation_requested = 0;
+	return requested;
 }
 
 static void event_callback(void *context, const struct exfat_resize_event *event)
@@ -471,7 +476,10 @@ static void test_cancellation_without_event_reporting(void)
 {
 	struct test_allocator allocator = { 0 };
 	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
-	struct monitor_state state = { .cancellation_requested = 1 };
+	struct monitor_state state = {
+		.cancellation_requested = 1,
+		.one_shot_cancellation = 1,
+	};
 	struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 0);
 	struct exfat_fixture fixture;
 	enum exfat_resize_error error;
@@ -483,6 +491,7 @@ static void test_cancellation_without_event_reporting(void)
 	CHECK(error == EXFAT_RESIZE_CANCELLED);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	CHECK(state.cancellation_calls == 1);
+	CHECK(!state.cancellation_requested);
 	CHECK(state.event_count == 0);
 	CHECK(allocator.allocation_attempts == 0);
 	CHECK(fixture.memory.operation_count == 0);

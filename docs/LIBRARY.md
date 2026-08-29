@@ -143,8 +143,10 @@ exception must not escape across the C interface.
 ### Cooperative cancellation
 
 `cancellation_requested` returns zero to continue and nonzero to request
-cancellation. The library latches the first nonzero result, so the callback
-does not need to keep returning nonzero.
+cancellation. When the library observes a nonzero result at a checkpoint, it
+aborts the resize through the normal error path and returns
+`EXFAT_RESIZE_CANCELLED`. The callback is not consulted again after that result
+is observed, so it does not need to keep returning nonzero.
 
 Cancellation is cooperative. It is observed only at safe transaction
 boundaries and cannot preempt a block-device or allocator callback already in
