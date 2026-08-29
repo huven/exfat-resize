@@ -82,6 +82,21 @@ static void check_event_stream(const struct monitor_state *state, size_t expecte
 	}
 }
 
+static void check_operation_streams_are_equal(
+    const struct memory_block_device *expected, const struct memory_block_device *actual)
+{
+	size_t index;
+
+	CHECK(expected->operation_count == actual->operation_count);
+	if (expected->operation_count != actual->operation_count)
+		return;
+	for (index = 0; index < expected->operation_count; ++index) {
+		CHECK(expected->operations[index].kind == actual->operations[index].kind);
+		CHECK(expected->operations[index].first_sector == actual->operations[index].first_sector);
+		CHECK(expected->operations[index].sector_count == actual->operations[index].sector_count);
+	}
+}
+
 static void test_invalid_devices(void)
 {
 	enum invalid_device_kind {
@@ -369,7 +384,6 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	struct exfat_fixture reported;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage;
-	size_t operation_bytes;
 	uint64_t target_size = exfat_fixture_target_size(TARGET_SECTOR_COUNT);
 
 	CHECK(exfat_fixture_initialize(&baseline, TARGET_SECTOR_COUNT) == 0);
@@ -393,13 +407,8 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	if (reported_state.event_count == 5)
 		CHECK(reported_state.events[4].value == target_size);
 	CHECK(reported_state.cancellation_calls == 0);
-	CHECK(baseline.memory.operation_count == empty.memory.operation_count);
-	CHECK(baseline.memory.operation_count == reported.memory.operation_count);
-	operation_bytes = baseline.memory.operation_count * sizeof(*baseline.memory.operations);
-	if (baseline.memory.operation_count == empty.memory.operation_count)
-		CHECK(memcmp(baseline.memory.operations, empty.memory.operations, operation_bytes) == 0);
-	if (baseline.memory.operation_count == reported.memory.operation_count)
-		CHECK(memcmp(baseline.memory.operations, reported.memory.operations, operation_bytes) == 0);
+	check_operation_streams_are_equal(&baseline.memory, &empty.memory);
+	check_operation_streams_are_equal(&baseline.memory, &reported.memory);
 	CHECK(test_allocator_is_clean(&baseline_allocator));
 	CHECK(test_allocator_is_clean(&empty_allocator));
 	CHECK(test_allocator_is_clean(&reported_allocator));
