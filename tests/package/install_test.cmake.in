@@ -21,6 +21,7 @@ set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
 set(contributing "${documentation_dir}/CONTRIBUTING.md")
 set(readme "${documentation_dir}/README.md")
 set(license "${documentation_dir}/LICENSE")
+set(library_document "${documentation_dir}/docs/LIBRARY.md")
 set(partitioning_document "${documentation_dir}/docs/PARTITIONING.md")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
 set(development_install_prefix "@CMAKE_CURRENT_BINARY_DIR@/development-install-tree")
@@ -64,6 +65,7 @@ foreach(required_file
         "${contributing}"
         "${readme}"
         "${license}"
+        "${library_document}"
         "${partitioning_document}"
         "${transaction_document}"
 )
@@ -105,6 +107,7 @@ foreach(required_file
         "${development_documentation_dir}/CONTRIBUTING.md"
         "${development_documentation_dir}/README.md"
         "${development_documentation_dir}/LICENSE"
+        "${development_documentation_dir}/docs/LIBRARY.md"
         "${development_documentation_dir}/docs/PARTITIONING.md"
         "${development_documentation_dir}/docs/TRANSACTION.md"
 )
@@ -179,13 +182,50 @@ foreach(required_text
         "Conform to exFAT revision 1.00"
         "Vendor Allocation directory entries"
         "docs/PARTITIONING.md"
+        "docs/LIBRARY.md"
         "docs/TRANSACTION.md#memory-requirements"
-        "allocator-backed working-memory sizes"
-        "ordinary heap memory"
+        "exfat_resize(&device, target_size, &allocator, NULL, &stage)"
+        "compatible 2.x release"
 )
     string(FIND "${readme_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
         message(FATAL_ERROR "Installed README does not contain: ${required_text}")
+    endif()
+endforeach()
+
+file(READ "${library_document}" library_contents)
+foreach(required_text
+        "# C library reference"
+        "## Block-device contract"
+        "## Allocator contract"
+        "## Operation monitor"
+        "EXFAT_RESIZE_CANCELLED"
+        "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
+        "unknown event codes"
+        "## Results and recovery stages"
+        "## Compatibility and migration from 1.x"
+        "removes `struct exfat_resize_options`"
+        "five-argument declaration"
+)
+    string(FIND "${library_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Installed library reference does not contain: ${required_text}"
+        )
+    endif()
+endforeach()
+
+string(REGEX MATCHALL "\\[[^]]*\\]\\([^)]+\\)" library_links "${library_contents}")
+foreach(library_link IN LISTS library_links)
+    string(REGEX REPLACE "^.*\\(([^)]+)\\)$" "\\1" link_target "${library_link}")
+    if(link_target MATCHES "^(#|[A-Za-z][A-Za-z0-9+.-]*:|/)")
+        continue()
+    endif()
+    string(REGEX REPLACE "#.*$" "" link_path "${link_target}")
+    if(NOT EXISTS "${documentation_dir}/docs/${link_path}")
+        message(FATAL_ERROR
+            "Installed library-reference link does not resolve: ${link_target}"
+        )
     endif()
 endforeach()
 
@@ -251,8 +291,9 @@ endforeach()
 file(READ "${installed_header}" header_contents)
 foreach(required_text
         "read the operational safety requirements"
-        "https://github.com/huven/exfat-resize#safety"
-        "Memory requirements"
+        "complete public-library contract"
+        "https://github.com/huven/exfat-resize"
+        "docs/LIBRARY.md"
         "docs/TRANSACTION.md"
         "Working-memory sizes and lifetimes"
         "readable and writable"
@@ -261,6 +302,9 @@ foreach(required_text
         "9899:2011 section 6.5"
         "borrowed only for that callback invocation"
         "must not be retained"
+        "struct exfat_resize_monitor"
+        "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
+        "EXFAT_RESIZE_CANCELLED"
 )
     string(FIND "${header_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)

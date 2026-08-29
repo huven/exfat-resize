@@ -21,10 +21,10 @@ extern "C" {
  */
 
 /*
- * Before calling exfat_resize(), read the operational safety requirements and
- * supported filesystem subset in README.md, distributed with the library and
- * available at:
- * https://github.com/huven/exfat-resize#safety
+ * Before calling exfat_resize(), read the operational safety requirements in
+ * README.md and the complete public-library contract in docs/LIBRARY.md. Both
+ * are distributed with the library and available at:
+ * https://github.com/huven/exfat-resize
  */
 
 enum exfat_resize_error {
@@ -69,7 +69,9 @@ enum exfat_resize_error {
 	/* Growth would move or consume storage marked as a bad cluster. */
 	EXFAT_RESIZE_BAD_CLUSTER_CONFLICT = 19,
 	/* Filesystem sectors cannot be mapped to whole device sectors. */
-	EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING = 20
+	EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING = 20,
+	/* Cooperative cancellation was requested at a safe boundary. */
+	EXFAT_RESIZE_CANCELLED = 21
 };
 
 /* Recovery boundary reached by exfat_resize(). */
@@ -86,16 +88,39 @@ enum exfat_resize_stage {
 	EXFAT_RESIZE_STAGE_COMPLETED = 4
 };
 
+/* Generic severity for structured library events. */
+enum exfat_resize_event_level {
+	EXFAT_RESIZE_EVENT_LEVEL_DEBUG = 0,
+	EXFAT_RESIZE_EVENT_LEVEL_INFO = 1,
+	EXFAT_RESIZE_EVENT_LEVEL_WARNING = 2,
+	EXFAT_RESIZE_EVENT_LEVEL_ERROR = 3
+};
+
+/* Reports entry into the stage stored in an exfat_resize_event. */
+#define EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED UINT32_C(1)
+
+/* Fixed event record delivered synchronously by exfat_resize(). */
+struct exfat_resize_event {
+	/* Authoritative recovery stage when the event is delivered. */
+	enum exfat_resize_stage stage;
+	/* Severity used for generic filtering and presentation. */
+	enum exfat_resize_event_level level;
+	/* Stable semantic identifier; unknown values must be tolerated. */
+	uint32_t code;
+	/* Code-specific unsigned value; zero when the code has no value. */
+	uint64_t value;
+};
+
 /*
  * Callback contract
  *
- * These rules apply to block-device and allocator callbacks. Callbacks are
- * synchronous, and the library does not invoke them concurrently within one
- * public call. It passes context unchanged and retains no callback or context
- * pointer after the call returns. Callback tables, context pointers, and
- * callback-owned state must remain valid for the complete call; callback
- * tables and context pointers must not change during it. Callbacks may modify
- * state referenced by context. C++ exceptions must not escape a callback
+ * These rules apply to block-device, allocator, and monitor callbacks.
+ * Callbacks are synchronous, and the library does not invoke them concurrently
+ * within one public call. It passes each context unchanged and retains no
+ * callback or context pointer after the call returns. Callback tables, context
+ * pointers, and callback-owned state must remain valid for the complete call;
+ * callback tables and context pointers must not change during it. Callbacks may
+ * modify state referenced by context. C++ exceptions must not escape a callback
  * across the C interface.
  *
  * Block-device callbacks
@@ -155,23 +180,50 @@ struct exfat_resize_allocator {
 	void (*deallocate)(void *context, void *memory, size_t size);
 };
 
-struct exfat_resize_options {
-	/* Allocator used for all working memory owned by the call. */
-	struct exfat_resize_allocator allocator;
+/*
+ * Monitor callbacks
+ *
+ * Both callbacks are optional, quick, nonblocking observations of an active
+ * call and may be invoked repeatedly. cancellation_requested returns zero to
+ * continue or nonzero to request cancellation at the next safe boundary.
+ * report_event cannot report an error or replace the library result. Its event
+ * pointer is borrowed only for the callback; unknown event codes must be
+ * tolerated. A monitor callback must not reenter the active resize.
+ */
+struct exfat_resize_monitor {
+	/* Opaque caller value passed unchanged to both monitor callbacks. */
+	void *context;
+	/* Returns zero to continue or nonzero to request cancellation. */
+	int (*cancellation_requested)(void *context);
+	/* Observes one borrowed event for the duration of this callback only. */
+	void (*report_event)(void *context, const struct exfat_resize_event *event);
 };
 
 /*
  * Grows the exFAT filesystem at sector zero to target_size bytes.
  *
- * The caller must provide exclusive access to the backing device. The device
- * and options objects must remain valid and unchanged until the call returns.
- * The library performs no synchronization between calls. Concurrent or
- * callback-reentrant calls must use different backing devices, and any shared
- * callback state must support that use.
+ * The caller must provide exclusive access to the backing device. The device,
+ * allocator, and any nonnull monitor objects must remain valid and unchanged
+ * until the call returns. The library performs no synchronization between
+ * calls. Concurrent calls must use different backing devices, and any shared
+ * callback state must support that use. A callback must not reenter the active
+ * resize.
  *
- * Working-memory sizes and lifetimes requested through options->allocator
- * are documented in the "Memory requirements" section of docs/TRANSACTION.md
- * distributed with exfat-resize.
+ * allocator must be nonnull and provide both callbacks. monitor may be NULL;
+ * each callback in a nonnull monitor is independently optional. Cancellation
+ * is cooperative: exfat_resize() returns EXFAT_RESIZE_CANCELLED at the next
+ * safe checkpoint without preempting the callback or transaction step then in
+ * progress. The first observed request is latched. Concrete operation failures
+ * take precedence, and cancellation requested at COMPLETED does not replace
+ * success.
+ *
+ * A STAGE_ENTERED event is reported at INFO level for PREFLIGHT and every
+ * subsequent stage. Its value is zero except at COMPLETED, where it is the
+ * resulting filesystem size in bytes. Event reporting is observational and
+ * unknown event codes must be ignored or displayed generically.
+ *
+ * Working-memory sizes and lifetimes requested through allocator are
+ * documented in docs/TRANSACTION.md, distributed with exfat-resize.
  *
  * If stage is not NULL, it must remain writable until the function returns.
  * It receives the resize stage reached even when the function returns an
@@ -181,14 +233,16 @@ struct exfat_resize_options {
  *
  * device supplies the sector-addressed backing-device view and callbacks;
  * target_size is the requested filesystem length in bytes and is rounded down
- * to a whole filesystem sector; options supplies working-memory allocation;
- * and stage optionally receives the recovery boundary reached.
+ * to a whole filesystem sector; allocator supplies working-memory allocation;
+ * monitor optionally supplies operation callbacks; and stage optionally
+ * receives the recovery boundary reached.
  *
  * Returns an exfat_resize_error describing success or the reason for failure.
  */
 enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *device,
     uint64_t target_size,
-    const struct exfat_resize_options *options,
+    const struct exfat_resize_allocator *allocator,
+    const struct exfat_resize_monitor *monitor,
     enum exfat_resize_stage *stage);
 
 #ifdef __cplusplus

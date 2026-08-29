@@ -142,7 +142,9 @@ struct resize_context {
 	const struct exfat_resize_block_device *device;
 	struct exfat_resize_sector_adapter sector_adapter;
 	struct exfat_resize_allocator allocator;
+	struct exfat_resize_monitor monitor;
 	enum exfat_resize_stage stage;
+	int cancellation_latched;
 	struct exfat_resize_geometry source;
 	struct exfat_resize_geometry target;
 	struct allocation_stream old_bitmap;
@@ -168,6 +170,40 @@ struct resize_context {
 };
 
 enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
+
+/* Operation monitoring */
+
+static void report_event(struct resize_context *context,
+    uint32_t code,
+    enum exfat_resize_event_level level,
+    uint64_t value)
+{
+	struct exfat_resize_event event;
+
+	if (context->monitor.report_event == NULL)
+		return;
+	event.stage = context->stage;
+	event.level = level;
+	event.code = code;
+	event.value = value;
+	context->monitor.report_event(context->monitor.context, &event);
+}
+
+static void enter_stage(
+    struct resize_context *context, enum exfat_resize_stage stage, uint64_t value)
+{
+	context->stage = stage;
+	report_event(
+	    context, EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED, EXFAT_RESIZE_EVENT_LEVEL_INFO, value);
+}
+
+static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)
+{
+	if (!context->cancellation_latched && context->monitor.cancellation_requested != NULL &&
+	    context->monitor.cancellation_requested(context->monitor.context) != 0)
+		context->cancellation_latched = 1;
+	return context->cancellation_latched ? EXFAT_RESIZE_CANCELLED : EXFAT_RESIZE_SUCCESS;
+}
 
 /* Sector I/O */
 
@@ -1549,10 +1585,13 @@ static enum exfat_resize_error write_target_bitmap(struct resize_context *contex
 
 /* Resize transaction */
 
+/*
+ * Populate filesystem-derived state after exfat_resize() has initialized the
+ * operation-wide allocator, monitor, and recovery stage.
+ */
 static enum exfat_resize_error prepare_context(struct resize_context *context,
     const struct exfat_resize_block_device *device,
-    uint64_t target_size,
-    const struct exfat_resize_options *options)
+    uint64_t target_size)
 {
 	struct allocation_stream root;
 	struct exfat_resize_device_geometry device_geometry;
@@ -1564,9 +1603,6 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	uint64_t target_sector_count;
 	size_t cache_index;
 
-	*context = (struct resize_context){ 0 };
-	context->allocator = options->allocator;
-	context->stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
 	context->io_buffer =
 	    context->allocator.allocate(context->allocator.context, EXFAT_IO_BUFFER_SIZE);
 	if (context->io_buffer == NULL)
@@ -1604,8 +1640,7 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	error = validate_reserved_fat_entries(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	context->cluster_size =
-	    (uint64_t)context->source.sectors_per_cluster * context->sector_size;
+	context->cluster_size = (uint64_t)context->source.sectors_per_cluster * context->sector_size;
 
 	heap_movement =
 	    (uint64_t)context->target.cluster_heap_offset - context->source.cluster_heap_offset;
@@ -1688,7 +1723,10 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	 * are reserved for preflight and are never consulted below. The target
 	 * directory cache has not yet been populated.
 	 */
-	context->stage = EXFAT_RESIZE_STAGE_PREPARING;
+	enter_stage(context, EXFAT_RESIZE_STAGE_PREPARING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error =
 	    exfat_resize_set_volume_dirty(context->device, context->io_buffer, EXFAT_IO_BUFFER_SIZE, 1);
 	if (error != EXFAT_RESIZE_SUCCESS)
@@ -1698,7 +1736,13 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_RESIZING;
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	enter_stage(context, EXFAT_RESIZE_STAGE_RESIZING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = write_target_fat(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
@@ -1729,13 +1773,17 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_FINALIZING;
+	enter_stage(context, EXFAT_RESIZE_STAGE_FINALIZING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error =
 	    exfat_resize_set_volume_dirty(context->device, context->io_buffer, EXFAT_IO_BUFFER_SIZE, 0);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	enter_stage(context, EXFAT_RESIZE_STAGE_COMPLETED,
+	    context->target.volume_sector_count * (uint64_t)context->sector_size);
 	return EXFAT_RESIZE_SUCCESS;
 }
 
@@ -1766,7 +1814,8 @@ static void release_context(struct resize_context *context)
 
 enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *device,
     uint64_t target_size,
-    const struct exfat_resize_options *options,
+    const struct exfat_resize_allocator *allocator,
+    const struct exfat_resize_monitor *monitor,
     enum exfat_resize_stage *stage)
 {
 	struct resize_context context = { .stage = EXFAT_RESIZE_STAGE_PREFLIGHT };
@@ -1780,13 +1829,27 @@ enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *dev
 		error = EXFAT_RESIZE_INVALID_ARGUMENT;
 		goto out;
 	}
-	if (options == NULL || options->allocator.allocate == NULL ||
-	    options->allocator.deallocate == NULL) {
+	if (allocator == NULL || allocator->allocate == NULL || allocator->deallocate == NULL) {
 		error = EXFAT_RESIZE_INVALID_ARGUMENT;
 		goto out;
 	}
+	context.allocator = *allocator;
+	if (monitor != NULL)
+		context.monitor = *monitor;
+	/*
+	 * The context starts at PREFLIGHT for early-error recovery reporting.
+	 * Delay the corresponding event until structural arguments are valid so
+	 * rejected calls do not invoke monitor callbacks.
+	 */
+	enter_stage(&context, EXFAT_RESIZE_STAGE_PREFLIGHT, 0);
+	error = cancellation_checkpoint(&context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto out;
 
-	error = prepare_context(&context, device, target_size, options);
+	error = prepare_context(&context, device, target_size);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto out;
+	error = cancellation_checkpoint(&context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		goto out;
 

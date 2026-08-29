@@ -139,6 +139,8 @@ static const char *resize_error(enum exfat_resize_error error)
 		return "expanded FAT conflicts with a source bad cluster";
 	case EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING:
 		return "filesystem sector size is incompatible with device sector size";
+	case EXFAT_RESIZE_CANCELLED:
+		return "operation cancelled";
 	}
 	return "unknown error";
 }
@@ -276,7 +278,7 @@ static void print_partition_update_uncertain_guidance(void)
 
 int cli_main(int argc, char **argv)
 {
-	struct exfat_resize_options options;
+	struct exfat_resize_allocator allocator;
 	struct device device;
 	enum device_partition_state partition_state = DEVICE_PARTITION_UNCHANGED;
 	enum exfat_resize_error result;
@@ -415,11 +417,11 @@ int cli_main(int argc, char **argv)
 			    device.block_device.sector_count * (uint64_t)device.block_device.sector_size);
 		}
 	}
-	options.allocator.context = NULL;
-	options.allocator.allocate = allocate_memory;
-	options.allocator.deallocate = deallocate_memory;
+	allocator.context = NULL;
+	allocator.allocate = allocate_memory;
+	allocator.deallocate = deallocate_memory;
 
-	result = exfat_resize(&device.block_device, target, &options, &stage);
+	result = exfat_resize(&device.block_device, target, &allocator, NULL, &stage);
 	if (result != EXFAT_RESIZE_SUCCESS) {
 		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
 		if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)

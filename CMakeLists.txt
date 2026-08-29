@@ -258,6 +258,7 @@ foreach(exfat_resize_document_component IN ITEMS Runtime Development)
 
     install(
         FILES
+            docs/LIBRARY.md
             docs/PARTITIONING.md
             docs/TRANSACTION.md
         DESTINATION

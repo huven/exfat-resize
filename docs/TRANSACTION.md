@@ -40,6 +40,13 @@ phase, so the value is conservative when that write reports failure without
 taking effect. The library publishes the selected stage before returning and
 does not promise automatic resume or rollback.
 
+The optional operation monitor reports entry into each stage only after that
+stage is authoritative. Cooperative cancellation is observed at safe
+boundaries around the transitions above and returns the same recovery stage as
+another failure at that boundary. Synchronization required for writes already
+issued is not cancelled. Once the clean target reaches `COMPLETED`, the call
+returns success even if the completion event causes a cancellation request.
+
 A `PREPARING` failure may leave `VolumeDirty` set and may leave relocated data
 in locations which are not authoritative under the source geometry. The source
 layout itself remains intact. A `RESIZING` failure may leave a mixture of old

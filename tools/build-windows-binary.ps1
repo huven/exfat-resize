@@ -91,10 +91,11 @@ try {
     $Contributing = Join-Path $Documentation "CONTRIBUTING.md"
     $License = Join-Path $Documentation "LICENSE"
     $Readme = Join-Path $Documentation "README.md"
+    $LibraryReference = Join-Path $Documentation "docs/LIBRARY.md"
     $Partitioning = Join-Path $Documentation "docs/PARTITIONING.md"
     $Transaction = Join-Path $Documentation "docs/TRANSACTION.md"
     foreach ($RequiredFile in @(
-        $Binary, $Contributing, $License, $Readme, $Partitioning, $Transaction
+        $Binary, $Contributing, $License, $Readme, $LibraryReference, $Partitioning, $Transaction
     )) {
         if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
             throw "CMake runtime installation is incomplete: $RequiredFile"
@@ -112,6 +113,7 @@ try {
     Copy-Item -LiteralPath $Contributing -Destination $PackageDirectory
     Copy-Item -LiteralPath $License -Destination $PackageDirectory
     Copy-Item -LiteralPath $Readme -Destination $PackageDirectory
+    Copy-Item -LiteralPath $LibraryReference -Destination $PackageDocumentation
     Copy-Item -LiteralPath $Partitioning -Destination $PackageDocumentation
     Copy-Item -LiteralPath $Transaction -Destination $PackageDocumentation
 

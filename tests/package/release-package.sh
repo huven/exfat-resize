@@ -126,6 +126,12 @@ cmp "$source_tree/CONTRIBUTING.md" \
 	"$temporary/prefix/share/doc/exfat_resize/CONTRIBUTING.md"
 cmp "$source_tree/LICENSE" "$temporary/prefix/share/doc/exfat_resize/LICENSE"
 cmp "$source_tree/README.md" "$temporary/prefix/share/doc/exfat_resize/README.md"
+cmp "$source_tree/docs/LIBRARY.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/LIBRARY.md"
+cmp "$source_tree/docs/PARTITIONING.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/PARTITIONING.md"
+cmp "$source_tree/docs/TRANSACTION.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/TRANSACTION.md"
 installed_cli_version=$("$temporary/prefix/bin/exfat-resize" --version)
 if [ "$installed_cli_version" != "exfat-resize $build_version" ]; then
 	echo "installed CLI version disagrees with build version" >&2
