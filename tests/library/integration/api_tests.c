@@ -13,13 +13,25 @@
 
 enum { TARGET_SECTOR_COUNT = 65536 };
 enum { EVENT_CAPACITY = 8 };
+enum { BACKUP_BOOT_REGION = 12 };
 
 static int failure_count;
+
+enum monitor_operation_trigger {
+	MONITOR_TRIGGER_NONE,
+	MONITOR_TRIGGER_READ_SECTOR,
+	MONITOR_TRIGGER_WRITE_SECTOR,
+	MONITOR_TRIGGER_SYNC_COUNT
+};
 
 struct monitor_state {
 	struct exfat_resize_event events[EVENT_CAPACITY];
 	size_t event_count;
 	size_t cancellation_calls;
+	const struct memory_block_device *operation_memory;
+	enum monitor_operation_trigger operation_trigger;
+	uint64_t trigger_sector;
+	size_t trigger_sync_count;
 	enum exfat_resize_stage request_stage;
 	int request_on_stage;
 	int cancellation_requested;
@@ -34,13 +46,45 @@ struct monitor_state {
 		} \
 	} while (0)
 
+static size_t operation_kind_count(
+    const struct memory_block_device *memory, enum memory_operation_kind kind)
+{
+	size_t count = 0;
+	size_t index;
+
+	for (index = 0; index < memory->operation_count; ++index) {
+		if (memory->operations[index].kind == kind)
+			++count;
+	}
+	return count;
+}
+
+static int monitor_operation_triggered(const struct monitor_state *state)
+{
+	const struct memory_block_device *memory = state->operation_memory;
+	const struct memory_operation *operation;
+
+	if (memory == NULL || state->operation_trigger == MONITOR_TRIGGER_NONE)
+		return 0;
+	if (state->operation_trigger == MONITOR_TRIGGER_SYNC_COUNT)
+		return operation_kind_count(memory, MEMORY_OPERATION_SYNC) >= state->trigger_sync_count;
+	if (memory->operation_count == 0)
+		return 0;
+	operation = &memory->operations[memory->operation_count - 1];
+	return operation->kind ==
+	    (state->operation_trigger == MONITOR_TRIGGER_READ_SECTOR ? MEMORY_OPERATION_READ
+	                                                             : MEMORY_OPERATION_WRITE) &&
+	    state->trigger_sector >= operation->first_sector &&
+	    state->trigger_sector - operation->first_sector < operation->sector_count;
+}
+
 static int cancellation_callback(void *context)
 {
 	struct monitor_state *state = context;
 	int requested;
 
 	++state->cancellation_calls;
-	requested = state->cancellation_requested;
+	requested = state->cancellation_requested || monitor_operation_triggered(state);
 	if (requested && state->one_shot_cancellation)
 		state->cancellation_requested = 0;
 	return requested;
@@ -100,6 +144,21 @@ static void check_operation_streams_are_equal(
 		CHECK(expected->operations[index].first_sector == actual->operations[index].first_sector);
 		CHECK(expected->operations[index].sector_count == actual->operations[index].sector_count);
 	}
+}
+
+static int operation_covers_sector(
+    const struct memory_block_device *memory, enum memory_operation_kind kind, uint64_t sector)
+{
+	size_t index;
+
+	for (index = 0; index < memory->operation_count; ++index) {
+		const struct memory_operation *operation = &memory->operations[index];
+
+		if (operation->kind == kind && sector >= operation->first_sector &&
+		    sector - operation->first_sector < operation->sector_count)
+			return 1;
+	}
+	return 0;
 }
 
 static void test_invalid_devices(void)
@@ -375,18 +434,23 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	struct test_allocator baseline_allocator = { 0 };
 	struct test_allocator empty_allocator = { 0 };
 	struct test_allocator reported_allocator = { 0 };
+	struct test_allocator polled_allocator = { 0 };
 	struct exfat_resize_allocator baseline_callbacks =
 	    test_allocator_callbacks(&baseline_allocator);
 	struct exfat_resize_allocator empty_callbacks = test_allocator_callbacks(&empty_allocator);
 	struct exfat_resize_allocator reported_callbacks =
 	    test_allocator_callbacks(&reported_allocator);
+	struct exfat_resize_allocator polled_callbacks = test_allocator_callbacks(&polled_allocator);
 	struct monitor_state empty_state = { 0 };
 	struct monitor_state reported_state = { 0 };
+	struct monitor_state polled_state = { 0 };
 	struct exfat_resize_monitor empty_monitor = resize_monitor(&empty_state, 0, 0);
 	struct exfat_resize_monitor reported_monitor = resize_monitor(&reported_state, 0, 1);
+	struct exfat_resize_monitor polled_monitor = resize_monitor(&polled_state, 1, 0);
 	struct exfat_fixture baseline;
 	struct exfat_fixture empty;
 	struct exfat_fixture reported;
+	struct exfat_fixture polled;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage;
 	uint64_t target_size = exfat_fixture_target_size(TARGET_SECTOR_COUNT);
@@ -394,6 +458,7 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	CHECK(exfat_fixture_initialize(&baseline, TARGET_SECTOR_COUNT) == 0);
 	CHECK(exfat_fixture_initialize(&empty, TARGET_SECTOR_COUNT) == 0);
 	CHECK(exfat_fixture_initialize(&reported, TARGET_SECTOR_COUNT) == 0);
+	CHECK(exfat_fixture_initialize(&polled, TARGET_SECTOR_COUNT) == 0);
 	error = exfat_fixture_resize(
 	    &baseline.memory.device, TARGET_SECTOR_COUNT, &baseline_callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
@@ -405,6 +470,9 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	    &reported.memory.device, target_size + 511, &reported_callbacks, &reported_monitor, &stage);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
+	error = exfat_fixture_resize_with_monitor(
+	    &polled.memory.device, TARGET_SECTOR_COUNT, &polled_callbacks, &polled_monitor, NULL);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
 
 	CHECK(empty_state.event_count == 0);
 	CHECK(empty_state.cancellation_calls == 0);
@@ -412,14 +480,115 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	if (reported_state.event_count == 5)
 		CHECK(reported_state.events[4].value == target_size);
 	CHECK(reported_state.cancellation_calls == 0);
+	CHECK(polled_state.event_count == 0);
+	CHECK(polled_state.cancellation_calls != 0);
 	check_operation_streams_are_equal(&baseline.memory, &empty.memory);
 	check_operation_streams_are_equal(&baseline.memory, &reported.memory);
+	check_operation_streams_are_equal(&baseline.memory, &polled.memory);
 	CHECK(test_allocator_is_clean(&baseline_allocator));
 	CHECK(test_allocator_is_clean(&empty_allocator));
 	CHECK(test_allocator_is_clean(&reported_allocator));
+	CHECK(test_allocator_is_clean(&polled_allocator));
 	exfat_fixture_destroy(&baseline);
 	exfat_fixture_destroy(&empty);
 	exfat_fixture_destroy(&reported);
+	exfat_fixture_destroy(&polled);
+}
+
+static void test_cache_window_turnover_cancellation(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	struct exfat_fixture fixture;
+	struct monitor_state state = { 0 };
+	struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 0);
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	uint64_t child_sector;
+	uint64_t root_sector;
+
+	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+	root_sector =
+	    exfat_fixture_cluster_sector(&fixture.geometry, fixture.geometry.root_directory_cluster);
+	child_sector = exfat_fixture_cluster_sector(&fixture.geometry, 6);
+	state.operation_memory = &fixture.memory;
+	state.operation_trigger = MONITOR_TRIGGER_READ_SECTOR;
+	state.trigger_sector = root_sector;
+	error = exfat_fixture_resize_with_monitor(
+	    &fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_READ, root_sector));
+	CHECK(!operation_covers_sector(&fixture.memory, MEMORY_OPERATION_READ, child_sector));
+	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_WRITE) == 0);
+	CHECK(test_allocator_is_clean(&allocator));
+	exfat_fixture_destroy(&fixture);
+}
+
+static void test_cluster_copy_chunk_boundary_cancellation(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	struct exfat_resize_device_geometry device_geometry;
+	struct exfat_resize_geometry target;
+	struct exfat_fixture fixture;
+	struct monitor_state state = { 0 };
+	struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 0);
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	uint64_t source_sector;
+	uint64_t target_sector;
+	uint32_t source_cluster;
+	uint32_t target_cluster;
+
+	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+	device_geometry.logical_sector_size = fixture.memory.device.sector_size;
+	device_geometry.sector_count = fixture.memory.device.sector_count;
+	error =
+	    exfat_resize_plan_growth(&device_geometry, &fixture.geometry, TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	source_cluster = fixture.crossing_first_cluster;
+	error = exfat_resize_map_growth_cluster(
+	    &fixture.geometry, &target, source_cluster, &target_cluster);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	source_sector = exfat_fixture_cluster_sector(&fixture.geometry, source_cluster);
+	target_sector = exfat_fixture_cluster_sector(&target, target_cluster);
+	state.operation_memory = &fixture.memory;
+	state.operation_trigger = MONITOR_TRIGGER_WRITE_SECTOR;
+	state.trigger_sector = target_sector;
+	error = exfat_fixture_resize_with_monitor(
+	    &fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_PREPARING);
+	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_READ, source_sector));
+	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_WRITE, target_sector));
+	CHECK(test_allocator_is_clean(&allocator));
+	exfat_fixture_destroy(&fixture);
+}
+
+static void test_cancellation_before_boot_region_commit(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	struct exfat_fixture fixture;
+	struct monitor_state state = {
+		.operation_trigger = MONITOR_TRIGGER_SYNC_COUNT,
+		.trigger_sync_count = 2,
+	};
+	struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 0);
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+
+	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+	state.operation_memory = &fixture.memory;
+	error = exfat_fixture_resize_with_monitor(
+	    &fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_RESIZING);
+	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_SYNC) == 2);
+	CHECK(!operation_covers_sector(&fixture.memory, MEMORY_OPERATION_WRITE, BACKUP_BOOT_REGION));
+	CHECK(test_allocator_is_clean(&allocator));
+	exfat_fixture_destroy(&fixture);
 }
 
 static void test_stage_cancellation(void)
@@ -499,11 +668,18 @@ static void test_cancellation_without_event_reporting(void)
 	exfat_fixture_destroy(&fixture);
 }
 
-enum precedence_failure_kind { PRECEDENCE_ALLOCATION_FAILURE, PRECEDENCE_READ_FAILURE };
+enum precedence_failure_kind {
+	PRECEDENCE_ALLOCATION_FAILURE,
+	PRECEDENCE_READ_FAILURE,
+	PRECEDENCE_SOURCE_FAT_READ_FAILURE
+};
 
 struct precedence_context {
 	struct monitor_state *monitor;
 	struct exfat_resize_block_device *device;
+	uint64_t failing_read_sector;
+	size_t cancellation_calls_at_failure;
+	int fail_selected_read;
 };
 
 static void *precedence_allocate(void *context, size_t size)
@@ -527,9 +703,10 @@ static int precedence_read(
 {
 	struct precedence_context *precedence = context;
 
-	(void)first_sector;
-	(void)sector_count;
-	(void)buffer;
+	if (precedence->fail_selected_read && first_sector != precedence->failing_read_sector)
+		return precedence->device->read(
+		    precedence->device->context, first_sector, sector_count, buffer);
+	precedence->cancellation_calls_at_failure = precedence->monitor->cancellation_calls;
 	precedence->monitor->cancellation_requested = 1;
 	return 1234;
 }
@@ -555,6 +732,7 @@ static void test_concrete_failures_precede_cancellation(void)
 	static const enum precedence_failure_kind cases[] = {
 		PRECEDENCE_ALLOCATION_FAILURE,
 		PRECEDENCE_READ_FAILURE,
+		PRECEDENCE_SOURCE_FAT_READ_FAILURE,
 	};
 	size_t index;
 
@@ -564,7 +742,7 @@ static void test_concrete_failures_precede_cancellation(void)
 		struct monitor_state state = { 0 };
 		struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 1);
 		struct exfat_fixture fixture;
-		struct precedence_context precedence;
+		struct precedence_context precedence = { 0 };
 		struct exfat_resize_block_device device;
 		enum exfat_resize_error error;
 		enum exfat_resize_error expected_error;
@@ -580,6 +758,10 @@ static void test_concrete_failures_precede_cancellation(void)
 			callbacks.deallocate = precedence_deallocate;
 			expected_error = EXFAT_RESIZE_OUT_OF_MEMORY;
 		} else {
+			if (cases[index] == PRECEDENCE_SOURCE_FAT_READ_FAILURE) {
+				precedence.fail_selected_read = 1;
+				precedence.failing_read_sector = fixture.geometry.fat_offset;
+			}
 			device.context = &precedence;
 			device.read = precedence_read;
 			device.write = precedence_write;
@@ -591,9 +773,12 @@ static void test_concrete_failures_precede_cancellation(void)
 		CHECK(error == expected_error);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		CHECK(state.cancellation_requested);
-		CHECK(state.cancellation_calls == 1);
+		if (cases[index] == PRECEDENCE_ALLOCATION_FAILURE)
+			CHECK(state.cancellation_calls == 1);
+		else
+			CHECK(state.cancellation_calls == precedence.cancellation_calls_at_failure);
 		check_event_stream(&state, 1);
-		if (cases[index] == PRECEDENCE_READ_FAILURE)
+		if (cases[index] != PRECEDENCE_ALLOCATION_FAILURE)
 			CHECK(test_allocator_is_clean(&allocator));
 		exfat_fixture_destroy(&fixture);
 	}
@@ -608,6 +793,9 @@ int main(void)
 	test_preflight_io_error();
 	test_unsupported_sector_mapping();
 	test_monitor_event_stream_and_disabled_behavior();
+	test_cache_window_turnover_cancellation();
+	test_cluster_copy_chunk_boundary_cancellation();
+	test_cancellation_before_boot_region_commit();
 	test_stage_cancellation();
 	test_cancellation_without_event_reporting();
 	test_concrete_failures_precede_cancellation();

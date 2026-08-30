@@ -37,6 +37,7 @@ enum {
 
 #define TARGET_SECTOR_COUNT UINT32_C(65536)
 #define WORK_BUFFER_SIZE ((size_t)UINT32_C(1048576))
+#define IO_MAX_CHUNK_SIZE ((size_t)UINT32_C(1048576))
 #define FAT_BAD_CLUSTER UINT32_C(0xfffffff7)
 #define MAX_DIRECTORY_SIZE (UINT64_C(256) * 1024 * 1024)
 
@@ -46,6 +47,11 @@ struct allocator_state {
 	struct test_allocator tracker;
 	struct memory_block_device *device;
 	int allocation_after_write;
+};
+
+struct fat_read_cancellation_state {
+	const struct memory_block_device *memory;
+	uint64_t fat_sector;
 };
 
 #define CHECK(expression) \
@@ -78,6 +84,17 @@ static struct exfat_resize_allocator resize_allocator(void)
 	callbacks.deallocate = deallocate_memory;
 
 	return callbacks;
+}
+
+static int cancel_after_first_fat_read(void *context)
+{
+	const struct fat_read_cancellation_state *state = context;
+	const struct memory_operation *operation;
+
+	if (state->memory->operation_count == 0)
+		return 0;
+	operation = &state->memory->operations[state->memory->operation_count - 1];
+	return operation->kind == MEMORY_OPERATION_READ && operation->first_sector == state->fat_sector;
 }
 
 static enum exfat_resize_error plan_fixture_growth(struct exfat_fixture *fixture,
@@ -258,6 +275,10 @@ static void check_source_fat_snapshot_read(const struct exfat_fixture *fixture)
 	uint64_t used_bytes = ((uint64_t)fixture->geometry.cluster_count + 2) * 4;
 	uint64_t used_sectors =
 	    (used_bytes + fixture->memory.device.sector_size - 1) / fixture->memory.device.sector_size;
+	uint64_t expected_sector = fixture->geometry.fat_offset;
+	uint64_t end_sector = expected_sector + used_sectors;
+	uint32_t maximum_sector_count =
+	    (uint32_t)(IO_MAX_CHUNK_SIZE / fixture->memory.device.sector_size);
 	size_t operation_count = 0;
 	size_t index;
 
@@ -267,15 +288,18 @@ static void check_source_fat_snapshot_read(const struct exfat_fixture *fixture)
 
 		if (operation->kind == MEMORY_OPERATION_WRITE)
 			break;
-		if (operation->kind != MEMORY_OPERATION_READ ||
-		    operation->first_sector >= fixture->geometry.fat_offset + used_sectors ||
+		if (operation->kind != MEMORY_OPERATION_READ || operation->first_sector >= end_sector ||
 		    operation_end <= fixture->geometry.fat_offset)
 			continue;
-		CHECK(operation->first_sector == fixture->geometry.fat_offset);
-		CHECK(operation->sector_count == used_sectors);
+		CHECK(operation->first_sector == expected_sector);
+		CHECK(operation->sector_count != 0);
+		CHECK(operation->sector_count <= maximum_sector_count);
+		CHECK(operation_end <= end_sector);
+		expected_sector = operation_end;
 		++operation_count;
 	}
-	CHECK(operation_count == 1);
+	CHECK(operation_count != 0);
+	CHECK(expected_sector == end_sector);
 }
 
 static size_t rewrite_fat_read_count(const struct exfat_fixture *fixture,
@@ -1741,13 +1765,18 @@ static void test_secondary_entry_io_errors_are_preserved(void)
 static void test_oversized_child_directory_is_rejected(void)
 {
 	struct exfat_resize_allocator callbacks;
+	struct exfat_resize_monitor monitor = { 0 };
 	struct exfat_fixture fixture;
+	struct fat_read_cancellation_state cancellation;
 	unsigned char root[SECTOR_SIZE];
 	unsigned char child_entry_set[32 * 3];
 	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
 	uint64_t root_sector;
 	uint64_t target_sector_count;
 	uint16_t checksum;
+	size_t fat_read_count = 0;
+	size_t operation_index;
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(exfat_fixture_read_sector(&fixture, exfat_fixture_cluster_sector(&fixture.geometry, 2),
@@ -1773,6 +1802,7 @@ static void test_oversized_child_directory_is_rejected(void)
 	fixture.geometry.cluster_heap_offset =
 	    fixture.geometry.fat_offset + fixture.geometry.fat_length;
 	fixture.geometry.cluster_count = 600000;
+	CHECK(((uint64_t)fixture.geometry.cluster_count + 2) * 4 > IO_MAX_CHUNK_SIZE);
 	fixture.geometry.volume_sector_count =
 	    fixture.geometry.cluster_heap_offset + fixture.geometry.cluster_count;
 	target_sector_count = fixture.geometry.volume_sector_count + fixture.geometry.cluster_count;
@@ -1783,6 +1813,27 @@ static void test_oversized_child_directory_is_rejected(void)
 	memory_block_device_clear_operations(&fixture.memory);
 
 	callbacks = resize_allocator();
+	cancellation.memory = &fixture.memory;
+	cancellation.fat_sector = fixture.geometry.fat_offset;
+	monitor.context = &cancellation;
+	monitor.cancellation_requested = cancel_after_first_fat_read;
+	error = exfat_fixture_resize_with_monitor(
+	    &fixture.memory.device, target_sector_count, &callbacks, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+	for (operation_index = 0; operation_index < fixture.memory.operation_count; ++operation_index) {
+		const struct memory_operation *operation = &fixture.memory.operations[operation_index];
+
+		if (operation->kind == MEMORY_OPERATION_READ &&
+		    operation->first_sector == fixture.geometry.fat_offset) {
+			++fat_read_count;
+			CHECK((uint64_t)operation->sector_count * fixture.memory.device.sector_size ==
+			    IO_MAX_CHUNK_SIZE);
+		}
+	}
+	CHECK(fat_read_count == 1);
+	check_operations_are_read_only(&fixture);
+	memory_block_device_clear_operations(&fixture.memory);
 	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
@@ -2720,7 +2771,7 @@ static void test_contiguous_relocation_is_batched(void)
 	}
 }
 
-static void test_source_fat_snapshot_is_single_read(void)
+static void test_source_fat_snapshot_reads_are_bounded(void)
 {
 	struct exfat_resize_allocator callbacks = resize_allocator();
 	struct exfat_fixture fixture;
@@ -2974,7 +3025,7 @@ int main(void)
 	test_allocator_validation();
 	test_mapping_extremes();
 	test_contiguous_relocation_is_batched();
-	test_source_fat_snapshot_is_single_read();
+	test_source_fat_snapshot_reads_are_bounded();
 	test_file_fat_stream_uses_source_snapshot();
 	test_directory_fat_stream_uses_source_snapshot_and_target_model();
 	test_multi_sector_cluster_copy();
