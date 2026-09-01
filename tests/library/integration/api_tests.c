@@ -15,6 +15,9 @@ enum { TARGET_SECTOR_COUNT = 65536 };
 enum { EVENT_CAPACITY = 8 };
 enum { BACKUP_BOOT_REGION = 12 };
 
+#define ALLOCATION_MODEL_ZERO_CHUNK_SIZE UINT32_C(67108864)
+#define LARGE_TARGET_SECTOR_COUNT UINT64_C(20000000)
+
 static int failure_count;
 
 enum monitor_operation_trigger {
@@ -668,6 +671,108 @@ static void test_cancellation_without_event_reporting(void)
 	exfat_fixture_destroy(&fixture);
 }
 
+struct allocation_zero_state {
+	struct test_allocator allocator;
+	void *allocation_model;
+	size_t allocation_model_size;
+	int contents_checked;
+};
+
+static int buffer_has_value(const unsigned char *buffer, size_t size, unsigned char value)
+{
+	size_t index;
+
+	for (index = 0; index < size; ++index) {
+		if (buffer[index] != value)
+			return 0;
+	}
+	return 1;
+}
+
+static void *allocation_zero_allocate(void *context, size_t size)
+{
+	struct allocation_zero_state *state = context;
+	void *memory = test_allocator_allocate(&state->allocator, size);
+
+	if (memory != NULL && size > ALLOCATION_MODEL_ZERO_CHUNK_SIZE) {
+		CHECK(state->allocation_model == NULL);
+		state->allocation_model = memory;
+		state->allocation_model_size = size;
+		memset(memory, 0xa5, size);
+	}
+	return memory;
+}
+
+static void allocation_zero_deallocate(void *context, void *memory, size_t size)
+{
+	struct allocation_zero_state *state = context;
+
+	if (memory == state->allocation_model) {
+		const unsigned char *bytes = memory;
+
+		CHECK(size == state->allocation_model_size);
+		CHECK(size > ALLOCATION_MODEL_ZERO_CHUNK_SIZE);
+		if (size == state->allocation_model_size &&
+		    size > ALLOCATION_MODEL_ZERO_CHUNK_SIZE) {
+			CHECK(buffer_has_value(bytes, ALLOCATION_MODEL_ZERO_CHUNK_SIZE, 0));
+			CHECK(buffer_has_value(bytes + ALLOCATION_MODEL_ZERO_CHUNK_SIZE,
+			    size - ALLOCATION_MODEL_ZERO_CHUNK_SIZE, 0xa5));
+			state->contents_checked = 1;
+		}
+	}
+	test_allocator_deallocate(&state->allocator, memory, size);
+}
+
+static int cancel_after_first_allocation_zero_chunk(void *context)
+{
+	struct allocation_zero_state *state = context;
+
+	if (state->allocation_model == NULL)
+		return 0;
+	return *(const unsigned char *)state->allocation_model == 0;
+}
+
+static void test_allocation_model_zero_chunk_boundary_cancellation(void)
+{
+	struct allocation_zero_state state = { 0 };
+	struct exfat_resize_allocator allocator = {
+		.context = &state,
+		.allocate = allocation_zero_allocate,
+		.deallocate = allocation_zero_deallocate,
+	};
+	struct exfat_resize_monitor monitor = {
+		.context = &state,
+		.cancellation_requested = cancel_after_first_allocation_zero_chunk,
+	};
+	struct exfat_resize_device_geometry device_geometry;
+	struct exfat_resize_geometry target;
+	struct exfat_fixture fixture;
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+
+	if (SIZE_MAX <= ALLOCATION_MODEL_ZERO_CHUNK_SIZE)
+		return;
+	CHECK(exfat_fixture_initialize(&fixture, LARGE_TARGET_SECTOR_COUNT) == 0);
+	device_geometry.logical_sector_size = fixture.memory.device.sector_size;
+	device_geometry.sector_count = fixture.memory.device.sector_count;
+	error = exfat_resize_plan_growth(
+	    &device_geometry, &fixture.geometry, LARGE_TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK((uint64_t)target.cluster_count * sizeof(uint32_t) >
+	    ALLOCATION_MODEL_ZERO_CHUNK_SIZE);
+	CHECK((uint64_t)target.cluster_count * sizeof(uint32_t) <=
+	    2 * ALLOCATION_MODEL_ZERO_CHUNK_SIZE);
+
+	error = exfat_fixture_resize_with_monitor(
+	    &fixture.memory.device, LARGE_TARGET_SECTOR_COUNT, &allocator, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+	CHECK(state.contents_checked);
+	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_WRITE) == 0);
+	CHECK(test_allocator_is_clean(&state.allocator));
+	exfat_fixture_destroy(&fixture);
+}
+
 enum precedence_failure_kind {
 	PRECEDENCE_ALLOCATION_FAILURE,
 	PRECEDENCE_READ_FAILURE,
@@ -798,6 +903,7 @@ int main(void)
 	test_cancellation_before_boot_region_commit();
 	test_stage_cancellation();
 	test_cancellation_without_event_reporting();
+	test_allocation_model_zero_chunk_boundary_cancellation();
 	test_concrete_failures_precede_cancellation();
 
 	if (failure_count != 0) {

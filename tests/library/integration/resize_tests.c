@@ -36,6 +36,11 @@ enum {
 };
 
 #define TARGET_SECTOR_COUNT UINT32_C(65536)
+#define ALLOCATION_CLAIM_CHECKPOINT_INTERVAL UINT32_C(1048576)
+#define ALLOCATION_CLAIM_DEVICE_SECTOR_COUNT UINT64_C(3000000)
+#define ALLOCATION_CLAIM_FIRST_CLUSTER UINT32_C(1024)
+#define ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT \
+	(ALLOCATION_CLAIM_CHECKPOINT_INTERVAL + UINT32_C(1024))
 #define WORK_BUFFER_SIZE ((size_t)UINT32_C(1048576))
 #define IO_MAX_CHUNK_SIZE ((size_t)UINT32_C(1048576))
 #define FAT_BAD_CLUSTER UINT32_C(0xfffffff7)
@@ -52,6 +57,16 @@ struct allocator_state {
 struct fat_read_cancellation_state {
 	const struct memory_block_device *memory;
 	uint64_t fat_sector;
+};
+
+struct allocation_claim_cancellation_state {
+	struct test_allocator allocator;
+	uint32_t *allocation_model;
+	size_t allocation_model_size;
+	size_t expected_model_size;
+	size_t claimed_index;
+	size_t unclaimed_index;
+	int contents_checked;
 };
 
 #define CHECK(expression) \
@@ -84,6 +99,49 @@ static struct exfat_resize_allocator resize_allocator(void)
 	callbacks.deallocate = deallocate_memory;
 
 	return callbacks;
+}
+
+static void *allocation_claim_allocate(void *context, size_t size)
+{
+	struct allocation_claim_cancellation_state *state = context;
+	void *memory = test_allocator_allocate(&state->allocator, size);
+
+	if (memory != NULL && size == state->expected_model_size) {
+		CHECK(state->allocation_model == NULL);
+		state->allocation_model = memory;
+		state->allocation_model_size = size;
+	}
+	return memory;
+}
+
+static void allocation_claim_deallocate(void *context, void *memory, size_t size)
+{
+	struct allocation_claim_cancellation_state *state = context;
+
+	if (memory == state->allocation_model) {
+		size_t entry_count = size / sizeof(*state->allocation_model);
+
+		CHECK(size == state->allocation_model_size);
+		CHECK(size % sizeof(*state->allocation_model) == 0);
+		CHECK(state->claimed_index < entry_count);
+		CHECK(state->unclaimed_index < entry_count);
+		if (size == state->allocation_model_size &&
+		    size % sizeof(*state->allocation_model) == 0 &&
+		    state->claimed_index < entry_count && state->unclaimed_index < entry_count) {
+			CHECK(state->allocation_model[state->claimed_index] != 0);
+			CHECK(state->allocation_model[state->unclaimed_index] == 0);
+			state->contents_checked = 1;
+		}
+	}
+	test_allocator_deallocate(&state->allocator, memory, size);
+}
+
+static int cancel_during_allocation_claim(void *context)
+{
+	const struct allocation_claim_cancellation_state *state = context;
+
+	return state->allocation_model != NULL &&
+	    state->allocation_model[state->claimed_index] != 0;
 }
 
 static int cancel_after_first_fat_read(void *context)
@@ -637,6 +695,103 @@ done:
 	free(fat);
 	if (result == 0)
 		memory_block_device_clear_operations(&fixture->memory);
+	return result;
+}
+
+static int configure_large_allocation_claim(struct exfat_fixture *fixture,
+    int no_fat_chain,
+    uint64_t *target_sector_count)
+{
+	unsigned char root[SECTOR_SIZE];
+	unsigned char *entry_set = root + PERFORMANCE_FILE_PRIMARY_OFFSET;
+	unsigned char *stream = entry_set + 32;
+	unsigned char *fat = NULL;
+	uint32_t old_fat_length = fixture->geometry.fat_length;
+	uint32_t bitmap_cluster_count;
+	uint32_t index;
+	uint64_t bitmap_length;
+	size_t fat_size;
+	int result = -1;
+
+	if (exfat_fixture_read_sector(fixture,
+	        exfat_fixture_cluster_sector(
+	            &fixture->geometry, fixture->geometry.root_directory_cluster),
+	        root, sizeof(root)) != 0 ||
+	    entry_set[0] != ENTRY_FILE || stream[0] != ENTRY_STREAM)
+		goto done;
+
+	fixture->geometry.cluster_count =
+	    ALLOCATION_CLAIM_FIRST_CLUSTER + ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT + 1024;
+	fixture->geometry.fat_length =
+	    exfat_resize_used_fat_sector_count(fixture->geometry.cluster_count, SECTOR_SIZE);
+	fixture->geometry.cluster_heap_offset =
+	    fixture->geometry.fat_offset + fixture->geometry.fat_length;
+	fixture->geometry.volume_sector_count =
+	    fixture->geometry.cluster_heap_offset + fixture->geometry.cluster_count;
+	*target_sector_count =
+	    fixture->geometry.volume_sector_count + fixture->geometry.cluster_count;
+	if (*target_sector_count > fixture->memory.device.sector_count)
+		goto done;
+
+	fat_size = (size_t)fixture->geometry.fat_length * SECTOR_SIZE;
+	fat = calloc(1, fat_size);
+	if (fat == NULL || fixture->memory.device.read(fixture->memory.device.context,
+	                       fixture->geometry.fat_offset, old_fat_length, fat) != 0)
+		goto done;
+	bitmap_length = ((uint64_t)fixture->geometry.cluster_count + 7) / 8;
+	bitmap_cluster_count = (uint32_t)((bitmap_length + SECTOR_SIZE - 1) / SECTOR_SIZE);
+	for (index = 0; index < bitmap_cluster_count; ++index) {
+		uint32_t next = index + 1 == bitmap_cluster_count
+		    ? UINT32_C(0xffffffff)
+		    : UINT32_C(400) + index + 1;
+
+		if (exfat_resize_store_le32(
+		        fat, fat_size, (size_t)(UINT32_C(400) + index) * 4, next) !=
+		    EXFAT_RESIZE_SUCCESS)
+			goto done;
+	}
+	if (!no_fat_chain) {
+		for (index = 0; index < ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT; ++index) {
+			uint32_t next = index + 1 == ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT
+			    ? UINT32_C(0xffffffff)
+			    : ALLOCATION_CLAIM_FIRST_CLUSTER + index + 1;
+
+			if (exfat_resize_store_le32(fat, fat_size,
+			        (size_t)(ALLOCATION_CLAIM_FIRST_CLUSTER + index) * 4, next) !=
+			    EXFAT_RESIZE_SUCCESS)
+				goto done;
+		}
+	}
+
+	if (exfat_resize_store_le32(root, 32, 20, UINT32_C(400)) != EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le64(root, 32, 24, bitmap_length) != EXFAT_RESIZE_SUCCESS)
+		goto done;
+	stream[1] = ALLOCATION_POSSIBLE | (no_fat_chain ? NO_FAT_CHAIN : 0);
+	if (exfat_resize_store_le64(stream, 32, 8,
+	        (uint64_t)ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT * SECTOR_SIZE) !=
+	        EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le32(stream, 32, 20, ALLOCATION_CLAIM_FIRST_CLUSTER) !=
+	        EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le64(stream, 32, 24,
+	        (uint64_t)ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT * SECTOR_SIZE) !=
+	        EXFAT_RESIZE_SUCCESS ||
+	    exfat_resize_store_le16(entry_set, 32, 2, entry_set_checksum(entry_set)) !=
+	        EXFAT_RESIZE_SUCCESS ||
+	    exfat_fixture_write_boot_regions(fixture) != 0)
+		goto done;
+	if (fixture->memory.device.write(fixture->memory.device.context,
+	        fixture->geometry.fat_offset, fixture->geometry.fat_length, fat) != 0 ||
+	    fixture->memory.device.write(fixture->memory.device.context,
+	        exfat_fixture_cluster_sector(
+	            &fixture->geometry, fixture->geometry.root_directory_cluster),
+	        1, root) != 0)
+		goto done;
+
+	result = 0;
+	memory_block_device_clear_operations(&fixture->memory);
+
+done:
+	free(fat);
 	return result;
 }
 
@@ -2785,6 +2940,84 @@ static void test_source_fat_snapshot_reads_are_bounded(void)
 	exfat_fixture_destroy(&fixture);
 }
 
+static void test_allocation_stream_claims_are_cancellable(void)
+{
+	int no_fat_chain;
+
+	for (no_fat_chain = 0; no_fat_chain <= 1; ++no_fat_chain) {
+		struct allocation_claim_cancellation_state state = { 0 };
+		struct exfat_resize_allocator allocator = {
+			.context = &state,
+			.allocate = allocation_claim_allocate,
+			.deallocate = allocation_claim_deallocate,
+		};
+		struct exfat_resize_monitor monitor = {
+			.context = &state,
+			.cancellation_requested = cancel_during_allocation_claim,
+		};
+		struct exfat_resize_geometry target;
+		struct exfat_fixture fixture;
+		enum exfat_resize_error error;
+		enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+		uint64_t model_size;
+		uint64_t target_sector_count;
+		uint32_t mapped_cluster;
+		int fixture_result;
+
+		fixture_result =
+		    exfat_fixture_initialize(&fixture, ALLOCATION_CLAIM_DEVICE_SECTOR_COUNT);
+		CHECK(fixture_result == 0);
+		if (fixture_result != 0)
+			continue;
+		fixture_result =
+		    configure_large_allocation_claim(&fixture, no_fat_chain, &target_sector_count);
+		CHECK(fixture_result == 0);
+		if (fixture_result != 0) {
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		error = plan_fixture_growth(&fixture, target_sector_count, &target);
+		CHECK(error == EXFAT_RESIZE_SUCCESS);
+		if (error != EXFAT_RESIZE_SUCCESS) {
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		model_size = (uint64_t)target.cluster_count * sizeof(uint32_t);
+		CHECK(model_size <= SIZE_MAX);
+		if (model_size > SIZE_MAX) {
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		state.expected_model_size = (size_t)model_size;
+		error = exfat_resize_map_growth_cluster(
+		    &fixture.geometry, &target, ALLOCATION_CLAIM_FIRST_CLUSTER, &mapped_cluster);
+		CHECK(error == EXFAT_RESIZE_SUCCESS);
+		if (error != EXFAT_RESIZE_SUCCESS) {
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		state.claimed_index = mapped_cluster - 2;
+		error = exfat_resize_map_growth_cluster(&fixture.geometry, &target,
+		    ALLOCATION_CLAIM_FIRST_CLUSTER + ALLOCATION_CLAIM_STREAM_CLUSTER_COUNT - 1,
+		    &mapped_cluster);
+		CHECK(error == EXFAT_RESIZE_SUCCESS);
+		if (error != EXFAT_RESIZE_SUCCESS) {
+			exfat_fixture_destroy(&fixture);
+			continue;
+		}
+		state.unclaimed_index = mapped_cluster - 2;
+
+		error = exfat_fixture_resize_with_monitor(&fixture.memory.device, target_sector_count,
+		    &allocator, &monitor, &stage);
+		CHECK(error == EXFAT_RESIZE_CANCELLED);
+		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+		CHECK(state.contents_checked);
+		CHECK(test_allocator_is_clean(&state.allocator));
+		check_operations_are_read_only(&fixture);
+		exfat_fixture_destroy(&fixture);
+	}
+}
+
 static void test_file_fat_stream_uses_source_snapshot(void)
 {
 	struct exfat_resize_allocator callbacks = resize_allocator();
@@ -3026,6 +3259,7 @@ int main(void)
 	test_mapping_extremes();
 	test_contiguous_relocation_is_batched();
 	test_source_fat_snapshot_reads_are_bounded();
+	test_allocation_stream_claims_are_cancellable();
 	test_file_fat_stream_uses_source_snapshot();
 	test_directory_fat_stream_uses_source_snapshot_and_target_model();
 	test_multi_sector_cluster_copy();
