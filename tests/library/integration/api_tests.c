@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { TARGET_SECTOR_COUNT = 65536 };
@@ -16,7 +17,11 @@ enum { EVENT_CAPACITY = 8 };
 enum { BACKUP_BOOT_REGION = 12 };
 
 #define ALLOCATION_MODEL_ZERO_CHUNK_SIZE UINT32_C(67108864)
+#define CLUSTER_CHECKPOINT_INTERVAL UINT32_C(1048576)
+#define BITMAP_GENERATION_CHUNK_SIZE ((size_t)(CLUSTER_CHECKPOINT_INTERVAL / 8))
+#define IO_BUFFER_SIZE ((size_t)UINT32_C(1048576))
 #define LARGE_TARGET_SECTOR_COUNT UINT64_C(20000000)
+#define TRANSACTION_SCALE_TARGET_SECTOR_COUNT UINT64_C(1100000)
 
 static int failure_count;
 
@@ -39,6 +44,16 @@ struct monitor_state {
 	int request_on_stage;
 	int cancellation_requested;
 	int one_shot_cancellation;
+};
+
+struct bitmap_generation_state {
+	struct test_allocator allocator;
+	const struct memory_block_device *memory;
+	unsigned char *io_buffer;
+	unsigned char *snapshot;
+	uint64_t final_fat_sector;
+	int saw_generation_start;
+	int buffer_changed;
 };
 
 #define CHECK(expression) \
@@ -162,6 +177,58 @@ static int operation_covers_sector(
 			return 1;
 	}
 	return 0;
+}
+
+static uint32_t used_fat_sector_count(
+    const struct exfat_resize_geometry *geometry, uint32_t sector_size)
+{
+	uint64_t byte_count = ((uint64_t)geometry->cluster_count + 2) * 4;
+
+	return (uint32_t)((byte_count + sector_size - 1) / sector_size);
+}
+
+static void *bitmap_generation_allocate(void *context, size_t size)
+{
+	struct bitmap_generation_state *state = context;
+	void *memory = test_allocator_allocate(&state->allocator, size);
+
+	if (memory != NULL && size == IO_BUFFER_SIZE) {
+		CHECK(state->io_buffer == NULL);
+		state->io_buffer = memory;
+	}
+	return memory;
+}
+
+static void bitmap_generation_deallocate(void *context, void *memory, size_t size)
+{
+	struct bitmap_generation_state *state = context;
+
+	if (memory == state->io_buffer)
+		CHECK(size == IO_BUFFER_SIZE);
+	test_allocator_deallocate(&state->allocator, memory, size);
+}
+
+static int cancel_after_first_bitmap_generation_chunk(void *context)
+{
+	struct bitmap_generation_state *state = context;
+	const struct memory_operation *operation;
+
+	if (state->io_buffer == NULL || state->memory->operation_count == 0)
+		return 0;
+	operation = &state->memory->operations[state->memory->operation_count - 1];
+	if (operation->kind != MEMORY_OPERATION_WRITE ||
+	    state->final_fat_sector < operation->first_sector ||
+	    state->final_fat_sector - operation->first_sector >= operation->sector_count)
+		return 0;
+	if (!state->saw_generation_start) {
+		memcpy(state->snapshot, state->io_buffer, BITMAP_GENERATION_CHUNK_SIZE);
+		state->saw_generation_start = 1;
+		return 0;
+	}
+	if (memcmp(state->snapshot, state->io_buffer, BITMAP_GENERATION_CHUNK_SIZE) == 0)
+		return 0;
+	state->buffer_changed = 1;
+	return 1;
 }
 
 static void test_invalid_devices(void)
@@ -569,6 +636,122 @@ static void test_cluster_copy_chunk_boundary_cancellation(void)
 	exfat_fixture_destroy(&fixture);
 }
 
+static void test_target_fat_buffer_boundary_cancellation(void)
+{
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	struct exfat_resize_device_geometry device_geometry;
+	struct exfat_resize_geometry target;
+	struct exfat_fixture fixture;
+	struct monitor_state state = { 0 };
+	struct exfat_resize_monitor monitor = resize_monitor(&state, 1, 0);
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	uint32_t fat_sector_capacity;
+	uint32_t fat_sector_count;
+	int fixture_result;
+
+	fixture_result = exfat_fixture_initialize(&fixture, TRANSACTION_SCALE_TARGET_SECTOR_COUNT);
+	CHECK(fixture_result == 0);
+	if (fixture_result != 0)
+		return;
+	device_geometry.logical_sector_size = fixture.memory.device.sector_size;
+	device_geometry.sector_count = fixture.memory.device.sector_count;
+	error = exfat_resize_plan_growth(&device_geometry, &fixture.geometry,
+	    TRANSACTION_SCALE_TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto done;
+	fat_sector_capacity = (uint32_t)(IO_BUFFER_SIZE / fixture.memory.device.sector_size);
+	fat_sector_count = used_fat_sector_count(&target, fixture.memory.device.sector_size);
+	CHECK(fat_sector_count > fat_sector_capacity);
+	if (fat_sector_count <= fat_sector_capacity)
+		goto done;
+	state.operation_memory = &fixture.memory;
+	state.operation_trigger = MONITOR_TRIGGER_WRITE_SECTOR;
+	state.trigger_sector = target.fat_offset;
+
+	error = exfat_fixture_resize_with_monitor(&fixture.memory.device,
+	    TRANSACTION_SCALE_TARGET_SECTOR_COUNT, &callbacks, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_RESIZING);
+	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_WRITE, target.fat_offset));
+	CHECK(!operation_covers_sector(
+	    &fixture.memory, MEMORY_OPERATION_WRITE, target.fat_offset + fat_sector_capacity));
+	CHECK(test_allocator_is_clean(&allocator));
+
+done:
+	exfat_fixture_destroy(&fixture);
+}
+
+static void test_target_bitmap_generation_boundary_cancellation(void)
+{
+	struct bitmap_generation_state state = { 0 };
+	struct exfat_resize_allocator allocator = {
+		.context = &state,
+		.allocate = bitmap_generation_allocate,
+		.deallocate = bitmap_generation_deallocate,
+	};
+	struct exfat_resize_monitor monitor = {
+		.context = &state,
+		.cancellation_requested = cancel_after_first_bitmap_generation_chunk,
+	};
+	struct exfat_resize_device_geometry device_geometry;
+	struct exfat_resize_geometry target;
+	struct exfat_fixture fixture;
+	enum exfat_resize_error error;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	uint64_t bitmap_cluster_count;
+	uint64_t bitmap_first_sector;
+	uint64_t bitmap_length;
+	uint64_t cluster_size;
+	uint32_t fat_sector_count;
+	int fixture_result;
+
+	state.snapshot = malloc(BITMAP_GENERATION_CHUNK_SIZE);
+	CHECK(state.snapshot != NULL);
+	if (state.snapshot == NULL)
+		return;
+	fixture_result = exfat_fixture_initialize(&fixture, TRANSACTION_SCALE_TARGET_SECTOR_COUNT);
+	CHECK(fixture_result == 0);
+	if (fixture_result != 0)
+		goto free_snapshot;
+	device_geometry.logical_sector_size = fixture.memory.device.sector_size;
+	device_geometry.sector_count = fixture.memory.device.sector_count;
+	error = exfat_resize_plan_growth(&device_geometry, &fixture.geometry,
+	    TRANSACTION_SCALE_TARGET_SECTOR_COUNT, &target);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto destroy_fixture;
+	fat_sector_count = used_fat_sector_count(&target, fixture.memory.device.sector_size);
+	state.final_fat_sector = target.fat_offset + fat_sector_count - 1;
+	state.memory = &fixture.memory;
+	bitmap_length = ((uint64_t)target.cluster_count + 7) / 8;
+	CHECK(bitmap_length > BITMAP_GENERATION_CHUNK_SIZE);
+	if (bitmap_length <= BITMAP_GENERATION_CHUNK_SIZE)
+		goto destroy_fixture;
+	cluster_size =
+	    (uint64_t)fixture.memory.device.sector_size * target.sectors_per_cluster;
+	bitmap_cluster_count = (bitmap_length + cluster_size - 1) / cluster_size;
+	bitmap_first_sector = target.cluster_heap_offset +
+	    (target.cluster_count - bitmap_cluster_count) * target.sectors_per_cluster;
+
+	error = exfat_fixture_resize_with_monitor(&fixture.memory.device,
+	    TRANSACTION_SCALE_TARGET_SECTOR_COUNT, &allocator, &monitor, &stage);
+	CHECK(error == EXFAT_RESIZE_CANCELLED);
+	CHECK(stage == EXFAT_RESIZE_STAGE_RESIZING);
+	CHECK(state.saw_generation_start);
+	CHECK(state.buffer_changed);
+	CHECK(!operation_covers_sector(
+	    &fixture.memory, MEMORY_OPERATION_WRITE, bitmap_first_sector));
+	CHECK(test_allocator_is_clean(&state.allocator));
+
+destroy_fixture:
+	exfat_fixture_destroy(&fixture);
+free_snapshot:
+	free(state.snapshot);
+}
+
 static void test_cancellation_before_boot_region_commit(void)
 {
 	struct test_allocator allocator = { 0 };
@@ -900,6 +1083,8 @@ int main(void)
 	test_monitor_event_stream_and_disabled_behavior();
 	test_cache_window_turnover_cancellation();
 	test_cluster_copy_chunk_boundary_cancellation();
+	test_target_fat_buffer_boundary_cancellation();
+	test_target_bitmap_generation_boundary_cancellation();
 	test_cancellation_before_boot_region_commit();
 	test_stage_cancellation();
 	test_cancellation_without_event_reporting();
