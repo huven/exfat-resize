@@ -96,19 +96,20 @@ enum exfat_resize_event_level {
 	EXFAT_RESIZE_EVENT_LEVEL_ERROR = 3
 };
 
-/* Reports entry into the stage stored in an exfat_resize_event. */
+/* Reports entry into the stage stored in values[0]. */
 #define EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED UINT32_C(1)
+
+/* Number of code-specific unsigned values carried by each event. */
+#define EXFAT_RESIZE_EVENT_VALUE_COUNT 3
 
 /* Fixed event record delivered synchronously by exfat_resize(). */
 struct exfat_resize_event {
-	/* Authoritative recovery stage when the event is delivered. */
-	enum exfat_resize_stage stage;
 	/* Severity used for generic filtering and presentation. */
 	enum exfat_resize_event_level level;
 	/* Stable semantic identifier; unknown values must be tolerated. */
 	uint32_t code;
-	/* Code-specific unsigned value; zero when the code has no value. */
-	uint64_t value;
+	/* Code-specific unsigned values; unused elements are zero. */
+	uint64_t values[EXFAT_RESIZE_EVENT_VALUE_COUNT];
 };
 
 /*
@@ -215,13 +216,13 @@ struct exfat_resize_monitor {
  * is cooperative: exfat_resize() returns EXFAT_RESIZE_CANCELLED at the next
  * safe checkpoint without preempting the callback or transaction step then in
  * progress. A nonzero cancellation result aborts the resize through its normal
- * error path. Concrete operation failures take precedence, and cancellation
- * requested at COMPLETED does not replace success.
+ * error path. Concrete operation failures take precedence. COMPLETED is
+ * terminal: after reporting it, exfat_resize() returns success without polling
+ * for cancellation again.
  *
- * A STAGE_ENTERED event is reported at INFO level for PREFLIGHT and every
- * subsequent stage. Its value is zero except at COMPLETED, where it is the
- * resulting filesystem size in bytes. Event reporting is observational and
- * unknown event codes must be ignored or displayed generically.
+ * Event reporting is observational. Event codes and their payload semantics
+ * are documented in docs/LIBRARY.md, distributed with exfat-resize. Unknown
+ * event codes must be ignored or displayed generically.
  *
  * Working-memory sizes and lifetimes requested through allocator are
  * documented in docs/TRANSACTION.md, distributed with exfat-resize.

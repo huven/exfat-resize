@@ -8,6 +8,7 @@
 #include "boot_region.h"
 #include "checked_math.h"
 #include "endian.h"
+#include "event.h"
 #include "geometry.h"
 #include "sector_adapter.h"
 
@@ -179,28 +180,12 @@ enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
 
 /* Operation monitoring */
 
-static void report_event(struct resize_context *context,
-    uint32_t code,
-    enum exfat_resize_event_level level,
-    uint64_t value)
-{
-	struct exfat_resize_event event;
-
-	if (context->monitor.report_event == NULL)
-		return;
-	event.stage = context->stage;
-	event.level = level;
-	event.code = code;
-	event.value = value;
-	context->monitor.report_event(context->monitor.context, &event);
-}
-
 static void enter_stage(
     struct resize_context *context, enum exfat_resize_stage stage, uint64_t value)
 {
 	context->stage = stage;
-	report_event(
-	    context, EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED, EXFAT_RESIZE_EVENT_LEVEL_INFO, value);
+	exfat_resize_report_event(&context->monitor, EXFAT_RESIZE_EVENT_LEVEL_INFO,
+	    EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED, (uint64_t)stage, value, 0);
 }
 
 static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)

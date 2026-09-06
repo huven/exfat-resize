@@ -118,7 +118,8 @@ static void event_callback(void *context, const struct exfat_resize_event *event
 	CHECK(state->event_count < EVENT_CAPACITY);
 	if (state->event_count < EVENT_CAPACITY)
 		state->events[state->event_count++] = *event;
-	if (state->request_on_stage && event->stage == state->request_stage)
+	if (state->request_on_stage && event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED &&
+	    event->values[0] == (uint64_t)state->request_stage)
 		state->cancellation_requested = 1;
 }
 
@@ -141,11 +142,12 @@ static void check_event_stream(const struct monitor_state *state, size_t expecte
 
 	CHECK(state->event_count == expected_count);
 	for (index = 0; index < state->event_count; ++index) {
-		CHECK(state->events[index].stage == (enum exfat_resize_stage)index);
 		CHECK(state->events[index].level == EXFAT_RESIZE_EVENT_LEVEL_INFO);
 		CHECK(state->events[index].code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED);
-		if (state->events[index].stage != EXFAT_RESIZE_STAGE_COMPLETED)
-			CHECK(state->events[index].value == 0);
+		CHECK(state->events[index].values[0] == index);
+		if (index != EXFAT_RESIZE_STAGE_COMPLETED)
+			CHECK(state->events[index].values[1] == 0);
+		CHECK(state->events[index].values[2] == 0);
 	}
 }
 
@@ -548,7 +550,7 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	CHECK(empty_state.cancellation_calls == 0);
 	check_event_stream(&reported_state, 5);
 	if (reported_state.event_count == 5)
-		CHECK(reported_state.events[4].value == target_size);
+		CHECK(reported_state.events[4].values[1] == target_size);
 	CHECK(reported_state.cancellation_calls == 0);
 	CHECK(polled_state.event_count == 0);
 	CHECK(polled_state.cancellation_calls != 0);
@@ -821,7 +823,7 @@ static void test_stage_cancellation(void)
 				CHECK(fixture.memory.operations[operation].kind == MEMORY_OPERATION_READ);
 		}
 		if (cases[index].requested_stage == EXFAT_RESIZE_STAGE_COMPLETED && state.event_count == 5)
-			CHECK(state.events[4].value == exfat_fixture_target_size(TARGET_SECTOR_COUNT));
+			CHECK(state.events[4].values[1] == exfat_fixture_target_size(TARGET_SECTOR_COUNT));
 		CHECK(test_allocator_is_clean(&allocator));
 		exfat_fixture_destroy(&fixture);
 	}

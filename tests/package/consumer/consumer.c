@@ -29,7 +29,8 @@ static void report_event(void *context, const struct exfat_resize_event *event)
 {
 	int *callback_count = context;
 
-	if (event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED)
+	if (event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED &&
+	    event->values[0] <= EXFAT_RESIZE_STAGE_COMPLETED)
 		++*callback_count;
 }
 

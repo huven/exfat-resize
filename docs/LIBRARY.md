@@ -156,10 +156,9 @@ allowed to finish. When a request is observed, `exfat_resize` returns
 
 Invalid public arguments are rejected before the cancellation callback is
 consulted. A concrete allocation, read, write, or synchronization failure is
-not replaced by a cancellation request arising during that operation. Once
-the clean target has been synchronized and `COMPLETED` has been reported, the
-operation returns success even if that final event causes cancellation to be
-requested.
+not replaced by a cancellation request arising during that operation.
+`COMPLETED` is terminal: after reporting it, `exfat_resize` returns success
+without consulting the cancellation callback again.
 
 Cooperative cancellation does not protect against process termination, a
 crash, power loss, `SIGKILL`, or `TerminateProcess`. If the caller does not
@@ -175,16 +174,16 @@ It may update caller-owned state that a later cancellation callback observes.
 
 Every event contains:
 
-- `stage`: the authoritative recovery stage at delivery time;
 - `level`: a generic filtering and presentation severity;
 - `code`: a permanent semantic identifier;
-- `value`: a code-specific unsigned integer, or zero when unused.
+- `values`: `EXFAT_RESIZE_EVENT_VALUE_COUNT` code-specific unsigned integers
+  (currently three), with unused elements set to zero.
 
 Event levels form the closed `enum exfat_resize_event_level`. Event codes use
 an open `uint32_t` namespace so later 2.x releases can add codes without
 changing the monitor structure. Callers must tolerate unknown event codes by
-ignoring them or displaying their numeric stage, level, code, and value.
-Published codes are never renumbered or reused with different semantics.
+ignoring them or displaying their numeric level, code, and values. Published
+codes are never renumbered or reused for different semantics.
 
 The initial code is `EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED`. It is emitted at
 `EXFAT_RESIZE_EVENT_LEVEL_INFO` after each stage becomes authoritative. A
@@ -196,11 +195,13 @@ successful call reports these stages once and in order:
 4. `FINALIZING`
 5. `COMPLETED`
 
-The event value is zero for the first four stages. At `COMPLETED`, it is the
-exact resulting filesystem size in bytes after filesystem-sector rounding.
-Calls rejected by the initial structural argument validation emit no events.
-Target and filesystem validation that requires device I/O occurs after
-`PREFLIGHT` is reported. Failures emit only the stages reached before return.
+For this code, `values[0]` contains the newly entered stage. `values[1]` is
+zero for the first four stages; at `COMPLETED`, it contains the exact resulting
+filesystem size in bytes after filesystem-sector rounding. `values[2]` is
+zero. Calls rejected by the initial structural argument validation emit no
+events. Target and filesystem validation that requires device I/O occurs
+after `PREFLIGHT` is reported. Failures emit only the stages reached before
+return.
 
 ## Results and recovery stages
 

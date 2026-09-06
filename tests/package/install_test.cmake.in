@@ -201,6 +201,7 @@ foreach(required_text
         "## Operation monitor"
         "EXFAT_RESIZE_CANCELLED"
         "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
+        "EXFAT_RESIZE_EVENT_VALUE_COUNT"
         "unknown event codes"
         "## Results and recovery stages"
         "## Compatibility and migration from 1.x"
@@ -304,6 +305,7 @@ foreach(required_text
         "must not be retained"
         "struct exfat_resize_monitor"
         "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
+        "EXFAT_RESIZE_EVENT_VALUE_COUNT"
         "EXFAT_RESIZE_CANCELLED"
 )
     string(FIND "${header_contents}" "${required_text}" required_text_offset)

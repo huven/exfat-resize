@@ -111,6 +111,7 @@ add_library(
         lib/boot_region.c
         lib/checked_math.c
         lib/endian.c
+        lib/event.c
         lib/geometry.c
         lib/resize.c
         lib/sector_adapter.c
