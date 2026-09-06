@@ -101,12 +101,18 @@ rolled back, or resumable. Follow the recovery guidance printed with an error;
 depending on the stage reached, recovery may require a filesystem checker or
 restoring the verified backup.
 
+On macOS and Linux, Ctrl-C requests cooperative cancellation. Work already in
+progress is allowed to reach the next safe boundary. When the request is
+observed before completion, the command prints the applicable recovery
+guidance, performs normal device cleanup, and exits with status 130. Further
+Ctrl-C requests remain handled during cleanup.
+
 Every normal error exit prints stage-specific recovery guidance. If the command
 terminates abnormally without printing stage-specific recovery guidance, for
-example because of an interruption, process crash, or power loss, assume that
-destructive metadata updates may have started; do not retry the resize, and
-restore the verified backup. Follow a less conservative checker-and-retry path
-only when the command explicitly reports that it is safe.
+example because of forced termination, a process crash, or power loss, assume
+that destructive metadata updates may have started; do not retry the resize,
+and restore the verified backup. Follow a less conservative checker-and-retry
+path only when the command explicitly reports that it is safe.
 
 If `--grow-partition` reports that a partition update was attempted or that the
 partition was enlarged, follow its partition-specific guidance even though no
@@ -139,6 +145,9 @@ optionally enlarge a supported partition as part of an explicit-size resize.
 
 Only filesystems meeting the
 [compatibility requirements](#filesystem-compatibility) below are supported.
+
+During the operation, the CLI reports each transaction stage. After successful
+completion, it reports the resulting filesystem size in bytes.
 
 ### macOS and Linux
 

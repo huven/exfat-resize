@@ -107,6 +107,64 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     return()
 endif()
 
+add_library(
+    exfat_resize_posix_entry_test_object
+    OBJECT
+        ${PROJECT_SOURCE_DIR}/src/posix/entry.c
+)
+target_include_directories(
+    exfat_resize_posix_entry_test_object
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+)
+target_compile_definitions(
+    exfat_resize_posix_entry_test_object
+    PRIVATE
+        main=exfat_resize_test_posix_entry
+)
+exfat_resize_configure_target(exfat_resize_posix_entry_test_object)
+
+add_executable(
+    exfat_resize_posix_entry_test
+    posix-entry.c
+    $<TARGET_OBJECTS:exfat_resize_posix_entry_test_object>
+)
+target_include_directories(
+    exfat_resize_posix_entry_test
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+)
+exfat_resize_configure_target(exfat_resize_posix_entry_test)
+add_test(NAME cli.posix-entry COMMAND exfat_resize_posix_entry_test)
+set_tests_properties(cli.posix-entry PROPERTIES LABELS cli)
+
+add_executable(
+    exfat_resize_cli_cancellation_test
+    cli-cancellation.c
+    ${PROJECT_SOURCE_DIR}/src/cli.c
+)
+target_include_directories(
+    exfat_resize_cli_cancellation_test
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/lib
+        ${PROJECT_SOURCE_DIR}/src
+)
+target_compile_definitions(
+    exfat_resize_cli_cancellation_test
+    PRIVATE
+        EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}-cancellation-test"
+)
+target_link_libraries(exfat_resize_cli_cancellation_test PRIVATE exfat_resize)
+exfat_resize_configure_target(exfat_resize_cli_cancellation_test)
+add_test(
+    NAME cli.cancellation
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:exfat_resize_cli_cancellation_test>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cli-cancellation-test.cmake"
+)
+set_tests_properties(cli.cancellation PROPERTIES LABELS cli)
+
 exfat_resize_add_device_test(
     exfat_resize_device_bounds_test
     device-bounds.c

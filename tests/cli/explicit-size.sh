@@ -43,6 +43,15 @@ expect_valid_size_syntax() {
 	fi
 }
 
+expected_resize_output() {
+	printf '%s\n' \
+		"exfat-resize: checking filesystem" \
+		"exfat-resize: preparing resize" \
+		"exfat-resize: resizing filesystem" \
+		"exfat-resize: finalizing resize" \
+		"exfat-resize: resized $1 to $2 bytes"
+}
+
 read_volume_sector_count() {
 	set -- $(od -An -tu1 -j 72 -N 8 "$1")
 	if [ "$#" -ne 8 ]; then
@@ -63,7 +72,7 @@ target_bytes=$((target_sectors * sector_size + 127))
 backing_bytes=$((backing_sectors * sector_size))
 
 output=$("$program" "$image" "$target_bytes")
-if [ "$output" != "exfat-resize: resized $image" ]; then
+if [ "$output" != "$(expected_resize_output "$image" "$((target_sectors * sector_size))")" ]; then
 	echo "unexpected resize output: $output" >&2
 	exit 1
 fi
@@ -81,7 +90,7 @@ check_exfat_image "$image"
 
 format_exfat_image "$kibibyte_image" 65536 131072
 output=$("$program" "$kibibyte_image" 49152K)
-if [ "$output" != "exfat-resize: resized $kibibyte_image" ]; then
+if [ "$output" != "$(expected_resize_output "$kibibyte_image" "$((49152 * 1024))")" ]; then
 	echo "unexpected K-suffix resize output: $output" >&2
 	exit 1
 fi
@@ -93,7 +102,7 @@ check_exfat_image "$kibibyte_image"
 
 format_exfat_image "$mebibyte_image" 65536 131072
 output=$("$program" "$mebibyte_image" 48M)
-if [ "$output" != "exfat-resize: resized $mebibyte_image" ]; then
+if [ "$output" != "$(expected_resize_output "$mebibyte_image" "$((48 * 1024 * 1024))")" ]; then
 	echo "unexpected M-suffix resize output: $output" >&2
 	exit 1
 fi

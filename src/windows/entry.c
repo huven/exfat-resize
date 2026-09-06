@@ -57,7 +57,7 @@ int wmain(int argc, wchar_t **wide_argv)
 			break;
 	}
 	if (index == argc)
-		status = cli_main(argc, argv);
+		status = cli_main(argc, argv, NULL);
 	else
 		status = cli_report_startup_error(error);
 	while (index > 0)
