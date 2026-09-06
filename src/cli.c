@@ -29,7 +29,8 @@ static const char target_description[] =
     "Regular image file, drive letter such as E:, or\n"
     "                     volume-GUID path with the exFAT main boot sector\n"
     "                     at sector zero";
-static const char platform_safety[] = "";
+static const char platform_safety[] =
+    "  Ctrl+C and Ctrl+Break request cooperative cancellation at the next safe boundary.\n";
 static const char documentation_lead[] = "";
 static const char platform_options[] =
     "  --grow-partition   Grow a basic partition to explicit SIZE when needed\n";
@@ -554,6 +555,10 @@ dismount:
 			fprintf(stderr,
 			    "exfat-resize: the resize completed and was synchronized; remount the "
 			    "volume and run a filesystem checker; do not retry the resize\n");
+		else if (result == EXFAT_RESIZE_CANCELLED)
+			fprintf(stderr,
+			    "exfat-resize: the volume may remain mounted; prevent access until the "
+			    "recovery procedure is complete\n");
 		goto out;
 	}
 	if (result != EXFAT_RESIZE_SUCCESS)

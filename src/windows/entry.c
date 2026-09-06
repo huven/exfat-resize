@@ -7,6 +7,26 @@
 #include <stdlib.h>
 #include <windows.h>
 
+static volatile LONG interrupt_requested;
+
+static BOOL WINAPI handle_control(DWORD control_type)
+{
+	switch (control_type) {
+	case CTRL_C_EVENT:
+	case CTRL_BREAK_EVENT:
+		(void)InterlockedExchange(&interrupt_requested, 1);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
+static int cancellation_requested(void *context)
+{
+	(void)context;
+	return InterlockedCompareExchange(&interrupt_requested, 0, 0) != 0;
+}
+
 static char *utf8_argument(const wchar_t *argument, const char **error)
 {
 	char *converted;
@@ -33,13 +53,27 @@ static char *utf8_argument(const wchar_t *argument, const char **error)
 
 int wmain(int argc, wchar_t **wide_argv)
 {
+	struct cli_cancellation cancellation = {
+		.context = NULL,
+		.requested = cancellation_requested,
+	};
 	const char *error = NULL;
 	char **argv;
 	UINT original_output_code_page;
+	char startup_error[128];
+	DWORD error_number;
 	int index;
 	int status = EXIT_FAILURE;
 	int output_code_page_changed;
 
+	(void)InterlockedExchange(&interrupt_requested, 0);
+	if (!SetConsoleCtrlHandler(handle_control, TRUE)) {
+		error_number = GetLastError();
+		(void)snprintf(startup_error, sizeof(startup_error),
+		    "cannot install console control handler: Windows error %lu",
+		    (unsigned long)error_number);
+		return cli_report_startup_error(startup_error);
+	}
 	original_output_code_page = GetConsoleOutputCP();
 	output_code_page_changed = SetConsoleOutputCP(CP_UTF8);
 	if (argc < 0 || (size_t)argc > SIZE_MAX / sizeof(*argv) - 1) {
@@ -57,7 +91,7 @@ int wmain(int argc, wchar_t **wide_argv)
 			break;
 	}
 	if (index == argc)
-		status = cli_main(argc, argv, NULL);
+		status = cli_main(argc, argv, &cancellation);
 	else
 		status = cli_report_startup_error(error);
 	while (index > 0)
@@ -68,5 +102,6 @@ restore_console:
 	(void)fflush(NULL);
 	if (output_code_page_changed)
 		(void)SetConsoleOutputCP(original_output_code_page);
+	(void)SetConsoleCtrlHandler(handle_control, FALSE);
 	return status;
 }

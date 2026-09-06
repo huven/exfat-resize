@@ -178,6 +178,7 @@ foreach(required_text
         "is not a general filesystem checker"
         "Every normal error exit prints stage-specific recovery guidance"
         "Ctrl-C requests cooperative cancellation"
+        "Ctrl+Break request the same cooperative cancellation"
         "exits with status 130"
         "reports each transaction stage"
         "terminates abnormally without printing stage-specific"

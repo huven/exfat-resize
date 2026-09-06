@@ -102,10 +102,11 @@ depending on the stage reached, recovery may require a filesystem checker or
 restoring the verified backup.
 
 On macOS and Linux, Ctrl-C requests cooperative cancellation. Work already in
-progress is allowed to reach the next safe boundary. When the request is
+progress is allowed to reach the next safe boundary. On Windows, Ctrl+C and
+Ctrl+Break request the same cooperative cancellation. When the request is
 observed before completion, the command prints the applicable recovery
 guidance, performs normal device cleanup, and exits with status 130. Further
-Ctrl-C requests remain handled during cleanup.
+cancellation requests remain handled during cleanup.
 
 Every normal error exit prints stage-specific recovery guidance. If the command
 terminates abnormally without printing stage-specific recovery guidance, for
