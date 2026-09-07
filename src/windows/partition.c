@@ -2,6 +2,7 @@
 
 #include "device.h"
 
+#include "cli.h"
 #include "windows/device_internal.h"
 
 #include <limits.h>
@@ -126,9 +127,16 @@ static int checked_end(uint64_t start, uint64_t length, uint64_t *end)
 	return 0;
 }
 
-int device_grow_partition(struct device *device,
+static int cancellation_requested(const struct cli_cancellation *cancellation)
+{
+	return cancellation != NULL && cancellation->requested != NULL &&
+	    cancellation->requested(cancellation->context) != 0;
+}
+
+enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
+    const struct cli_cancellation *cancellation,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size)
@@ -155,37 +163,37 @@ int device_grow_partition(struct device *device,
 	DWORD error_number;
 	size_t index;
 	int path_length;
-	int result = -1;
+	enum device_partition_growth_result result = DEVICE_PARTITION_GROWTH_ERROR;
 
 	*partition_state = DEVICE_PARTITION_UNCHANGED;
 	if (device->volume_io_buffer == NULL) {
 		windows_device_set_error(
 		    error, error_size, path, "--grow-partition requires a logical Windows volume target");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 	if (device->block_device.sector_count > UINT64_MAX / sector_size) {
 		windows_device_set_error(error, error_size, path, "the logical volume size is too large");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 	current_length = device->block_device.sector_count * (uint64_t)sector_size;
 	if (target_size <= current_length)
-		return 0;
+		return DEVICE_PARTITION_GROWTH_SUCCESS;
 	if (target_size > (uint64_t)LLONG_MAX ||
 	    target_size > UINT64_MAX - ((uint64_t)sector_size - 1)) {
 		windows_device_set_error(
 		    error, error_size, path, "the requested partition size is too large");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 	requested_length = (target_size + sector_size - 1) / sector_size * (uint64_t)sector_size;
 	if (requested_length > (uint64_t)LLONG_MAX) {
 		windows_device_set_error(
 		    error, error_size, path, "the requested partition size is too large");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 
 	if (query_partition_information(device->handle, path, &partition, error, error_size) != 0 ||
 	    query_volume_extent(device->handle, path, &extent, error, error_size) != 0)
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	if (partition.IsServicePartition || partition.PartitionNumber == 0 ||
 	    partition.StartingOffset.QuadPart < 0 || partition.PartitionLength.QuadPart <= 0 ||
 	    extent.StartingOffset.QuadPart < 0 || extent.ExtentLength.QuadPart <= 0 ||
@@ -194,7 +202,7 @@ int device_grow_partition(struct device *device,
 	    extent.ExtentLength.QuadPart != partition.PartitionLength.QuadPart) {
 		windows_device_set_error(error, error_size, path,
 		    "the volume does not map to one complete basic-disk partition");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 	disk_number = extent.DiskNumber;
 	partition_number = partition.PartitionNumber;
@@ -205,7 +213,7 @@ int device_grow_partition(struct device *device,
 	if (path_length < 0 || (size_t)path_length >= sizeof(disk_path) / sizeof(disk_path[0])) {
 		windows_device_set_error(
 		    error, error_size, path, "cannot construct the physical disk path");
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 	disk = CreateFileW(disk_path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
 	    NULL, OPEN_EXISTING, FILE_FLAG_WRITE_THROUGH, NULL);
@@ -218,7 +226,7 @@ int device_grow_partition(struct device *device,
 			windows_device_set_operation_error(
 			    error, error_size, path, "cannot open the physical disk", error_number);
 		}
-		return -1;
+		return DEVICE_PARTITION_GROWTH_ERROR;
 	}
 
 	layout = query_drive_layout(disk, path, error, error_size);
@@ -318,6 +326,14 @@ int device_grow_partition(struct device *device,
 		    "not enough immediately trailing unallocated space for the requested size");
 		goto out;
 	}
+	/*
+	 * This is the final cancellation point until partition mutation, required
+	 * synchronization, property refresh, and geometry readback have completed.
+	 */
+	if (cancellation_requested(cancellation)) {
+		result = DEVICE_PARTITION_GROWTH_CANCELLED;
+		goto out;
+	}
 
 	growth = requested_length - current_length;
 	(void)memset(&request, 0, sizeof(request));
@@ -370,7 +386,7 @@ int device_grow_partition(struct device *device,
 		goto out;
 	}
 	device->block_device.sector_count = requested_length / sector_size;
-	result = 0;
+	result = DEVICE_PARTITION_GROWTH_SUCCESS;
 
 out:
 	free(layout);

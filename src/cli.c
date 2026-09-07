@@ -474,6 +474,7 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 	if (positional_count != 2)
 		target = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
 	if (grow_partition) {
+		enum device_partition_growth_result partition_result;
 		uint64_t current_size;
 
 		if (device.block_device.sector_count >
@@ -498,29 +499,37 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 			print_no_write_guidance();
 			goto out;
 		}
-		if (target > current_size &&
-		    device_grow_partition(
-		        &device, positional[0], target, &partition_state, error, sizeof(error)) != 0) {
-			fprintf(stderr, "exfat-resize: %s\n", error);
-			if (partition_state == DEVICE_PARTITION_GROWN)
-				print_partition_grown_guidance();
-			else if (partition_state == DEVICE_PARTITION_UPDATE_ATTEMPTED)
-				print_partition_update_uncertain_guidance();
-			else
-				print_no_write_guidance();
-			if (partition_state != DEVICE_PARTITION_UNCHANGED &&
-			    device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+		if (target > current_size) {
+			if (cancellation_requested(cancellation))
+				goto cancelled;
+			partition_result = device_grow_partition(&device, positional[0], target, cancellation,
+			    &partition_state, error, sizeof(error));
+			if (partition_result == DEVICE_PARTITION_GROWTH_CANCELLED)
+				goto cancelled;
+			if (partition_result != DEVICE_PARTITION_GROWTH_SUCCESS) {
 				fprintf(stderr, "exfat-resize: %s\n", error);
-				fprintf(stderr,
-				    "exfat-resize: the volume may remain mounted; prevent access until the "
-				    "partition layout is verified\n");
+				if (partition_state == DEVICE_PARTITION_GROWN)
+					print_partition_grown_guidance();
+				else if (partition_state == DEVICE_PARTITION_UPDATE_ATTEMPTED)
+					print_partition_update_uncertain_guidance();
+				else
+					print_no_write_guidance();
+				if (partition_state != DEVICE_PARTITION_UNCHANGED &&
+				    device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+					fprintf(stderr, "exfat-resize: %s\n", error);
+					fprintf(stderr,
+					    "exfat-resize: the volume may remain mounted; prevent access until the "
+					    "partition layout is verified\n");
+				}
+				goto out;
 			}
-			goto out;
 		}
 		if (partition_state == DEVICE_PARTITION_GROWN) {
 			printf("exfat-resize: grew the partition containing %s to %" PRIu64 " bytes\n",
 			    positional[0],
 			    device.block_device.sector_count * (uint64_t)device.block_device.sector_size);
+			if (cancellation_requested(cancellation))
+				goto cancelled;
 		}
 	}
 	allocator.context = NULL;
@@ -534,19 +543,19 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 	    ? monitor_cancellation_requested
 	    : NULL;
 	monitor.report_event = report_resize_event;
-	if (cancellation_requested(cancellation)) {
-		result = EXFAT_RESIZE_CANCELLED;
-		status = CLI_CANCELLED_EXIT_STATUS;
-		print_resize_failure(&device, positional[0], result, stage, partition_state);
-		goto dismount;
-	}
 
 	result = exfat_resize(&device.block_device, target, &allocator, &monitor, &stage);
+	if (result == EXFAT_RESIZE_CANCELLED)
+		goto cancelled;
 	if (result != EXFAT_RESIZE_SUCCESS) {
 		print_resize_failure(&device, positional[0], result, stage, partition_state);
-		if (result == EXFAT_RESIZE_CANCELLED)
-			status = CLI_CANCELLED_EXIT_STATUS;
 	}
+	goto dismount;
+
+cancelled:
+	result = EXFAT_RESIZE_CANCELLED;
+	status = CLI_CANCELLED_EXIT_STATUS;
+	print_resize_failure(&device, positional[0], result, stage, partition_state);
 
 dismount:
 	if (device_dismount(&device, positional[0], error, sizeof(error)) != 0) {

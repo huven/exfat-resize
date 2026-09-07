@@ -12,6 +12,8 @@
 #include <windows.h>
 #endif
 
+struct cli_cancellation;
+
 struct device {
 #if defined(_WIN32)
 	HANDLE handle;
@@ -33,11 +35,18 @@ enum device_partition_state {
 	DEVICE_PARTITION_GROWN
 };
 
+enum device_partition_growth_result {
+	DEVICE_PARTITION_GROWTH_SUCCESS,
+	DEVICE_PARTITION_GROWTH_ERROR,
+	DEVICE_PARTITION_GROWTH_CANCELLED
+};
+
 void device_init(struct device *device);
 int device_open(struct device *device, const char *path, char *error, size_t error_size);
-int device_grow_partition(struct device *device,
+enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
+    const struct cli_cancellation *cancellation,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size);

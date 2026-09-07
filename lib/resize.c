@@ -1013,7 +1013,7 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 	enum exfat_resize_error error;
 	uint64_t valid_data_length;
 	uint16_t attributes;
-	uint16_t calculated_checksum;
+	uint16_t calculated_checksum = 0;
 	uint8_t secondary_count;
 	uint32_t index;
 	int is_directory;

@@ -12,8 +12,9 @@
 
 static int partition_grown;
 static int properties_updated;
+static PHANDLER_ROUTINE console_handler;
 
-static int configured_fault(const char *point)
+static int configured_point(const char *point)
 {
 	const char *configured = getenv("EXFAT_RESIZE_TEST_PARTITION_FAULT");
 	size_t point_length = strlen(point);
@@ -23,12 +24,38 @@ static int configured_fault(const char *point)
 		size_t length = separator == NULL ? strlen(configured) : (size_t)(separator - configured);
 
 		if (length == point_length && memcmp(configured, point, length) == 0) {
-			SetLastError(ERROR_GEN_FAILURE);
 			return 1;
 		}
 		configured = separator == NULL ? NULL : separator + 1;
 	}
 	return 0;
+}
+
+static int configured_fault(const char *point)
+{
+	if (!configured_point(point))
+		return 0;
+	SetLastError(ERROR_GEN_FAILURE);
+	return 1;
+}
+
+static int request_cancellation(void)
+{
+	if (console_handler != NULL && console_handler(CTRL_C_EVENT))
+		return 0;
+	SetLastError(ERROR_GEN_FAILURE);
+	return -1;
+}
+
+BOOL WINAPI windows_partition_test_set_console_ctrl_handler(PHANDLER_ROUTINE handler, BOOL add)
+{
+	if (handler == NULL || (add && console_handler != NULL) ||
+	    (!add && handler != console_handler)) {
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	console_handler = add ? handler : NULL;
+	return TRUE;
 }
 
 BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
@@ -46,9 +73,15 @@ BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
 		SetLastError(ERROR_GEN_FAILURE);
 		return FALSE;
 	}
+	if (control == IOCTL_DISK_GROW_PARTITION && configured_point("cancel-grow") &&
+	    request_cancellation() != 0)
+		return FALSE;
 	succeeded = DeviceIoControl(
 	    handle, control, input, input_size, output, output_size, returned, overlapped);
 	if (!succeeded)
+		return FALSE;
+	if (control == IOCTL_DISK_GET_DRIVE_LAYOUT_EX && configured_point("cancel-discovery") &&
+	    request_cancellation() != 0)
 		return FALSE;
 
 	if (control == IOCTL_DISK_GROW_PARTITION) {

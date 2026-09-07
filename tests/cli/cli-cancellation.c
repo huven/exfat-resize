@@ -11,8 +11,7 @@
 enum cancellation_mode {
 	CANCEL_BEFORE_OPEN,
 	CANCEL_AFTER_OPEN,
-	CANCEL_DURING_PREFLIGHT,
-	CANCEL_DURING_PREFLIGHT_DISMOUNT_FAILURE
+	CANCEL_AFTER_OPEN_DISMOUNT_FAILURE
 };
 
 static enum cancellation_mode mode;
@@ -73,9 +72,10 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	return 0;
 }
 
-int device_grow_partition(struct device *device,
+enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
+    const struct cli_cancellation *cancellation,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size)
@@ -83,11 +83,12 @@ int device_grow_partition(struct device *device,
 	(void)device;
 	(void)path;
 	(void)target_size;
+	(void)cancellation;
 	(void)partition_state;
 	(void)error;
 	(void)error_size;
 	++device_callback_calls;
-	return -1;
+	return DEVICE_PARTITION_GROWTH_ERROR;
 }
 
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
@@ -97,7 +98,7 @@ int device_dismount(struct device *device, const char *path, char *error, size_t
 	if (!claim_active || close_calls != 0)
 		cleanup_order_valid = 0;
 	++dismount_calls;
-	if (mode == CANCEL_DURING_PREFLIGHT_DISMOUNT_FAILURE) {
+	if (mode == CANCEL_AFTER_OPEN_DISMOUNT_FAILURE) {
 		(void)snprintf(error, error_size, "test-device: cannot dismount test volume");
 		return -1;
 	}
@@ -124,9 +125,8 @@ static int cancellation_requested(void *context)
 {
 	(void)context;
 	++cancellation_calls;
-	return mode == CANCEL_BEFORE_OPEN || (mode == CANCEL_AFTER_OPEN && claim_active) ||
-	    ((mode == CANCEL_DURING_PREFLIGHT || mode == CANCEL_DURING_PREFLIGHT_DISMOUNT_FAILURE) &&
-	        cancellation_calls >= 3);
+	return mode == CANCEL_BEFORE_OPEN ||
+	    ((mode == CANCEL_AFTER_OPEN || mode == CANCEL_AFTER_OPEN_DISMOUNT_FAILURE) && claim_active);
 }
 
 int main(int argc, char **argv)
@@ -139,19 +139,16 @@ int main(int argc, char **argv)
 	int status;
 
 	if (argc != 2) {
-		fprintf(stderr,
-		    "usage: cli-cancellation "
-		    "before-open|after-open|during-preflight|during-preflight-dismount-failure\n");
+		fprintf(
+		    stderr, "usage: cli-cancellation before-open|after-open|after-open-dismount-failure\n");
 		return EXIT_FAILURE;
 	}
 	if (strcmp(argv[1], "before-open") == 0)
 		mode = CANCEL_BEFORE_OPEN;
 	else if (strcmp(argv[1], "after-open") == 0)
 		mode = CANCEL_AFTER_OPEN;
-	else if (strcmp(argv[1], "during-preflight") == 0)
-		mode = CANCEL_DURING_PREFLIGHT;
-	else if (strcmp(argv[1], "during-preflight-dismount-failure") == 0)
-		mode = CANCEL_DURING_PREFLIGHT_DISMOUNT_FAILURE;
+	else if (strcmp(argv[1], "after-open-dismount-failure") == 0)
+		mode = CANCEL_AFTER_OPEN_DISMOUNT_FAILURE;
 	else
 		return EXIT_FAILURE;
 	status = cli_main(3, cli_argv, &cancellation);

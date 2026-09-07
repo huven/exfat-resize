@@ -14,8 +14,10 @@ BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
     LPDWORD returned,
     LPOVERLAPPED overlapped);
 BOOL WINAPI windows_partition_test_flush_file_buffers(HANDLE handle);
+BOOL WINAPI windows_partition_test_set_console_ctrl_handler(PHANDLER_ROUTINE handler, BOOL add);
 
 #define DeviceIoControl windows_partition_test_device_io_control
 #define FlushFileBuffers windows_partition_test_flush_file_buffers
+#define SetConsoleCtrlHandler windows_partition_test_set_console_ctrl_handler
 
 #endif

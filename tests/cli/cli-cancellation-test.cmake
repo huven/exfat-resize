@@ -4,7 +4,7 @@ if(NOT DEFINED PROGRAM)
     message(FATAL_ERROR "PROGRAM is required")
 endif()
 
-foreach(mode before-open after-open during-preflight during-preflight-dismount-failure)
+foreach(mode before-open after-open after-open-dismount-failure)
     execute_process(
         COMMAND "${PROGRAM}" "${mode}"
         RESULT_VARIABLE result
@@ -33,12 +33,12 @@ foreach(mode before-open after-open during-preflight during-preflight-dismount-f
         message(FATAL_ERROR "${mode} cancellation used the generic error text:\n${combined}")
     endif()
     string(FIND "${output}" "exfat-resize: checking filesystem" stage_offset)
-    if(mode MATCHES "^during-preflight" AND stage_offset EQUAL -1)
+    if(mode MATCHES "^after-open" AND stage_offset EQUAL -1)
         message(FATAL_ERROR "${mode} cancellation did not report the preflight stage:\n${combined}")
-    elseif(NOT mode MATCHES "^during-preflight" AND NOT stage_offset EQUAL -1)
+    elseif(NOT mode MATCHES "^after-open" AND NOT stage_offset EQUAL -1)
         message(FATAL_ERROR "${mode} cancellation entered the library unexpectedly:\n${combined}")
     endif()
-    if(mode STREQUAL "during-preflight-dismount-failure")
+    if(mode STREQUAL "after-open-dismount-failure")
         foreach(required_text
                 "cannot dismount test volume"
                 "the volume may remain mounted"
