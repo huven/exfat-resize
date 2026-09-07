@@ -134,11 +134,13 @@ the allocator contract.
 the allocator and device contexts. In a nonnull monitor,
 `cancellation_requested` and `report_event` are independently optional.
 
-Both callbacks run synchronously on the thread executing `exfat_resize`. They
-must be quick, nonblocking, safe to call repeatedly, and must not reenter the
-active resize. They are responsible for safely accessing any state shared with
-another thread, signal handler, console-control handler, or event loop. A C++
-exception must not escape across the C interface.
+Both callbacks run synchronously on the thread executing `exfat_resize`; the
+library does not continue until the callback returns. They may be called
+repeatedly and must not reenter the active resize. Callback execution time
+directly delays the operation, so implementations should return promptly. They
+are responsible for safely accessing any state shared with another thread,
+signal handler, console-control handler, or event loop. A C++ exception must
+not escape across the C interface.
 
 ### Cooperative cancellation
 
@@ -164,6 +166,20 @@ Cooperative cancellation does not protect against process termination, a
 crash, power loss, `SIGKILL`, or `TerminateProcess`. If the caller does not
 receive a recovery stage, follow the conservative abnormal-termination
 procedure in README.
+
+### Cancellation checkpoints and responsiveness
+
+A cancellation checkpoint calls `cancellation_requested` once. A nonzero
+result stops the operation before the next work unit. An already-started work
+unit finishes, and a concrete failure from that unit takes precedence over a
+concurrent cancellation request. Checkpoint counts are not part of the API.
+
+Cancellation checkpoints are placed at transaction boundaries and between
+bounded units of long, size-dependent library work. Their exact locations,
+frequency, and work-unit sizes are implementation details and may change
+between releases. No wall-clock response time is guaranteed: callbacks and
+synchronization are synchronous, and work already started is allowed to
+finish. The library does not check cancellation after `COMPLETED`.
 
 ### Structured events
 

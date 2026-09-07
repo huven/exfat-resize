@@ -316,13 +316,6 @@ can require a compatible 2.x release:
 
     find_package(exfat_resize 2.0 CONFIG REQUIRED)
 
-The public C API remains source compatible throughout the 2.x series. Build
-consumers with the header and static library from the same release and with
-ABI-compatible compiler settings for the target platform. Compatibility
-between separately compiled artifacts from different releases or deliberately
-different compiler ABIs is not promised. Incompatible source changes require a
-new major release.
-
 ## Installing prebuilt CLI binaries
 
 ### Linux and macOS

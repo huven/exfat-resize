@@ -45,7 +45,9 @@ stage is authoritative. Cooperative cancellation is observed at safe
 boundaries around the transitions above and returns the same recovery stage as
 another failure at that boundary. Synchronization required for writes already
 issued is not cancelled. `COMPLETED` is terminal: after reporting it, the call
-returns success without polling for cancellation again.
+returns success without polling for cancellation again. The caller-facing
+cancellation contract is documented under [Cancellation checkpoints and
+responsiveness](LIBRARY.md#cancellation-checkpoints-and-responsiveness).
 
 A `PREPARING` failure may leave `VolumeDirty` set and may leave relocated data
 in locations which are not authoritative under the source geometry. The source
@@ -70,9 +72,10 @@ It uses that buffer for boot-region I/O, cluster relocation, batched FAT and
 bitmap output, and buffering directory entry sets.
 
 During preflight, it requests a snapshot of the used portion of the source FAT,
-rounded up to a filesystem sector. The snapshot is filled by one block-device
-read, provides all source FAT lookups, and is released before the first write.
-Its size is approximately four bytes per source cluster.
+rounded up to a filesystem sector. The snapshot is filled by contiguous
+block-device reads no larger than 1 MiB, provides all source FAT lookups, and
+is released before the first write. Its size is approximately four bytes per
+source cluster.
 
 It separately requests a 768 KiB cache block, divided into three 256 KiB
 windows. Dedicated windows retain source directory data, source bitmap data,

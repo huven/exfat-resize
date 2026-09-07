@@ -184,12 +184,13 @@ struct exfat_resize_allocator {
 /*
  * Monitor callbacks
  *
- * Both callbacks are optional, quick, nonblocking observations of an active
- * call and may be invoked repeatedly. cancellation_requested returns zero to
- * continue or nonzero to abort the resize with EXFAT_RESIZE_CANCELLED at the
- * current checkpoint. report_event cannot report an error or replace the
- * library result. Its event pointer is borrowed only for the callback; unknown
- * event codes must be tolerated. A monitor callback must not reenter the active
+ * Both callbacks are optional synchronous observations of an active call and
+ * may be invoked repeatedly. Their execution time directly delays the call, so
+ * they should return promptly. cancellation_requested returns zero to continue
+ * or nonzero to abort the resize with EXFAT_RESIZE_CANCELLED at the current
+ * checkpoint. report_event cannot report an error or replace the library
+ * result. Its event pointer is borrowed only for the callback; unknown event
+ * codes must be tolerated. A monitor callback must not reenter the active
  * resize.
  */
 struct exfat_resize_monitor {
