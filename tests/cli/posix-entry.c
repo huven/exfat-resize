@@ -43,6 +43,8 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 	/* A repeated Ctrl-C remains handled while cli_main() performs cleanup. */
 	CHECK(raise(SIGINT) == 0);
 	CHECK(cancellation->requested(cancellation->context) != 0);
+	/* A closed progress pipe cannot terminate the process before cleanup. */
+	CHECK(raise(SIGPIPE) == 0);
 	return EXPECTED_CLI_STATUS;
 }
 
@@ -55,22 +57,30 @@ int cli_report_startup_error(const char *message)
 
 int main(void)
 {
-	struct sigaction action = { 0 };
-	struct sigaction original_action;
-	struct sigaction restored_action;
+	struct sigaction interrupt_action = { 0 };
+	struct sigaction pipe_action = { 0 };
+	struct sigaction installed_interrupt_action;
+	struct sigaction installed_pipe_action;
+	struct sigaction original_interrupt_action;
+	struct sigaction original_pipe_action;
 	char *argv[] = { "exfat-resize", NULL };
 	int status;
 
-	action.sa_handler = previous_handler;
-	(void)sigemptyset(&action.sa_mask);
-	CHECK(sigaction(SIGINT, &action, &original_action) == 0);
+	interrupt_action.sa_handler = previous_handler;
+	(void)sigemptyset(&interrupt_action.sa_mask);
+	CHECK(sigaction(SIGINT, &interrupt_action, &original_interrupt_action) == 0);
+	pipe_action.sa_handler = previous_handler;
+	(void)sigemptyset(&pipe_action.sa_mask);
+	CHECK(sigaction(SIGPIPE, &pipe_action, &original_pipe_action) == 0);
 	status = exfat_resize_test_posix_entry(1, argv);
 	CHECK(status == EXPECTED_CLI_STATUS);
-	CHECK(sigaction(SIGINT, NULL, &restored_action) == 0);
-	CHECK(restored_action.sa_handler == previous_handler);
-	CHECK(raise(SIGINT) == 0);
-	CHECK(previous_handler_calls == 1);
-	CHECK(sigaction(SIGINT, &original_action, NULL) == 0);
+	CHECK(sigaction(SIGINT, NULL, &installed_interrupt_action) == 0);
+	CHECK(installed_interrupt_action.sa_handler != previous_handler);
+	CHECK(sigaction(SIGPIPE, NULL, &installed_pipe_action) == 0);
+	CHECK(installed_pipe_action.sa_handler == SIG_IGN);
+	CHECK(previous_handler_calls == 0);
+	CHECK(sigaction(SIGPIPE, &original_pipe_action, NULL) == 0);
+	CHECK(sigaction(SIGINT, &original_interrupt_action, NULL) == 0);
 	if (failure_count != 0)
 		return EXIT_FAILURE;
 	printf("posix-entry: passed\n");

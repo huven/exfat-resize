@@ -29,20 +29,24 @@ int main(int argc, char **argv)
 		.context = NULL,
 		.requested = cancellation_requested,
 	};
-	struct sigaction action = { 0 };
-	struct sigaction previous_action;
+	struct sigaction interrupt_action = { 0 };
+	struct sigaction pipe_action = { 0 };
 	char error[256];
-	int status;
 
 	interrupt_requested = 0;
-	action.sa_handler = handle_interrupt;
-	action.sa_flags = SA_RESTART;
-	(void)sigemptyset(&action.sa_mask);
-	if (sigaction(SIGINT, &action, &previous_action) != 0) {
+	interrupt_action.sa_handler = handle_interrupt;
+	interrupt_action.sa_flags = SA_RESTART;
+	(void)sigemptyset(&interrupt_action.sa_mask);
+	if (sigaction(SIGINT, &interrupt_action, NULL) != 0) {
 		(void)snprintf(error, sizeof(error), "cannot install Ctrl-C handler: %s", strerror(errno));
 		return cli_report_startup_error(error);
 	}
-	status = cli_main(argc, argv, &cancellation);
-	(void)sigaction(SIGINT, &previous_action, NULL);
-	return status;
+	/* Retain both dispositions through process teardown and its stream flushes. */
+	pipe_action.sa_handler = SIG_IGN;
+	(void)sigemptyset(&pipe_action.sa_mask);
+	if (sigaction(SIGPIPE, &pipe_action, NULL) != 0) {
+		(void)snprintf(error, sizeof(error), "cannot ignore SIGPIPE: %s", strerror(errno));
+		return cli_report_startup_error(error);
+	}
+	return cli_main(argc, argv, &cancellation);
 }
