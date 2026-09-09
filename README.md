@@ -101,12 +101,19 @@ rolled back, or resumable. Follow the recovery guidance printed with an error;
 depending on the stage reached, recovery may require a filesystem checker or
 restoring the verified backup.
 
+On macOS and Linux, Ctrl-C requests cooperative cancellation. Work already in
+progress is allowed to reach the next safe boundary. On Windows, Ctrl+C and
+Ctrl+Break request the same cooperative cancellation. When the request is
+observed before completion, the command prints the applicable recovery
+guidance, performs normal device cleanup, and exits with status 130. Further
+cancellation requests remain handled during cleanup.
+
 Every normal error exit prints stage-specific recovery guidance. If the command
 terminates abnormally without printing stage-specific recovery guidance, for
-example because of an interruption, process crash, or power loss, assume that
-destructive metadata updates may have started; do not retry the resize, and
-restore the verified backup. Follow a less conservative checker-and-retry path
-only when the command explicitly reports that it is safe.
+example because of forced termination, a process crash, or power loss, assume
+that destructive metadata updates may have started; do not retry the resize,
+and restore the verified backup. Follow a less conservative checker-and-retry
+path only when the command explicitly reports that it is safe.
 
 If `--grow-partition` reports that a partition update was attempted or that the
 partition was enlarged, follow its partition-specific guidance even though no
@@ -139,6 +146,9 @@ optionally enlarge a supported partition as part of an explicit-size resize.
 
 Only filesystems meeting the
 [compatibility requirements](#filesystem-compatibility) below are supported.
+
+During the operation, the CLI reports each transaction stage. After successful
+completion, it reports the resulting filesystem size in bytes.
 
 ### macOS and Linux
 
@@ -272,92 +282,39 @@ is a thin platform-specific wrapper around the library:
 
 ## C library
 
-The repository also builds a C11 library with the public C-facing header
-`<exfat_resize.h>`. The core accepts a sector-addressed device and does not
-depend on file descriptors, disk images, raw-device APIs, or another filesystem
-implementation. Callback sector numbers use the device sector size declared by
-the caller. The library reads the filesystem sector size from the exFAT boot
-sector and adapts I/O between the two sector sizes; the filesystem sector size
-must be a multiple of the callback device sector size.
-Sector zero supplied by the caller must be the exFAT main boot sector; the
-library does not parse partition tables or apply the boot sector's
-`PartitionOffset`.
+The repository also builds a portable C11 library declared by
+`<exfat_resize.h>`. It accepts caller-provided sector-addressed device and
+allocation interfaces and an optional operation monitor for cooperative
+cancellation and structured stage events. Sector zero must be the exFAT main
+boot sector, and the caller must provide exclusive access and the verified
+backup required by [Safety](#safety).
 
-Read and write callbacks always receive a nonzero, in-range transfer. Their
-buffer has capacity for at least the requested sector count, and they must
-access only the requested bytes and either complete the full transfer or
-report failure. The library handles zero-sector operations itself without
-invoking a callback. The installed header defines the complete callback
-contract, including synchronization and lifetime requirements.
-
-The caller supplies exclusive access, a target size in bytes, and allocation
-callbacks:
+The minimal call shape is:
 
 ```c
-static void *allocate(void *context, size_t size)
-{
-    (void)context;
-    return malloc(size);
-}
-
-static void deallocate(void *context, void *memory, size_t size)
-{
-    (void)context;
-    (void)size;
-    free(memory);
-}
-
-struct exfat_resize_options options = {
-    .allocator = {
-        .allocate = allocate,
-        .deallocate = deallocate
-    }
+struct exfat_resize_allocator allocator = {
+    .allocate = allocate,
+    .deallocate = deallocate
 };
-
 enum exfat_resize_stage stage;
-error = exfat_resize(&device, target_size, &options, &stage);
+error = exfat_resize(&device, target_size, &allocator, NULL, &stage);
 ```
 
-Before writing, the library snapshots the used source FAT and rebuilds a
-validated in-memory allocation model covering the target cluster heap. See the
-transaction document's [memory requirements](docs/TRANSACTION.md#memory-requirements)
-for allocator-backed working-memory sizes, lifetimes, and backing options.
-The bundled CLI supplies those allocations with `malloc`, so its working set is
-ordinary heap memory. Peak heap use includes the 1 MiB I/O buffer, 768 KiB cache
-block, source-FAT snapshot, four-byte-per-target-cluster allocation model, and
-directory worklist described there.
-
-When an error is returned, `stage` describes the recovery boundary reached:
-
-- `PREFLIGHT`: no write was attempted;
-- `PREPARING`: the source layout remains authoritative; run a filesystem
-  checker before retrying;
-- `RESIZING`: authoritative source metadata may have been overwritten; restore
-  the verified backup;
-- `FINALIZING`: the resized target was synchronized, but its final dirty state
-  is uncertain; run a filesystem checker and do not retry the resize.
-
-On success, `stage` is `COMPLETED`. The stage pointer may be `NULL` when the
-caller does not need recovery guidance. See
-[docs/TRANSACTION.md](docs/TRANSACTION.md) for the exact write ordering and
-failure guarantees.
+Read the [library reference documentation](docs/LIBRARY.md) for the complete
+device, allocator, monitor, event, cancellation, lifetime, result, recovery,
+and compatibility contracts. Exact write ordering, durability guarantees, and
+allocator-backed [memory requirements](docs/TRANSACTION.md#memory-requirements)
+are documented separately.
 
 Downstream CMake projects can use `add_subdirectory()` and link
 `exfat_resize::exfat_resize`. The install target also provides the header,
 static library, CLI executable, CMake package files, and a manual page on macOS
-and Linux. This README and the exact MIT license are installed under CMake's
-`CMAKE_INSTALL_DOCDIR`.
+and Linux. This README, the library and transaction references, and the exact
+MIT license are installed under CMake's `CMAKE_INSTALL_DOCDIR`.
 Installed CMake packages use same-major version compatibility, so consumers
-can require a compatible 1.x release:
+can require a compatible 2.x release:
 
-    find_package(exfat_resize 1.0 CONFIG REQUIRED)
-
-The public C API remains source compatible throughout the 1.x series. Build
-consumers with the header and static library from the same release and with
-ABI-compatible compiler settings for the target platform. Compatibility
-between separately compiled artifacts from different releases or deliberately
-different compiler ABIs is not promised. Incompatible source changes require a
-new major release.
+    find_package(exfat_resize 2.0 CONFIG REQUIRED)
 
 ## Installing prebuilt CLI binaries
 

@@ -277,7 +277,7 @@ static void run_fault_case(const struct memory_operation *baseline,
     const struct exfat_resize_geometry *target)
 {
 	struct test_allocator allocator = { 0 };
-	struct exfat_resize_options options = test_allocator_options(&allocator);
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
 	struct exfat_fixture fixture;
 	enum exfat_resize_error error;
 	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
@@ -290,7 +290,7 @@ static void run_fault_case(const struct memory_operation *baseline,
 	} else {
 		memory_block_device_fail_operation(&fixture.memory, operation_index, 1234);
 	}
-	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &options, &stage);
+	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &callbacks, &stage);
 	CHECK(error == EXFAT_RESIZE_IO_ERROR);
 	CHECK(stage ==
 	    expected_stage(baseline, operation_index, first_transaction_operation, first_fat_write));
@@ -309,7 +309,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 {
 	struct test_allocator allocator = { 0 };
 	struct exfat_resize_geometry target;
-	struct exfat_resize_options options = test_allocator_options(&allocator);
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
 	struct exfat_fixture fixture;
 	struct memory_operation *baseline = NULL;
 	enum exfat_resize_error error;
@@ -327,7 +327,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	CHECK(initialize_durable_fixture(&fixture, target_sector_count) == 0);
 	error = plan_growth(&fixture, target_sector_count, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &options, &stage);
+	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &callbacks, &stage);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
 	CHECK(allocator.successful_allocations == allocator.deallocation_calls);

@@ -114,12 +114,12 @@ static void deallocate_callback(void *context, void *memory, size_t size)
 	test_allocator_deallocate(context, memory, size);
 }
 
-struct exfat_resize_options test_allocator_options(struct test_allocator *allocator)
+struct exfat_resize_allocator test_allocator_callbacks(struct test_allocator *allocator)
 {
-	struct exfat_resize_options options;
+	struct exfat_resize_allocator callbacks;
 
-	options.allocator.context = allocator;
-	options.allocator.allocate = allocate_callback;
-	options.allocator.deallocate = deallocate_callback;
-	return options;
+	callbacks.context = allocator;
+	callbacks.allocate = allocate_callback;
+	callbacks.deallocate = deallocate_callback;
+	return callbacks;
 }

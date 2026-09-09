@@ -58,6 +58,7 @@ if(TEST_CASE STREQUAL "help")
             "Safety:"
             "Documentation:"
             "Make and verify a backup"
+            "Ctrl+C and Ctrl+Break request cooperative cancellation at the next safe boundary"
             "Read the safety requirements"
             "README.md distributed with exfat-resize"
             "https://github.com/huven/exfat-resize#safety"

@@ -26,6 +26,10 @@ When
 is omitted, the filesystem grows to all space available in the backing object.
 When it is supplied, the requested size is rounded down to a whole filesystem
 sector.
+.PP
+During the operation, the command reports each transaction stage.
+After successful completion, it reports the resulting filesystem size in
+bytes.
 .SH ARGUMENTS
 .TP
 .I DEVICE
@@ -76,11 +80,18 @@ A failed or interrupted resize is not automatically repaired, rolled back, or
 resumable.
 Follow the recovery guidance printed with an error.
 .PP
+Ctrl-C requests cooperative cancellation.
+Work already in progress is allowed to reach the next safe boundary.
+When the request is observed before completion, the command prints the
+applicable recovery guidance, performs normal device cleanup, and exits with
+status 130.
+Further Ctrl-C requests remain handled during cleanup.
+.PP
 Every normal error exit prints stage-specific recovery guidance.
 If the command terminates abnormally without printing stage-specific recovery
-guidance, for example because of an interruption, process crash, or power loss,
-assume that destructive metadata updates may have started; do not retry the
-resize, and restore the verified backup.
+guidance, for example because of forced termination, a process crash, or power
+loss, assume that destructive metadata updates may have started; do not retry
+the resize, and restore the verified backup.
 Follow a less conservative checker-and-retry path only when the command
 explicitly reports that it is safe.
 .SH "FILESYSTEM COMPATIBILITY"
@@ -160,8 +171,9 @@ exfat-resize /dev/your-exfat-device
 .SH "EXIT STATUS"
 The command exits with status zero after a successful resize or after showing
 help or version information.
-It exits with a nonzero status when usage is invalid, the device cannot be
-opened, validation fails, or the resize does not complete successfully.
+It exits with status 130 when Ctrl-C cancellation is observed.
+It exits with another nonzero status when usage is invalid, the device cannot
+be opened, validation fails, or the resize does not complete successfully.
 .SH PLATFORMS
 Linux and macOS are supported.
 Raw block devices normally require privileges appropriate for the platform and

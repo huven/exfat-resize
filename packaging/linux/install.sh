@@ -31,6 +31,8 @@ install -m 0644 "$archive_directory/CONTRIBUTING.md" \
 	"$install_root/share/doc/exfat-resize/CONTRIBUTING.md"
 install -m 0644 "$archive_directory/LICENSE" "$install_root/share/doc/exfat-resize/LICENSE"
 install -m 0644 "$archive_directory/README.md" "$install_root/share/doc/exfat-resize/README.md"
+install -m 0644 "$archive_directory/docs/LIBRARY.md" \
+	"$install_root/share/doc/exfat-resize/docs/LIBRARY.md"
 install -m 0644 "$archive_directory/docs/PARTITIONING.md" \
 	"$install_root/share/doc/exfat-resize/docs/PARTITIONING.md"
 install -m 0644 "$archive_directory/docs/TRANSACTION.md" \

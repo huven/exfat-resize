@@ -8,6 +8,7 @@
 #include "boot_region.h"
 #include "checked_math.h"
 #include "endian.h"
+#include "event.h"
 #include "geometry.h"
 #include "sector_adapter.h"
 
@@ -37,12 +38,17 @@ enum {
 
 #define EXFAT_FAT_BAD_CLUSTER UINT32_C(0xfffffff7)
 #define EXFAT_FAT_END_OF_CHAIN UINT32_C(0xffffffff)
+#define EXFAT_CLUSTER_CHECKPOINT_INTERVAL UINT32_C(1048576)
 #define EXFAT_MAX_DIRECTORY_SIZE (UINT64_C(256) * 1024 * 1024)
 #define EXFAT_IO_BUFFER_SIZE ((size_t)UINT32_C(1048576))
+#define EXFAT_IO_MAX_CHUNK_SIZE ((size_t)UINT32_C(1048576))
+#define EXFAT_MEMORY_MAX_CHUNK_SIZE UINT32_C(67108864)
 #define EXFAT_SECTOR_CACHE_SIZE ((size_t)UINT32_C(262144))
 
 _Static_assert(EXFAT_SECTOR_CACHE_SIZE >= EXFAT_RESIZE_MAX_SECTOR_SIZE,
     "a sector cache must hold at least one maximum-sized sector");
+_Static_assert(EXFAT_IO_MAX_CHUNK_SIZE >= EXFAT_RESIZE_MAX_SECTOR_SIZE,
+    "an I/O chunk must hold at least one maximum-sized sector");
 
 /*
  * A nonzero model value means that the cluster is allocated. Values 2 and
@@ -142,6 +148,7 @@ struct resize_context {
 	const struct exfat_resize_block_device *device;
 	struct exfat_resize_sector_adapter sector_adapter;
 	struct exfat_resize_allocator allocator;
+	struct exfat_resize_monitor monitor;
 	enum exfat_resize_stage stage;
 	struct exfat_resize_geometry source;
 	struct exfat_resize_geometry target;
@@ -164,10 +171,52 @@ struct resize_context {
 	/* Indexed by target cluster minus 2; one entry for every target cluster. */
 	uint32_t *allocation_model;
 	size_t allocation_model_size;
+	uint32_t allocation_claims_since_checkpoint;
+	uint32_t displaced_clusters_since_checkpoint;
 	int found_bitmap;
 };
 
 enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
+
+/* Operation monitoring */
+
+static void enter_stage(
+    struct resize_context *context, enum exfat_resize_stage stage, uint64_t value)
+{
+	context->stage = stage;
+	exfat_resize_report_event(&context->monitor, EXFAT_RESIZE_EVENT_LEVEL_INFO,
+	    EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED, (uint64_t)stage, value, 0);
+}
+
+static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)
+{
+	context->allocation_claims_since_checkpoint = 0;
+	context->displaced_clusters_since_checkpoint = 0;
+	if (context->monitor.cancellation_requested != NULL &&
+	    context->monitor.cancellation_requested(context->monitor.context) != 0)
+		return EXFAT_RESIZE_CANCELLED;
+	return EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error zero_allocation_model(struct resize_context *context)
+{
+	enum exfat_resize_error error;
+	size_t byte_offset = 0;
+
+	while (byte_offset < context->allocation_model_size) {
+		size_t remaining = context->allocation_model_size - byte_offset;
+		size_t byte_count = remaining > EXFAT_MEMORY_MAX_CHUNK_SIZE
+		    ? (size_t)EXFAT_MEMORY_MAX_CHUNK_SIZE
+		    : remaining;
+
+		error = cancellation_checkpoint(context);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
+		memset((unsigned char *)context->allocation_model + byte_offset, 0, byte_count);
+		byte_offset += byte_count;
+	}
+	return EXFAT_RESIZE_SUCCESS;
+}
 
 /* Sector I/O */
 
@@ -177,15 +226,17 @@ static enum exfat_resize_error flush_cache(
 	struct sector_cache *cache = &context->caches[cache_index];
 	enum exfat_resize_error error;
 	uint32_t dirty_count;
-	size_t byte_count;
+	size_t buffer_size;
 
+	if (cache->dirty_first > cache->dirty_end || cache->dirty_end > cache->sector_capacity)
+		return EXFAT_RESIZE_INTERNAL_ERROR;
 	if (cache->dirty_first == cache->dirty_end)
 		return EXFAT_RESIZE_SUCCESS;
 	dirty_count = cache->dirty_end - cache->dirty_first;
-	byte_count = (size_t)dirty_count * context->sector_size;
+	buffer_size = (size_t)(cache->sector_capacity - cache->dirty_first) * context->sector_size;
 	error = exfat_resize_block_device_write(context->device,
 	    cache->first_sector + cache->dirty_first, dirty_count,
-	    cache->data + (size_t)cache->dirty_first * context->sector_size, byte_count);
+	    cache->data + (size_t)cache->dirty_first * context->sector_size, buffer_size);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	cache->dirty_first = 0;
@@ -198,6 +249,14 @@ static int cache_contains_sector(const struct sector_cache *cache, uint64_t sect
 	return sector >= cache->first_sector && sector - cache->first_sector < cache->sector_count;
 }
 
+static int cache_contains_range(
+    const struct sector_cache *cache, uint64_t first_sector, uint32_t sector_count)
+{
+	if (first_sector < cache->first_sector || sector_count > cache->sector_count)
+		return 0;
+	return first_sector - cache->first_sector <= cache->sector_count - sector_count;
+}
+
 static enum exfat_resize_error load_cache(struct resize_context *context,
     enum sector_cache_index cache_index,
     uint64_t first_sector,
@@ -205,21 +264,22 @@ static enum exfat_resize_error load_cache(struct resize_context *context,
 {
 	struct sector_cache *cache = &context->caches[cache_index];
 	enum exfat_resize_error error;
-	size_t byte_count;
 
-	if (cache_contains_sector(cache, first_sector))
-		return EXFAT_RESIZE_SUCCESS;
 	if (sector_count == 0 || sector_count > cache->sector_capacity)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
+	if (cache_contains_range(cache, first_sector, sector_count))
+		return EXFAT_RESIZE_SUCCESS;
 
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = flush_cache(context, cache_index);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
 	cache->sector_count = 0;
-	byte_count = (size_t)sector_count * context->sector_size;
-	error = exfat_resize_block_device_read(
-	    context->device, first_sector, sector_count, cache->data, byte_count);
+	error = exfat_resize_block_device_read(context->device, first_sector, sector_count, cache->data,
+	    (size_t)cache->sector_capacity * context->sector_size);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	cache->first_sector = first_sector;
@@ -257,7 +317,10 @@ static int cluster_is_valid(const struct exfat_resize_geometry *geometry, uint32
 
 static enum exfat_resize_error load_source_fat(struct resize_context *context)
 {
+	enum exfat_resize_error error;
 	uint64_t allocation_size;
+	uint32_t loaded_sector_count = 0;
+	uint32_t read_sector_capacity;
 	uint32_t sector_count;
 
 	sector_count =
@@ -273,8 +336,25 @@ static enum exfat_resize_error load_source_fat(struct resize_context *context)
 	if (context->source_fat == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
 
-	return exfat_resize_block_device_read(context->device, context->source.fat_offset, sector_count,
-	    context->source_fat, context->source_fat_size);
+	read_sector_capacity = (uint32_t)(EXFAT_IO_MAX_CHUNK_SIZE / context->sector_size);
+	while (loaded_sector_count < sector_count) {
+		uint32_t remaining_sector_count = sector_count - loaded_sector_count;
+		uint32_t read_sector_count = remaining_sector_count > read_sector_capacity
+		    ? read_sector_capacity
+		    : remaining_sector_count;
+		size_t byte_offset = (size_t)loaded_sector_count * context->sector_size;
+
+		error = cancellation_checkpoint(context);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
+		error = exfat_resize_block_device_read(context->device,
+		    context->source.fat_offset + loaded_sector_count, read_sector_count,
+		    context->source_fat + byte_offset, context->source_fat_size - byte_offset);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
+		loaded_sector_count += read_sector_count;
+	}
+	return EXFAT_RESIZE_SUCCESS;
 }
 
 static enum exfat_resize_error source_fat_get(
@@ -361,6 +441,13 @@ static enum exfat_resize_error model_entry_for_source_cluster(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
+static enum exfat_resize_error allocation_claim_checkpoint(struct resize_context *context)
+{
+	if (++context->allocation_claims_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
+		return EXFAT_RESIZE_SUCCESS;
+	return cancellation_checkpoint(context);
+}
+
 static enum exfat_resize_error claim_allocation_stream(
     struct resize_context *context, const struct allocation_stream *stream)
 {
@@ -390,6 +477,9 @@ static enum exfat_resize_error claim_allocation_stream(
 		    (uint64_t)context->source.cluster_count + 2)
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
 		for (index = 0; index < cluster_count; ++index) {
+			error = allocation_claim_checkpoint(context);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
 			error = model_entry_for_source_cluster(
 			    context, stream->first_cluster + index, &model_entry);
 			if (error != EXFAT_RESIZE_SUCCESS)
@@ -412,6 +502,9 @@ static enum exfat_resize_error claim_allocation_stream(
 
 	cluster = stream->first_cluster;
 	for (index = 0; index < cluster_count; ++index) {
+		error = allocation_claim_checkpoint(context);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
 		error = model_entry_for_source_cluster(context, cluster, &model_entry);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
@@ -890,6 +983,11 @@ static enum exfat_resize_error push_directory(struct resize_context *context,
 	items = context->allocator.allocate(context->allocator.context, size);
 	if (items == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
+	/*
+	 * Keep this preflight-only growth as one copy. Directory traversal owns
+	 * cancellation checkpoints; chunking would only benefit worklists with
+	 * millions of pending directories.
+	 */
 	if (worklist->count != 0)
 		memcpy(items, worklist->items, worklist->count * sizeof(*items));
 	if (worklist->items != NULL) {
@@ -915,7 +1013,7 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 	enum exfat_resize_error error;
 	uint64_t valid_data_length;
 	uint16_t attributes;
-	uint16_t calculated_checksum;
+	uint16_t calculated_checksum = 0;
 	uint8_t secondary_count;
 	uint32_t index;
 	int is_directory;
@@ -1380,17 +1478,27 @@ static enum exfat_resize_error copy_cluster_run(struct resize_context *context,
 		uint32_t count = remaining > context->io_sector_capacity ? context->io_sector_capacity
 		                                                         : (uint32_t)remaining;
 
+		error = cancellation_checkpoint(context);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
 		error = exfat_resize_block_device_read(context->device, source_sector + copied, count,
-		    context->io_buffer, (size_t)count * context->sector_size);
+		    context->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		error = exfat_resize_block_device_write(context->device, target_sector + copied, count,
-		    context->io_buffer, (size_t)count * context->sector_size);
+		    context->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		copied += count;
 	}
 	return EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error displaced_cluster_checkpoint(struct resize_context *context)
+{
+	if (++context->displaced_clusters_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
+		return EXFAT_RESIZE_SUCCESS;
+	return cancellation_checkpoint(context);
 }
 
 static enum exfat_resize_error move_displaced_clusters(struct resize_context *context)
@@ -1404,6 +1512,9 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 		uint32_t target_cluster;
 		uint32_t *model_entry;
 
+		error = displaced_cluster_checkpoint(context);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
 		error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
@@ -1423,6 +1534,9 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 			++source_index;
 			if (source_index == context->displaced_cluster_count)
 				break;
+			error = displaced_cluster_checkpoint(context);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
 			error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
@@ -1479,6 +1593,12 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 		size_t entry_count = byte_count / 4;
 		size_t index;
 
+		/* run_transaction() checks before the first output buffer. */
+		if (fat_sector != 0) {
+			error = cancellation_checkpoint(context);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
+		}
 		memset(context->io_buffer, 0, byte_count);
 		for (index = 0; index < entry_count; ++index) {
 			uint64_t entry = first_entry + index;
@@ -1494,7 +1614,8 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 				return EXFAT_RESIZE_INTERNAL_ERROR;
 		}
 		error = exfat_resize_block_device_write(context->device,
-		    context->target.fat_offset + fat_sector, sector_count, context->io_buffer, byte_count);
+		    context->target.fat_offset + fat_sector, sector_count, context->io_buffer,
+		    EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		fat_sector += sector_count;
@@ -1505,6 +1626,7 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 static enum exfat_resize_error write_target_bitmap(struct resize_context *context)
 {
 	enum exfat_resize_error error;
+	const size_t generation_byte_capacity = EXFAT_CLUSTER_CHECKPOINT_INTERVAL / 8;
 	uint64_t bitmap_sector;
 	uint64_t allocation_sector_count;
 	uint64_t output_sector = 0;
@@ -1523,23 +1645,35 @@ static enum exfat_resize_error write_target_bitmap(struct resize_context *contex
 		    ? context->io_sector_capacity
 		    : (uint32_t)remaining;
 		size_t byte_count = (size_t)sector_count * context->sector_size;
-		size_t byte_index;
+		size_t byte_index = 0;
 
-		memset(context->io_buffer, 0, byte_count);
-		for (byte_index = 0; byte_index < byte_count; ++byte_index) {
-			unsigned int bit_index;
+		while (byte_index < byte_count) {
+			size_t remaining_byte_count = byte_count - byte_index;
+			size_t generation_byte_count = remaining_byte_count > generation_byte_capacity
+			    ? generation_byte_capacity
+			    : remaining_byte_count;
+			size_t generation_end = byte_index + generation_byte_count;
 
-			for (bit_index = 0; bit_index < 8; ++bit_index, ++target_bit) {
-				if (target_bit >= context->target.cluster_count)
-					break;
-				if (context->allocation_model[target_bit] != 0) {
-					context->io_buffer[byte_index] |= (unsigned char)(1u << bit_index);
-					++context->used_cluster_count;
+			error = cancellation_checkpoint(context);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
+			memset(context->io_buffer + byte_index, 0, generation_byte_count);
+			for (; byte_index < generation_end; ++byte_index) {
+				unsigned int bit_index;
+
+				for (bit_index = 0; bit_index < 8; ++bit_index, ++target_bit) {
+					if (target_bit >= context->target.cluster_count)
+						break;
+					if (context->allocation_model[target_bit] != 0) {
+						context->io_buffer[byte_index] |=
+						    (unsigned char)(1u << bit_index);
+						++context->used_cluster_count;
+					}
 				}
 			}
 		}
 		error = exfat_resize_block_device_write(context->device, bitmap_sector + output_sector,
-		    sector_count, context->io_buffer, byte_count);
+		    sector_count, context->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		output_sector += sector_count;
@@ -1549,10 +1683,13 @@ static enum exfat_resize_error write_target_bitmap(struct resize_context *contex
 
 /* Resize transaction */
 
+/*
+ * Populate filesystem-derived state after exfat_resize() has initialized the
+ * operation-wide allocator, monitor, and recovery stage.
+ */
 static enum exfat_resize_error prepare_context(struct resize_context *context,
     const struct exfat_resize_block_device *device,
-    uint64_t target_size,
-    const struct exfat_resize_options *options)
+    uint64_t target_size)
 {
 	struct allocation_stream root;
 	struct exfat_resize_device_geometry device_geometry;
@@ -1564,9 +1701,6 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	uint64_t target_sector_count;
 	size_t cache_index;
 
-	*context = (struct resize_context){ 0 };
-	context->allocator = options->allocator;
-	context->stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
 	context->io_buffer =
 	    context->allocator.allocate(context->allocator.context, EXFAT_IO_BUFFER_SIZE);
 	if (context->io_buffer == NULL)
@@ -1604,8 +1738,7 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	error = validate_reserved_fat_entries(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	context->cluster_size =
-	    (uint64_t)context->source.sectors_per_cluster * context->sector_size;
+	context->cluster_size = (uint64_t)context->source.sectors_per_cluster * context->sector_size;
 
 	heap_movement =
 	    (uint64_t)context->target.cluster_heap_offset - context->source.cluster_heap_offset;
@@ -1644,14 +1777,16 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	}
 
 	model_size = (uint64_t)context->target.cluster_count * sizeof(*context->allocation_model);
-	context->allocation_model_size = (size_t)model_size;
-	if (context->allocation_model_size != model_size)
+	if (model_size > SIZE_MAX)
 		return EXFAT_RESIZE_ARITHMETIC_OVERFLOW;
+	context->allocation_model_size = (size_t)model_size;
 	context->allocation_model =
 	    context->allocator.allocate(context->allocator.context, context->allocation_model_size);
 	if (context->allocation_model == NULL)
 		return EXFAT_RESIZE_OUT_OF_MEMORY;
-	memset(context->allocation_model, 0, context->allocation_model_size);
+	error = zero_allocation_model(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 
 	root.first_cluster = context->source.root_directory_cluster;
 	root.data_length = 0;
@@ -1688,7 +1823,10 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	 * are reserved for preflight and are never consulted below. The target
 	 * directory cache has not yet been populated.
 	 */
-	context->stage = EXFAT_RESIZE_STAGE_PREPARING;
+	enter_stage(context, EXFAT_RESIZE_STAGE_PREPARING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error =
 	    exfat_resize_set_volume_dirty(context->device, context->io_buffer, EXFAT_IO_BUFFER_SIZE, 1);
 	if (error != EXFAT_RESIZE_SUCCESS)
@@ -1698,7 +1836,13 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_RESIZING;
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	enter_stage(context, EXFAT_RESIZE_STAGE_RESIZING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = write_target_fat(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
@@ -1723,19 +1867,26 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	error = exfat_resize_block_device_sync(context->device);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 
 	error = exfat_resize_write_boot_regions(context->device, &context->target,
 	    context->used_cluster_count, context->io_buffer, EXFAT_IO_BUFFER_SIZE);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_FINALIZING;
+	enter_stage(context, EXFAT_RESIZE_STAGE_FINALIZING, 0);
+	error = cancellation_checkpoint(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error =
 	    exfat_resize_set_volume_dirty(context->device, context->io_buffer, EXFAT_IO_BUFFER_SIZE, 0);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 
-	context->stage = EXFAT_RESIZE_STAGE_COMPLETED;
+	enter_stage(context, EXFAT_RESIZE_STAGE_COMPLETED,
+	    context->target.volume_sector_count * (uint64_t)context->sector_size);
 	return EXFAT_RESIZE_SUCCESS;
 }
 
@@ -1766,7 +1917,8 @@ static void release_context(struct resize_context *context)
 
 enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *device,
     uint64_t target_size,
-    const struct exfat_resize_options *options,
+    const struct exfat_resize_allocator *allocator,
+    const struct exfat_resize_monitor *monitor,
     enum exfat_resize_stage *stage)
 {
 	struct resize_context context = { .stage = EXFAT_RESIZE_STAGE_PREFLIGHT };
@@ -1780,13 +1932,27 @@ enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *dev
 		error = EXFAT_RESIZE_INVALID_ARGUMENT;
 		goto out;
 	}
-	if (options == NULL || options->allocator.allocate == NULL ||
-	    options->allocator.deallocate == NULL) {
+	if (allocator == NULL || allocator->allocate == NULL || allocator->deallocate == NULL) {
 		error = EXFAT_RESIZE_INVALID_ARGUMENT;
 		goto out;
 	}
+	context.allocator = *allocator;
+	if (monitor != NULL)
+		context.monitor = *monitor;
+	/*
+	 * The context starts at PREFLIGHT for early-error recovery reporting.
+	 * Delay the corresponding event until structural arguments are valid so
+	 * rejected calls do not invoke monitor callbacks.
+	 */
+	enter_stage(&context, EXFAT_RESIZE_STAGE_PREFLIGHT, 0);
+	error = cancellation_checkpoint(&context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto out;
 
-	error = prepare_context(&context, device, target_size, options);
+	error = prepare_context(&context, device, target_size);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		goto out;
+	error = cancellation_checkpoint(&context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		goto out;
 

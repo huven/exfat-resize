@@ -49,12 +49,12 @@ static void test_checked_ceil_divide(void)
 static void test_allocator_tracking(void)
 {
 	struct test_allocator allocator = { 0 };
-	struct exfat_resize_options options = test_allocator_options(&allocator);
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
 	void *first;
 	void *second;
 
-	first = options.allocator.allocate(options.allocator.context, 7);
-	second = options.allocator.allocate(options.allocator.context, 11);
+	first = callbacks.allocate(callbacks.context, 7);
+	second = callbacks.allocate(callbacks.context, 11);
 	CHECK(first != NULL);
 	CHECK(second != NULL);
 	CHECK(allocator.allocation_attempts == 2);
@@ -63,10 +63,10 @@ static void test_allocator_tracking(void)
 	CHECK(test_allocator_live_count(&allocator) == 2);
 	CHECK(test_allocator_live_bytes(&allocator) == 18);
 
-	options.allocator.deallocate(options.allocator.context, first, 7);
+	callbacks.deallocate(callbacks.context, first, 7);
 	CHECK(test_allocator_live_count(&allocator) == 1);
 	CHECK(test_allocator_live_bytes(&allocator) == 11);
-	options.allocator.deallocate(options.allocator.context, second, 11);
+	callbacks.deallocate(callbacks.context, second, 11);
 	CHECK(allocator.deallocation_calls == 2);
 	CHECK(test_allocator_is_clean(&allocator));
 }
@@ -74,17 +74,17 @@ static void test_allocator_tracking(void)
 static void test_allocator_failure_injection(void)
 {
 	struct test_allocator allocator = { 0 };
-	struct exfat_resize_options options = test_allocator_options(&allocator);
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
 	void *memory;
 
 	test_allocator_set_fail_on_attempt(&allocator, 2);
-	memory = options.allocator.allocate(options.allocator.context, 7);
+	memory = callbacks.allocate(callbacks.context, 7);
 	CHECK(memory != NULL);
-	CHECK(options.allocator.allocate(options.allocator.context, 11) == NULL);
+	CHECK(callbacks.allocate(callbacks.context, 11) == NULL);
 	CHECK(allocator.allocation_attempts == 2);
 	CHECK(allocator.successful_allocations == 1);
 	CHECK(allocator.largest_requested_size == 11);
-	options.allocator.deallocate(options.allocator.context, memory, 7);
+	callbacks.deallocate(callbacks.context, memory, 7);
 	CHECK(test_allocator_is_clean(&allocator));
 }
 

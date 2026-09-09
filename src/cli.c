@@ -29,6 +29,8 @@ static const char target_description[] =
     "Regular image file, drive letter such as E:, or\n"
     "                     volume-GUID path with the exFAT main boot sector\n"
     "                     at sector zero";
+static const char platform_safety[] =
+    "  Ctrl+C and Ctrl+Break request cooperative cancellation at the next safe boundary.\n";
 static const char documentation_lead[] = "";
 static const char platform_options[] =
     "  --grow-partition   Grow a basic partition to explicit SIZE when needed\n";
@@ -40,6 +42,8 @@ static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n";
 static const char introduction[] = "Grow an existing exFAT filesystem.";
 static const char target_description[] = "Regular file or raw block device with the exFAT\n"
                                          "                     main boot sector at sector zero";
+static const char platform_safety[] =
+    "  Ctrl-C requests cooperative cancellation at the next safe boundary.\n";
 static const char documentation_lead[] = "  See exfat-resize(8).\n";
 static const char platform_options[] = "";
 static const char platform_note[] = "";
@@ -83,6 +87,7 @@ static void print_help(void)
 	       "\n"
 	       "Safety:\n"
 	       "  Make and verify a backup before using this tool.\n"
+	       "%s"
 	       "\n"
 	       "Documentation:\n"
 	       "%s"
@@ -90,8 +95,8 @@ static void print_help(void)
 	       "  recovery instructions in README.md distributed with exfat-resize or at:\n"
 	       "    https://github.com/huven/exfat-resize#safety\n"
 	       "%s",
-	    usage, introduction, target_name, target_description, platform_options, documentation_lead,
-	    platform_note);
+	    usage, introduction, target_name, target_description, platform_options, platform_safety,
+	    documentation_lead, platform_note);
 }
 
 static const char *resize_error(enum exfat_resize_error error)
@@ -139,6 +144,8 @@ static const char *resize_error(enum exfat_resize_error error)
 		return "expanded FAT conflicts with a source bad cluster";
 	case EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING:
 		return "filesystem sector size is incompatible with device sector size";
+	case EXFAT_RESIZE_CANCELLED:
+		return "operation cancelled";
 	}
 	return "unknown error";
 }
@@ -274,13 +281,108 @@ static void print_partition_update_uncertain_guidance(void)
 	    "verify the partition layout and do not retry or shrink it\n");
 }
 
-int cli_main(int argc, char **argv)
+static int cancellation_requested(const struct cli_cancellation *cancellation)
 {
-	struct exfat_resize_options options;
+	return cancellation != NULL && cancellation->requested != NULL &&
+	    cancellation->requested(cancellation->context) != 0;
+}
+
+struct cli_monitor_context {
+	const struct cli_cancellation *cancellation;
+	const char *path;
+};
+
+static int monitor_cancellation_requested(void *opaque)
+{
+	const struct cli_monitor_context *context = opaque;
+
+	return cancellation_requested(context->cancellation);
+}
+
+static void report_resize_event(void *opaque, const struct exfat_resize_event *event)
+{
+	const struct cli_monitor_context *context = opaque;
+
+	if (event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED) {
+		switch (event->values[0]) {
+		case EXFAT_RESIZE_STAGE_PREFLIGHT:
+			printf("exfat-resize: checking filesystem\n");
+			goto flush;
+		case EXFAT_RESIZE_STAGE_PREPARING:
+			printf("exfat-resize: preparing resize\n");
+			goto flush;
+		case EXFAT_RESIZE_STAGE_RESIZING:
+			printf("exfat-resize: resizing filesystem\n");
+			goto flush;
+		case EXFAT_RESIZE_STAGE_FINALIZING:
+			printf("exfat-resize: finalizing resize\n");
+			goto flush;
+		case EXFAT_RESIZE_STAGE_COMPLETED:
+			printf(
+			    "exfat-resize: resized %s to %" PRIu64 " bytes\n", context->path, event->values[1]);
+			goto flush;
+		}
+	}
+	printf("exfat-resize: event level=%d code=%" PRIu32 " values=[%" PRIu64 ", %" PRIu64
+	       ", %" PRIu64 "]\n",
+	    (int)event->level, event->code, event->values[0], event->values[1], event->values[2]);
+
+flush:
+	(void)fflush(stdout);
+}
+
+static void print_recovery_guidance(
+    enum exfat_resize_stage stage, enum device_partition_state partition_state)
+{
+	switch (stage) {
+	case EXFAT_RESIZE_STAGE_PREFLIGHT:
+		print_no_write_guidance();
+		if (partition_state == DEVICE_PARTITION_GROWN)
+			print_partition_grown_guidance();
+		break;
+	case EXFAT_RESIZE_STAGE_PREPARING:
+		fprintf(stderr,
+		    "exfat-resize: the source filesystem remains authoritative; run a "
+		    "filesystem checker before retrying\n");
+		break;
+	case EXFAT_RESIZE_STAGE_RESIZING:
+		fprintf(stderr,
+		    "exfat-resize: the filesystem may be incomplete; restore the verified backup\n");
+		break;
+	case EXFAT_RESIZE_STAGE_FINALIZING:
+		fprintf(stderr,
+		    "exfat-resize: the resize completed, but its dirty state is uncertain; run a "
+		    "filesystem checker and do not retry the resize\n");
+		break;
+	case EXFAT_RESIZE_STAGE_COMPLETED:
+		break;
+	}
+}
+
+static void print_resize_failure(const struct device *device,
+    const char *path,
+    enum exfat_resize_error result,
+    enum exfat_resize_stage stage,
+    enum device_partition_state partition_state)
+{
+	if (result == EXFAT_RESIZE_CANCELLED)
+		fprintf(stderr, "exfat-resize: interrupted by user\n");
+	else
+		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
+	if (result == EXFAT_RESIZE_IO_ERROR && device->io_error_operation != NULL)
+		print_device_io_error(device, path);
+	print_recovery_guidance(stage, partition_state);
+}
+
+int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
+{
+	struct exfat_resize_allocator allocator;
+	struct exfat_resize_monitor monitor;
+	struct cli_monitor_context monitor_context;
 	struct device device;
 	enum device_partition_state partition_state = DEVICE_PARTITION_UNCHANGED;
 	enum exfat_resize_error result;
-	enum exfat_resize_stage stage;
+	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
 	const char *positional[2];
 	uint64_t target = 0;
 	char error[512];
@@ -357,6 +459,12 @@ int cli_main(int argc, char **argv)
 	}
 #endif
 
+	if (cancellation_requested(cancellation)) {
+		fprintf(stderr, "exfat-resize: interrupted by user\n");
+		print_no_write_guidance();
+		return CLI_CANCELLED_EXIT_STATUS;
+	}
+
 	device_init(&device);
 	if (device_open(&device, positional[0], error, sizeof(error)) != 0) {
 		fprintf(stderr, "exfat-resize: %s\n", error);
@@ -366,6 +474,7 @@ int cli_main(int argc, char **argv)
 	if (positional_count != 2)
 		target = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
 	if (grow_partition) {
+		enum device_partition_growth_result partition_result;
 		uint64_t current_size;
 
 		if (device.block_device.sector_count >
@@ -390,76 +499,79 @@ int cli_main(int argc, char **argv)
 			print_no_write_guidance();
 			goto out;
 		}
-		if (target > current_size &&
-		    device_grow_partition(
-		        &device, positional[0], target, &partition_state, error, sizeof(error)) != 0) {
-			fprintf(stderr, "exfat-resize: %s\n", error);
-			if (partition_state == DEVICE_PARTITION_GROWN)
-				print_partition_grown_guidance();
-			else if (partition_state == DEVICE_PARTITION_UPDATE_ATTEMPTED)
-				print_partition_update_uncertain_guidance();
-			else
-				print_no_write_guidance();
-			if (partition_state != DEVICE_PARTITION_UNCHANGED &&
-			    device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+		if (target > current_size) {
+			if (cancellation_requested(cancellation))
+				goto cancelled;
+			partition_result = device_grow_partition(&device, positional[0], target, cancellation,
+			    &partition_state, error, sizeof(error));
+			if (partition_result == DEVICE_PARTITION_GROWTH_CANCELLED)
+				goto cancelled;
+			if (partition_result != DEVICE_PARTITION_GROWTH_SUCCESS) {
 				fprintf(stderr, "exfat-resize: %s\n", error);
-				fprintf(stderr,
-				    "exfat-resize: the volume may remain mounted; prevent access until the "
-				    "partition layout is verified\n");
+				if (partition_state == DEVICE_PARTITION_GROWN)
+					print_partition_grown_guidance();
+				else if (partition_state == DEVICE_PARTITION_UPDATE_ATTEMPTED)
+					print_partition_update_uncertain_guidance();
+				else
+					print_no_write_guidance();
+				if (partition_state != DEVICE_PARTITION_UNCHANGED &&
+				    device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
+					fprintf(stderr, "exfat-resize: %s\n", error);
+					fprintf(stderr,
+					    "exfat-resize: the volume may remain mounted; prevent access until the "
+					    "partition layout is verified\n");
+				}
+				goto out;
 			}
-			goto out;
 		}
 		if (partition_state == DEVICE_PARTITION_GROWN) {
 			printf("exfat-resize: grew the partition containing %s to %" PRIu64 " bytes\n",
 			    positional[0],
 			    device.block_device.sector_count * (uint64_t)device.block_device.sector_size);
+			if (cancellation_requested(cancellation))
+				goto cancelled;
 		}
 	}
-	options.allocator.context = NULL;
-	options.allocator.allocate = allocate_memory;
-	options.allocator.deallocate = deallocate_memory;
+	allocator.context = NULL;
+	allocator.allocate = allocate_memory;
+	allocator.deallocate = deallocate_memory;
 
-	result = exfat_resize(&device.block_device, target, &options, &stage);
+	monitor_context.cancellation = cancellation;
+	monitor_context.path = positional[0];
+	monitor.context = &monitor_context;
+	monitor.cancellation_requested = cancellation != NULL && cancellation->requested != NULL
+	    ? monitor_cancellation_requested
+	    : NULL;
+	monitor.report_event = report_resize_event;
+
+	result = exfat_resize(&device.block_device, target, &allocator, &monitor, &stage);
+	if (result == EXFAT_RESIZE_CANCELLED)
+		goto cancelled;
 	if (result != EXFAT_RESIZE_SUCCESS) {
-		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
-		if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
-			print_device_io_error(&device, positional[0]);
-		switch (stage) {
-		case EXFAT_RESIZE_STAGE_PREFLIGHT:
-			print_no_write_guidance();
-			if (partition_state == DEVICE_PARTITION_GROWN)
-				print_partition_grown_guidance();
-			break;
-		case EXFAT_RESIZE_STAGE_PREPARING:
-			fprintf(stderr,
-			    "exfat-resize: the source filesystem remains authoritative; run a "
-			    "filesystem checker before retrying\n");
-			break;
-		case EXFAT_RESIZE_STAGE_RESIZING:
-			fprintf(stderr,
-			    "exfat-resize: the filesystem may be incomplete; restore the verified "
-			    "backup\n");
-			break;
-		case EXFAT_RESIZE_STAGE_FINALIZING:
-			fprintf(stderr,
-			    "exfat-resize: the resize completed, but its dirty state is uncertain; "
-			    "run a filesystem checker and do not retry the resize\n");
-			break;
-		case EXFAT_RESIZE_STAGE_COMPLETED:
-			break;
-		}
+		print_resize_failure(&device, positional[0], result, stage, partition_state);
 	}
+	goto dismount;
+
+cancelled:
+	result = EXFAT_RESIZE_CANCELLED;
+	status = CLI_CANCELLED_EXIT_STATUS;
+	print_resize_failure(&device, positional[0], result, stage, partition_state);
+
+dismount:
 	if (device_dismount(&device, positional[0], error, sizeof(error)) != 0) {
 		fprintf(stderr, "exfat-resize: %s\n", error);
 		if (result == EXFAT_RESIZE_SUCCESS)
 			fprintf(stderr,
 			    "exfat-resize: the resize completed and was synchronized; remount the "
 			    "volume and run a filesystem checker; do not retry the resize\n");
+		else if (result == EXFAT_RESIZE_CANCELLED)
+			fprintf(stderr,
+			    "exfat-resize: the volume may remain mounted; prevent access until the "
+			    "recovery procedure is complete\n");
 		goto out;
 	}
 	if (result != EXFAT_RESIZE_SUCCESS)
 		goto out;
-	printf("exfat-resize: resized %s\n", positional[0]);
 	status = EXIT_SUCCESS;
 
 out:

@@ -111,6 +111,7 @@ add_library(
         lib/boot_region.c
         lib/checked_math.c
         lib/endian.c
+        lib/event.c
         lib/geometry.c
         lib/resize.c
         lib/sector_adapter.c
@@ -258,6 +259,7 @@ foreach(exfat_resize_document_component IN ITEMS Runtime Development)
 
     install(
         FILES
+            docs/LIBRARY.md
             docs/PARTITIONING.md
             docs/TRANSACTION.md
         DESTINATION

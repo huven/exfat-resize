@@ -44,6 +44,6 @@ size_t test_allocator_live_count(const struct test_allocator *allocator);
 size_t test_allocator_live_bytes(const struct test_allocator *allocator);
 int test_allocator_is_clean(const struct test_allocator *allocator);
 
-struct exfat_resize_options test_allocator_options(struct test_allocator *allocator);
+struct exfat_resize_allocator test_allocator_callbacks(struct test_allocator *allocator);
 
 #endif
