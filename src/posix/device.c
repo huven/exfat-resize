@@ -289,13 +289,18 @@ static int block_device_sync(void *context)
 			result = fcntl(device->fd, F_FULLFSYNC);
 		} while (result != 0 && errno == EINTR);
 	} else {
-		dk_synchronize_t request = {
-			.offset = 0, .length = 0, .options = DK_SYNCHRONIZE_OPTION_BARRIER
-		};
+		dk_synchronize_t request = { .offset = 0, .length = 0, .options = 0 };
 
+		/* Drain buffered block nodes first; fsync is a no-op on raw character nodes. */
 		do {
-			result = ioctl(device->fd, DKIOCSYNCHRONIZE, &request);
+			result = fsync(device->fd);
 		} while (result != 0 && errno == EINTR);
+		if (result == 0) {
+			/* A write barrier only orders writes; request a full media flush. */
+			do {
+				result = ioctl(device->fd, DKIOCSYNCHRONIZE, &request);
+			} while (result != 0 && errno == EINTR);
+		}
 	}
 #elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	do {
