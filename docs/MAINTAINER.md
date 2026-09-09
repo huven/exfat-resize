@@ -22,9 +22,9 @@ CMake only resolves the build identity when the CLI is enabled, then passes it
 to the CLI target as the private
 `EXFAT_RESIZE_BUILD_VERSION` compile definition. Do not add another manually
 maintained version constant. `tools/version.cmake` uses the same implementation
-to determine the committed version packaged by `make dist`.
+to determine the committed version packaged by `sh tools/make-dist.sh`.
 
-`make dist` packages committed `HEAD`, excluding uncommitted changes, and
+`sh tools/make-dist.sh` packages committed `HEAD`, excluding uncommitted changes, and
 writes the source archive to `dist/`. At an exact matching `vX.Y.Z` tag, the
 archive and CLI use `X.Y.Z`. Untagged archives are development snapshots whose
 identity is `X.Y.Z-g<commit>`, independent of which other objects and tags are
@@ -48,9 +48,10 @@ The routine release procedure has six steps:
 6. Wait for GitHub to assemble and verify the signed archive, review the
    generated notes and all assets, then publish the draft manually.
 
-The maintainer does not run `make dist`, create the GitHub Release, or calculate
-release checksums. A temporary signed macOS executable is the only file uploaded
-manually; the workflow removes it after constructing the final archive.
+The maintainer does not run `sh tools/make-dist.sh`, create the GitHub Release,
+or calculate release checksums. A temporary signed macOS executable is the only
+file uploaded manually; the workflow removes it after constructing the final
+archive.
 
 The workflow creates or updates a draft release; it never modifies an already
 published release. If assembly or verification fails, use **Re-run failed jobs**

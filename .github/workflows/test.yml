@@ -39,7 +39,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes cmake exfatprogs exfat-fuse mandoc
 
       - name: Build and test
-        run: make test
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake --build build --config Release --parallel
+          ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
 
       - name: Lint manual page
         run: mandoc -T lint build/exfat-resize.8
@@ -55,7 +59,11 @@ jobs:
           persist-credentials: false
 
       - name: Build and test
-        run: make test
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake --build build --config Release --parallel
+          ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
 
       - name: Lint manual page
         run: mandoc -T lint build/exfat-resize.8
@@ -101,15 +109,16 @@ jobs:
           if (Get-Command sh.exe -ErrorAction SilentlyContinue) {
             throw "sh.exe is unexpectedly available"
           }
-          cmake -S . -B build/windows -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake -S . -B build/windows -DCMAKE_BUILD_TYPE=Release `
+            -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
 
       - name: Build CLI, library, and tests
         run: cmake --build build/windows --config Release --parallel
 
-      - name: Run library and CLI tests
+      - name: Run all registered tests
         run: >-
           ctest --test-dir build/windows --build-config Release
-          --output-on-failure -L "library|cli|package-native"
+          --output-on-failure --no-tests=error
 
   windows-volume-fixture:
     name: Prepare Windows logical-volume fixture
@@ -222,7 +231,7 @@ jobs:
             -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
             "-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x;-L;/usr/s390x-linux-gnu"
           cmake --build build/s390x --parallel
-          ctest --test-dir build/s390x --output-on-failure
+          ctest --test-dir build/s390x --output-on-failure --no-tests=error
 
   sanitizers:
     name: Linux (Clang, ASan/UBSan)
@@ -238,7 +247,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes clang cmake exfatprogs exfat-fuse
 
       - name: Build and test with sanitizers
-        run: CC=clang CXX=clang++ make sanitize-test
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build/sanitize -DCMAKE_BUILD_TYPE=Debug \
+            -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON \
+            -DEXFAT_RESIZE_ENABLE_SANITIZERS=ON
+          cmake --build build/sanitize --config Debug --parallel
+          ctest --test-dir build/sanitize --build-config Debug --output-on-failure --no-tests=error
+          cmake -S tests/package/consumer -B build/sanitize-consumer -DCMAKE_BUILD_TYPE=Debug \
+            -DEXFAT_RESIZE_SOURCE_DIR="$PWD" \
+            -DEXFAT_RESIZE_BUILD_CLI=OFF -DEXFAT_RESIZE_BUILD_TESTS=OFF \
+            -DEXFAT_RESIZE_ENABLE_SANITIZERS=ON
+          cmake --build build/sanitize-consumer --config Debug --parallel
+          ctest --test-dir build/sanitize-consumer --build-config Debug \
+            --output-on-failure --no-tests=error
 
   release-package:
     name: Release package consumers (${{ matrix.name }})
@@ -268,7 +292,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes cmake g++
 
       - name: Build and test the release package
-        run: CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} make release-test
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          sh tests/package/release-check.sh
+          sh tests/package/release-package.sh
 
       - name: Upload source package for Linux binary build
         if: matrix.name == 'Linux'

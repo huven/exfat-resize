@@ -46,7 +46,9 @@ jobs:
           tools/release-check.sh --require-signed-tag "$RELEASE_REF" "$release_commit"
 
       - name: Test release package
-        run: make release-test
+        run: |
+          sh tests/package/release-check.sh
+          sh tests/package/release-package.sh
 
       - name: Verify source archive
         id: artifacts

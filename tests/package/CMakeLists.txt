@@ -33,11 +33,13 @@ set_tests_properties(
         LABELS "package;package-native"
 )
 
-add_test(
-    NAME package.release-check
-    COMMAND sh ${PROJECT_SOURCE_DIR}/tests/package/release-check.sh
-)
-set_tests_properties(package.release-check PROPERTIES LABELS package)
+if(CMAKE_HOST_UNIX)
+    add_test(
+        NAME package.release-check
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/package/release-check.sh
+    )
+    set_tests_properties(package.release-check PROPERTIES LABELS package)
+endif()
 
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING)
     configure_file(
