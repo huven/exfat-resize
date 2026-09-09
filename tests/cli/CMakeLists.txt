@@ -210,6 +210,20 @@ exfat_resize_configure_target(exfat_resize_posix_entry_test)
 add_test(NAME cli.posix-entry COMMAND exfat_resize_posix_entry_test)
 set_tests_properties(cli.posix-entry PROPERTIES LABELS cli)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    add_executable(exfat_resize_macos_device_sync_test macos-device-sync.c)
+    target_include_directories(
+        exfat_resize_macos_device_sync_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(exfat_resize_macos_device_sync_test PRIVATE exfat_resize)
+    exfat_resize_configure_target(exfat_resize_macos_device_sync_test)
+    add_test(NAME cli.macos-device-sync COMMAND exfat_resize_macos_device_sync_test)
+    set_tests_properties(cli.macos-device-sync PROPERTIES LABELS cli)
+endif()
+
 exfat_resize_add_device_test(
     exfat_resize_device_bounds_test
     device-bounds.c
