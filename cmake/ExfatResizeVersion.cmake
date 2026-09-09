@@ -132,7 +132,7 @@ function(exfat_resize_resolve_checkout_build_version
     set(${output_variable} "${build_version}" PARENT_SCOPE)
 endfunction()
 
-# Resolve both identities from the exact commit packaged by make dist.
+# Resolve both identities from the exact commit packaged by tools/make-dist.sh.
 function(exfat_resize_resolve_commit_version
          source_dir commit package_version_variable build_version_variable)
     find_package(Git QUIET)
