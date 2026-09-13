@@ -114,6 +114,8 @@ example because of forced termination, a process crash, or power loss, assume
 that destructive metadata updates may have started; do not retry the resize,
 and restore the verified backup. Follow a less conservative checker-and-retry
 path only when the command explicitly reports that it is safe.
+On Windows, forced termination or a process crash may leave the volume accessible
+and falsely reported as healthy or clean; prevent further access until recovery.
 
 If `--grow-partition` reports that a partition update was attempted or that the
 partition was enlarged, follow its partition-specific guidance even though no
