@@ -173,7 +173,6 @@ struct resize_context {
 	size_t allocation_model_size;
 	uint32_t allocation_claims_since_checkpoint;
 	uint32_t displaced_clusters_since_checkpoint;
-	int found_bitmap;
 };
 
 enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
@@ -1151,7 +1150,7 @@ static enum exfat_resize_error scan_bitmap_entry(struct resize_context *context,
 			return EXFAT_RESIZE_INTERNAL_ERROR;
 		return write_directory_entry(context, location, entry);
 	}
-	if (context->found_bitmap)
+	if (context->old_bitmap.first_cluster != 0)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	error = allocation_from_entry(entry, EXFAT_BITMAP_FLAGS_OFFSET,
 	    EXFAT_BITMAP_FIRST_CLUSTER_OFFSET, EXFAT_BITMAP_DATA_LENGTH_OFFSET, &context->old_bitmap);
@@ -1164,7 +1163,6 @@ static enum exfat_resize_error scan_bitmap_entry(struct resize_context *context,
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	context->bitmap_location = *location;
-	context->found_bitmap = 1;
 	return EXFAT_RESIZE_SUCCESS;
 }
 
@@ -1815,7 +1813,7 @@ static enum exfat_resize_error prepare_context(struct resize_context *context,
 	error = scan_directory_tree(context, &root, DIRECTORY_SCAN_VALIDATE);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	if (!context->found_bitmap)
+	if (context->old_bitmap.first_cluster == 0)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	error = validate_allocation_model(context);
 	if (error != EXFAT_RESIZE_SUCCESS)

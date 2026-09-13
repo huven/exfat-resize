@@ -29,9 +29,10 @@ enum exfat_resize_error exfat_resize(
 may be null. The library validates the required argument objects before
 performing I/O, allocating memory, or invoking a monitor callback.
 
-The objects supplied through nonnull pointers, their callback pointers and
-contexts, and callback-owned state must remain valid and unchanged until the
-call returns. The library retains none of them after return. A nonnull `stage`
+The `device`, `allocator`, and any nonnull `monitor` objects, their callback
+pointers, and context pointer values must remain valid and unchanged until the
+call returns. Callback-owned state must remain valid, but callbacks may modify
+it. The library retains none of these pointers after return. A nonnull `stage`
 must remain writable until return.
 
 `target_size` is the requested filesystem size in bytes. It is rounded down to
