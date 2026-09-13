@@ -697,6 +697,8 @@ static enum exfat_resize_error read_stream(
 	uint64_t cluster_start;
 	uint64_t sector;
 	uint64_t cache_sector_offset;
+	uint64_t consumed_sectors;
+	uint32_t maximum_sector_count;
 	uint32_t read_sector_count;
 	size_t sector_offset;
 	size_t available;
@@ -717,8 +719,23 @@ static enum exfat_resize_error read_stream(
 		part = count < available ? count : available;
 
 		if (!cache_contains_sector(cache, sector)) {
+			maximum_sector_count = cache->sector_capacity;
+			if (cursor->data_cache == SECTOR_CACHE_SOURCE_DIRECTORY_DATA ||
+			    cursor->data_cache == SECTOR_CACHE_TARGET_DIRECTORY_DATA) {
+				/*
+				 * For directories, the caller requests one 32-byte entry per call.
+				 * Start directories with one sector, then grow read-ahead with
+				 * scan progress: uninterrupted fills read 1, 2, 4, 8, ... sectors.
+				 * Cache evictions during entry-set rewriting do not advance it.
+				 */
+				consumed_sectors =
+				    (uint64_t)cursor->traversed_clusters * cursor->geometry->sectors_per_cluster +
+				    cursor->cluster_offset / context->sector_size;
+				if (consumed_sectors < maximum_sector_count)
+					maximum_sector_count = (uint32_t)consumed_sectors + 1;
+			}
 			error = contiguous_stream_sector_count(
-			    context, cursor, cache->sector_capacity, &read_sector_count);
+			    context, cursor, maximum_sector_count, &read_sector_count);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = load_cache(context, cursor->data_cache, sector, read_sector_count);
