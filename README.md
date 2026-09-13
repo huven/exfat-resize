@@ -187,36 +187,38 @@ finished.
 Physical-disk paths such as `\\.\PhysicalDrive0` and other Windows device
 namespace forms are not supported as command targets.
 
+Run the following commands from the extracted directory.
+
 An image file must already have the desired length and is presented to the
 filesystem as a device with 512-byte sectors. Resizing an image normally does
 not require Administrator privileges, although the account running the command
 must have exclusive read/write access to the file:
 
-    exfat-resize C:\path\to\image.exfat
+    .\exfat-resize.exe C:\path\to\image.exfat
 
-For a logical volume, open an elevated terminal and close all files and
-applications using it. The CLI locks the volume exclusively before reading or
-writing it, retains the lock for the complete operation, synchronizes all
-writes, and dismounts the filesystem before releasing the lock. If the volume
-cannot be locked, the resize does not start.
+For a logical volume, open an elevated terminal in that directory and close
+all files and applications using the volume. The CLI locks the volume
+exclusively before reading or writing it, retains the lock for the complete
+operation, synchronizes all writes, and dismounts the filesystem before
+releasing the lock. If the volume cannot be locked, the resize does not start.
 
 Use either its drive designator or volume-GUID path:
 
-    exfat-resize E:
-    exfat-resize \\?\Volume{GUID}\
+    .\exfat-resize.exe E:
+    .\exfat-resize.exe \\?\Volume{GUID}\
 
 These commands grow the filesystem to the existing volume size; they do not
 change its partition table. An explicit size may also be supplied when it fits
 inside the existing volume:
 
-    exfat-resize E: 512G
+    .\exfat-resize.exe E: 512G
 
 #### Growing the containing partition
 
 If an explicit size does not fit inside a logical Windows volume,
 `--grow-partition` asks the CLI to enlarge the containing partition first:
 
-    exfat-resize --grow-partition E: 512G
+    .\exfat-resize.exe --grow-partition E: 512G
 
 This example requests a 512 GiB volume and grows the filesystem to use it. If
 the requested size already fits, the partition table is left unchanged and the
@@ -397,8 +399,8 @@ CLI from the extracted directory:
 The archive also contains the license, this README, the contribution guide,
 and the resize-transaction and partition-growth documentation. Resizing an
 image file normally does not require elevation. To access a logical volume or
-grow its partition, open PowerShell or Command Prompt as Administrator and
-invoke the extracted executable as described under [Windows usage](#windows).
+grow its partition, open PowerShell or Command Prompt as Administrator, change
+to the extracted directory, and follow [Windows usage](#windows).
 
 ## Contributing
 

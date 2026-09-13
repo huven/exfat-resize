@@ -26,9 +26,9 @@ Verify the resulting partition layout before running `exfat-resize`.
 
 ## GParted Live
 
-[GParted Live][gparted-live] is available for x86-64 computers. Identify the
-whole target disk carefully and use the included terminal rather than
-GParted's graphical exFAT resize action:
+[GParted Live][gparted-live] is available for x86-64 computers. GParted does not
+support growing exFAT filesystems. Identify the whole target disk carefully and
+use the included terminal to enlarge the partition:
 
 ```text
 sudo parted /dev/sdX

@@ -599,6 +599,7 @@ static void test_cache_window_turnover_cancellation(void)
 
 static void test_cluster_copy_chunk_boundary_cancellation(void)
 {
+	const uint64_t target_sector_count = UINT64_C(25000000);
 	struct test_allocator allocator = { 0 };
 	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
 	struct exfat_resize_device_geometry device_geometry;
@@ -610,15 +611,22 @@ static void test_cluster_copy_chunk_boundary_cancellation(void)
 	enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
 	uint64_t source_sector;
 	uint64_t target_sector;
+	uint32_t copy_chunk_sectors;
 	uint32_t source_cluster;
 	uint32_t target_cluster;
 
-	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+	/* Relocate the complete file, whose 8 KiB clusters span multiple I/O chunks. */
+	CHECK(
+	    exfat_fixture_initialize_with_sectors_per_cluster(&fixture, target_sector_count, 16) == 0);
+	copy_chunk_sectors = (uint32_t)(IO_BUFFER_SIZE / fixture.memory.device.sector_size);
+	CHECK((uint64_t)fixture.crossing_cluster_count * fixture.geometry.sectors_per_cluster >
+	    copy_chunk_sectors);
 	device_geometry.logical_sector_size = fixture.memory.device.sector_size;
 	device_geometry.sector_count = fixture.memory.device.sector_count;
 	error =
-	    exfat_resize_plan_growth(&device_geometry, &fixture.geometry, TARGET_SECTOR_COUNT, &target);
+	    exfat_resize_plan_growth(&device_geometry, &fixture.geometry, target_sector_count, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK(target.cluster_heap_offset >= fixture.geometry.volume_sector_count);
 	source_cluster = fixture.crossing_first_cluster;
 	error = exfat_resize_map_growth_cluster(
 	    &fixture.geometry, &target, source_cluster, &target_cluster);
@@ -629,11 +637,15 @@ static void test_cluster_copy_chunk_boundary_cancellation(void)
 	state.operation_trigger = MONITOR_TRIGGER_WRITE_SECTOR;
 	state.trigger_sector = target_sector;
 	error = exfat_fixture_resize_with_monitor(
-	    &fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, &monitor, &stage);
+	    &fixture.memory.device, target_sector_count, &callbacks, &monitor, &stage);
 	CHECK(error == EXFAT_RESIZE_CANCELLED);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREPARING);
 	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_READ, source_sector));
 	CHECK(operation_covers_sector(&fixture.memory, MEMORY_OPERATION_WRITE, target_sector));
+	CHECK(!operation_covers_sector(
+	    &fixture.memory, MEMORY_OPERATION_READ, source_sector + copy_chunk_sectors));
+	CHECK(!operation_covers_sector(
+	    &fixture.memory, MEMORY_OPERATION_WRITE, target_sector + copy_chunk_sectors));
 	CHECK(test_allocator_is_clean(&allocator));
 	exfat_fixture_destroy(&fixture);
 }
