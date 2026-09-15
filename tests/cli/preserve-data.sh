@@ -4,6 +4,7 @@
 set -eu
 
 program=$1
+metadata_program=${DIRECTORY_METADATA_TEST:?directory metadata test program is required}
 temporary=${TMPDIR:-/tmp}/exfat-resize-data-test.$$
 image=$temporary/image.exfat
 mountpoint=$temporary/mount
@@ -19,8 +20,7 @@ write_manifest() {
 
 	(
 		cd "$root"
-		# Ignore AppleDouble metadata created by macOS for the test files.
-		LC_ALL=C find . ! -name '._*' -print | LC_ALL=C sort |
+		LC_ALL=C find . -print | LC_ALL=C sort |
 		    while IFS= read -r path; do
 			    if [ -d "$path" ]; then
 				    printf 'directory\t%s\n' "$path"
@@ -58,10 +58,16 @@ dd if=/dev/urandom of="$mountpoint/documents/archive/payload.bin" \
 printf '%s\n' "unicode filename" >"$mountpoint/documents/archive/résumé-東京.txt"
 long_name=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.txt
 printf '%s\n' "long filename" >"$mountpoint/documents/archive/$long_name"
+unmount_exfat_image
+mount_exfat_image "$image" "$mountpoint" ro
 write_manifest "$mountpoint/documents" "$temporary/before.manifest"
 unmount_exfat_image
+# Read raw metadata while unmounted so verification cannot change access times.
+"$metadata_program" "$image" >"$temporary/before.metadata"
 
 "$program" "$image"
+"$metadata_program" "$image" >"$temporary/after.metadata"
+diff -u "$temporary/before.metadata" "$temporary/after.metadata"
 set -- $(od -An -tu4 -j 88 -N 4 "$image")
 new_cluster_heap=$1
 heap_shift_clusters=$(((new_cluster_heap - old_cluster_heap) / sectors_per_cluster))
@@ -72,7 +78,7 @@ if [ "$heap_shift_clusters" -lt "$minimum_heap_shift" ]; then
 fi
 check_exfat_image "$image"
 
-mount_exfat_image "$image" "$mountpoint"
+mount_exfat_image "$image" "$mountpoint" ro
 write_manifest "$mountpoint/documents" "$temporary/after.manifest"
 diff -u "$temporary/before.manifest" "$temporary/after.manifest"
 unmount_exfat_image

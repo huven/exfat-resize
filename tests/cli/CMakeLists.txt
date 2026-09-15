@@ -252,6 +252,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU
     )
 endif()
 
+add_executable(exfat_resize_directory_metadata directory-metadata.c)
+exfat_resize_configure_target(exfat_resize_directory_metadata)
+
 set(
     EXFAT_RESIZE_CLI_TEST_SCRIPTS
     help.sh
@@ -274,6 +277,7 @@ foreach(script IN LISTS EXFAT_RESIZE_CLI_TEST_SCRIPTS)
         COMMAND
             ${CMAKE_COMMAND} -E env
                 "DEVICE_LOCK_TEST=$<TARGET_FILE:exfat_resize_device_lock_test>"
+                "DIRECTORY_METADATA_TEST=$<TARGET_FILE:exfat_resize_directory_metadata>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/${script}"
                 "$<TARGET_FILE:exfat-resize>"
     )

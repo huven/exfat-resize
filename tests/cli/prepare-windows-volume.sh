@@ -76,6 +76,7 @@ mkdir "$mountpoint/small-files"
 index=1
 while [ "$index" -le 200 ]; do
 	test_file=$mountpoint/small-files/$index.txt
+	# windows-volume.ps1 verifies every file against this exact UTF-8/LF content.
 	printf 'exfat-resize Windows volume fixture %d\n' "$index" >"$test_file"
 	index=$((index + 1))
 done

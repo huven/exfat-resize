@@ -127,14 +127,19 @@ format_exfat_image() {
 mount_exfat_image() {
 	image=$1
 	mountpoint=$2
+	image_mount_mode=${3:-rw}
 
 	case $(uname -s) in
 		Darwin)
-			attach_image "$image" -mountpoint "$mountpoint"
+			if [ "$image_mount_mode" = ro ]; then
+				attach_image "$image" -readonly -mountpoint "$mountpoint"
+			else
+				attach_image "$image" -mountpoint "$mountpoint"
+			fi
 			;;
 		Linux)
 			test_device=$(sudo losetup --find --show "$image")
-			sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" \
+			sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g),$image_mount_mode" \
 			    "$test_device" "$mountpoint"
 			;;
 	esac
