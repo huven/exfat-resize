@@ -33,6 +33,25 @@ set_tests_properties(
         LABELS "package;package-native"
 )
 
+if(EXFAT_RESIZE_BUILD_CLI AND NOT CMAKE_CROSSCOMPILING)
+    configure_file(
+        incremental-version.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/incremental-version.cmake
+        @ONLY
+    )
+    add_test(
+        NAME package.incremental-version
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DBUILD_CONFIG=$<CONFIG>"
+            -P ${CMAKE_CURRENT_BINARY_DIR}/incremental-version.cmake
+    )
+    set_tests_properties(
+        package.incremental-version
+        PROPERTIES LABELS "package;package-native"
+    )
+endif()
+
 if(CMAKE_HOST_UNIX)
     add_test(
         NAME package.release-check

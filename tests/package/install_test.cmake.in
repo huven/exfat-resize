@@ -119,6 +119,7 @@ foreach(required_file
 endforeach()
 
 if("@EXFAT_RESIZE_BUILD_CLI@")
+    include("@PROJECT_BINARY_DIR@/exfat_resize_build_version.cmake")
     if(NOT EXISTS "${installed_cli}")
         message(FATAL_ERROR "Installed CLI file not found at ${installed_cli}")
     endif()
@@ -130,7 +131,7 @@ if("@EXFAT_RESIZE_BUILD_CLI@")
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     if(NOT cli_result EQUAL 0 OR
-       NOT cli_output STREQUAL "exfat-resize @EXFAT_RESIZE_BUILD_VERSION@")
+       NOT cli_output STREQUAL "exfat-resize ${EXFAT_RESIZE_BUILD_VERSION}")
         message(FATAL_ERROR
             "Installed CLI version check failed:\n${cli_output}${cli_error}"
         )
@@ -143,7 +144,7 @@ if("@EXFAT_RESIZE_INSTALL_MANPAGE@")
     endif()
     file(READ "${installed_manpage}" manpage_contents)
     foreach(required_text
-            "exfat-resize @EXFAT_RESIZE_BUILD_VERSION@"
+            "exfat-resize ${EXFAT_RESIZE_BUILD_VERSION}"
             ".SH SAFETY"
             "RECOVERY AFTER FAILURE"
             "Every normal error exit prints stage-specific recovery guidance"

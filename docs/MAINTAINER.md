@@ -18,11 +18,12 @@ separate build identity for the CLI:
 3. A source tree with neither form of provenance uses the package version with
    an `-unknown` suffix.
 
-CMake only resolves the build identity when the CLI is enabled, then passes it
-to the CLI target as the private
-`EXFAT_RESIZE_BUILD_VERSION` compile definition. Do not add another manually
-maintained version constant. `tools/version.cmake` uses the same implementation
-to determine the committed version packaged by `sh tools/make-dist.sh`.
+CMake resolves the build identity when the CLI is enabled and refreshes it on
+each CLI build. The generated private header and manual page change only when
+their contents change, so an unchanged identity does not cause recompilation.
+Do not add another manually maintained version constant. `tools/version.cmake`
+uses the same implementation to determine the committed version packaged by
+`sh tools/make-dist.sh`.
 
 `sh tools/make-dist.sh` packages committed `HEAD`, excluding uncommitted changes, and
 writes the source archive to `dist/`. At an exact matching `vX.Y.Z` tag, the

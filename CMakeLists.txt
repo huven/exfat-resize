@@ -54,11 +54,34 @@ if(EXFAT_RESIZE_BUILD_CLI AND NOT EXFAT_RESIZE_CLI_SUPPORTED)
 endif()
 
 set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
+set(EXFAT_RESIZE_INSTALL_MANPAGE OFF)
 if(EXFAT_RESIZE_BUILD_CLI)
-    exfat_resize_resolve_checkout_build_version(
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${PROJECT_VERSION}"
-        EXFAT_RESIZE_BUILD_VERSION
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(EXFAT_RESIZE_INSTALL_MANPAGE ON)
+    endif()
+    set(EXFAT_RESIZE_VERSION_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+    set(EXFAT_RESIZE_VERSION_BINARY_DIR "${PROJECT_BINARY_DIR}")
+    # Seed installable outputs at configure time; refresh Git identity on builds too.
+    include(cmake/ExfatResizeBuildVersion.cmake)
+    set(exfat_resize_version_outputs
+        "${PROJECT_BINARY_DIR}/exfat_resize_build_version.h"
+        "${PROJECT_BINARY_DIR}/exfat_resize_build_version.cmake"
+    )
+    if(EXFAT_RESIZE_INSTALL_MANPAGE)
+        list(APPEND exfat_resize_version_outputs "${PROJECT_BINARY_DIR}/exfat-resize.8")
+    endif()
+    add_custom_target(
+        exfat_resize_build_version
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DEXFAT_RESIZE_VERSION_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DEXFAT_RESIZE_VERSION_BINARY_DIR=${PROJECT_BINARY_DIR}"
+            "-DEXFAT_RESIZE_INSTALL_MANPAGE=${EXFAT_RESIZE_INSTALL_MANPAGE}"
+            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+            "-DCMAKE_DISABLE_FIND_PACKAGE_Git=${CMAKE_DISABLE_FIND_PACKAGE_Git}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/ExfatResizeBuildVersion.cmake"
+        BYPRODUCTS ${exfat_resize_version_outputs}
+        VERBATIM
     )
 endif()
 
@@ -152,18 +175,14 @@ if(EXFAT_RESIZE_BUILD_CLI)
         exfat-resize
         ${EXFAT_RESIZE_CLI_SOURCES}
     )
+    add_dependencies(exfat-resize exfat_resize_build_version)
 
     target_include_directories(
         exfat-resize
         PRIVATE
             ${PROJECT_SOURCE_DIR}/lib
             ${PROJECT_SOURCE_DIR}/src
-    )
-
-    target_compile_definitions(
-        exfat-resize
-        PRIVATE
-            EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}"
+            ${PROJECT_BINARY_DIR}
     )
 
     target_link_libraries(
@@ -177,16 +196,6 @@ if(EXFAT_RESIZE_BUILD_CLI)
     if(MINGW)
         target_link_options(exfat-resize PRIVATE -municode)
     endif()
-endif()
-
-set(EXFAT_RESIZE_INSTALL_MANPAGE OFF)
-if(EXFAT_RESIZE_BUILD_CLI AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    configure_file(
-        docs/exfat-resize.8.in
-        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
-        @ONLY
-    )
-    set(EXFAT_RESIZE_INSTALL_MANPAGE ON)
 endif()
 
 configure_package_config_file(
