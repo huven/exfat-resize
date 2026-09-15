@@ -1,0 +1,3 @@
+/* SPDX-License-Identifier: MIT */
+
+#define EXFAT_RESIZE_BUILD_VERSION "@EXFAT_RESIZE_BUILD_VERSION@"

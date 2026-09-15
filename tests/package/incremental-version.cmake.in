@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: MIT
+
+cmake_minimum_required(VERSION 3.20)
+
+find_package(Git REQUIRED)
+set(test_root "@CMAKE_CURRENT_BINARY_DIR@/incremental-version-test")
+set(repository "${test_root}/source")
+set(build "${test_root}/build")
+set(executable "${build}/exfat-resize@CMAKE_EXECUTABLE_SUFFIX@")
+if(NOT "@CMAKE_CONFIGURATION_TYPES@" STREQUAL "")
+    set(executable "${build}/${BUILD_CONFIG}/exfat-resize@CMAKE_EXECUTABLE_SUFFIX@")
+endif()
+set(header "${build}/exfat_resize_build_version.h")
+
+function(run_checked description)
+    execute_process(
+        COMMAND ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "${description} failed:\n${output}${error}")
+    endif()
+    set(command_output "${output}" PARENT_SCOPE)
+endfunction()
+
+function(run_git)
+    run_checked("Git ${ARGN}"
+        "${GIT_EXECUTABLE}" -C "${repository}"
+        -c user.name=exfat-resize-test -c user.email=test@example.invalid
+        -c commit.gpgsign=false -c core.autocrlf=false
+        -c "core.hooksPath=${test_root}/no-hooks" ${ARGN}
+    )
+    set(command_output "${command_output}" PARENT_SCOPE)
+endfunction()
+
+function(read_commit_version output_variable)
+    run_git(rev-parse HEAD)
+    string(SUBSTRING "${command_output}" 0 12 commit_id)
+    set(${output_variable} "@PROJECT_VERSION@-g${commit_id}" PARENT_SCOPE)
+endfunction()
+
+function(build_and_expect expected_version)
+    run_checked("Incremental build"
+        "@CMAKE_COMMAND@" --build "${build}"
+        --config "${BUILD_CONFIG}" --target exfat-resize
+    )
+    run_checked("CLI version" "${executable}" --version)
+    if(NOT command_output STREQUAL "exfat-resize ${expected_version}")
+        message(FATAL_ERROR
+            "Expected 'exfat-resize ${expected_version}', got '${command_output}'"
+        )
+    endif()
+    if("@EXFAT_RESIZE_INSTALL_MANPAGE@")
+        file(READ "${build}/exfat-resize.8" manpage)
+        string(FIND "${manpage}" "\"exfat-resize ${expected_version}\"" version_offset)
+        if(version_offset EQUAL -1)
+            message(FATAL_ERROR "Manual page does not match CLI version ${expected_version}")
+        endif()
+    endif()
+endfunction()
+
+file(REMOVE_RECURSE "${test_root}")
+file(MAKE_DIRECTORY "${repository}")
+# Copy the current build inputs, including uncommitted fixes, without Git or build artifacts.
+foreach(path CMakeLists.txt VERSION CONTRIBUTING.md LICENSE README.md cmake docs include lib src)
+    file(COPY "@PROJECT_SOURCE_DIR@/${path}" DESTINATION "${repository}")
+endforeach()
+run_git(init --quiet --template=)
+run_git(add .)
+run_git(commit --quiet -m "Initial fixture")
+read_commit_version(initial_version)
+
+set(configure_arguments
+    -S "${repository}" -B "${build}" -G "@CMAKE_GENERATOR@"
+    "-DCMAKE_C_COMPILER=@CMAKE_C_COMPILER@"
+    "-DCMAKE_MAKE_PROGRAM=@CMAKE_MAKE_PROGRAM@"
+    "-DCMAKE_BUILD_TYPE=@CMAKE_BUILD_TYPE@"
+    -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=OFF
+)
+if(NOT "@CMAKE_GENERATOR_PLATFORM@" STREQUAL "")
+    list(APPEND configure_arguments -A "@CMAKE_GENERATOR_PLATFORM@")
+endif()
+if(NOT "@CMAKE_GENERATOR_TOOLSET@" STREQUAL "")
+    list(APPEND configure_arguments -T "@CMAKE_GENERATOR_TOOLSET@")
+endif()
+run_checked("Fixture configuration" "@CMAKE_COMMAND@" ${configure_arguments})
+build_and_expect("${initial_version}")
+
+# No configure inputs change: each following check only runs cmake --build.
+# Separate changes for generators such as macOS Make with one-second timestamps.
+run_checked("Timestamp separation" "@CMAKE_COMMAND@" -E sleep 1)
+file(APPEND "${repository}/lib/resize.c" "\n/* Incremental version test. */\n")
+build_and_expect("${initial_version}-dirty")
+run_checked("Timestamp separation" "@CMAKE_COMMAND@" -E sleep 1)
+run_git(checkout -- lib/resize.c)
+build_and_expect("${initial_version}")
+
+run_checked("Timestamp separation" "@CMAKE_COMMAND@" -E sleep 1)
+run_git(commit --quiet --allow-empty -m "Same VERSION, new revision")
+read_commit_version(next_version)
+if(next_version STREQUAL initial_version)
+    message(FATAL_ERROR "Fixture commit did not change")
+endif()
+build_and_expect("${next_version}")
+
+# A no-op rebuild must not rewrite the version header or relink the executable.
+if(NOT EXISTS "${header}")
+    message(FATAL_ERROR "Generated version header not found: ${header}")
+endif()
+file(TIMESTAMP "${header}" header_time UTC)
+file(TIMESTAMP "${executable}" executable_time UTC)
+run_checked("Timestamp separation" "@CMAKE_COMMAND@" -E sleep 1)
+build_and_expect("${next_version}")
+file(TIMESTAMP "${header}" rebuilt_header_time UTC)
+file(TIMESTAMP "${executable}" rebuilt_executable_time UTC)
+if(NOT header_time STREQUAL rebuilt_header_time OR
+   NOT executable_time STREQUAL rebuilt_executable_time)
+    message(FATAL_ERROR "Unchanged rebuild rewrote the version header or executable")
+endif()
+
+file(REMOVE_RECURSE "${test_root}")
+message(STATUS "incremental-version: passed")

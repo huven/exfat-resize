@@ -16,7 +16,7 @@
 #include <string.h>
 
 #ifndef EXFAT_RESIZE_BUILD_VERSION
-#error "EXFAT_RESIZE_BUILD_VERSION must be provided by the build system"
+#include "exfat_resize_build_version.h"
 #endif
 
 #if defined(_WIN32)
