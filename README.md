@@ -205,7 +205,7 @@ releasing the lock. If the volume cannot be locked, the resize does not start.
 Use either its drive designator or volume-GUID path:
 
     .\exfat-resize.exe E:
-    .\exfat-resize.exe \\?\Volume{GUID}\
+    .\exfat-resize.exe "\\?\Volume{GUID}"
 
 These commands grow the filesystem to the existing volume size; they do not
 change its partition table. An explicit size may also be supplied when it fits
