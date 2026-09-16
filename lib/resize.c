@@ -901,58 +901,25 @@ static enum exfat_resize_error allocation_from_entry(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error validate_entry_allocation(struct resize_context *context,
-    const unsigned char entry[EXFAT_DIRECTORY_ENTRY_SIZE],
-    size_t flags_offset,
-    size_t first_cluster_offset,
-    size_t data_length_offset,
-    uint64_t maximum_data_length,
-    struct allocation_stream *stream)
-{
-	enum exfat_resize_error error;
-
-	error = allocation_from_entry(
-	    entry, flags_offset, first_cluster_offset, data_length_offset, stream);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
-	if (stream->data_length > maximum_data_length)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	if ((entry[flags_offset] & EXFAT_ALLOCATION_POSSIBLE) == 0) {
-		if (stream->first_cluster != 0 || stream->data_length != 0)
-			return EXFAT_RESIZE_INVALID_FILESYSTEM;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (stream->no_fat_chain && stream->data_length == 0)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	return claim_allocation_stream(context, stream);
-}
-
-static enum exfat_resize_error rewrite_entry_allocation(struct resize_context *context,
+/* The caller checks the Stream Extension type and AllocationPossible flag. */
+static enum exfat_resize_error rewrite_stream_allocation(struct resize_context *context,
     unsigned char entry[EXFAT_DIRECTORY_ENTRY_SIZE],
-    size_t flags_offset,
-    size_t first_cluster_offset,
-    size_t data_length_offset,
-    struct allocation_stream *source_stream,
+    const struct allocation_stream *source_stream,
     struct allocation_stream *target_stream)
 {
 	enum exfat_resize_error error;
 	uint32_t cluster_count;
 	uint32_t target_cluster;
 
-	error = allocation_from_entry(
-	    entry, flags_offset, first_cluster_offset, data_length_offset, source_stream);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
 	*target_stream = *source_stream;
-	if ((entry[flags_offset] & EXFAT_ALLOCATION_POSSIBLE) == 0 ||
-	    source_stream->first_cluster < 2 || source_stream->data_length == 0)
+	if (source_stream->first_cluster < 2 || source_stream->data_length == 0)
 		return EXFAT_RESIZE_SUCCESS;
 
 	error = map_cluster(context, source_stream->first_cluster, &target_cluster);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error = exfat_resize_store_le32(
-	    entry, EXFAT_DIRECTORY_ENTRY_SIZE, first_cluster_offset, target_cluster);
+	    entry, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_STREAM_FIRST_CLUSTER_OFFSET, target_cluster);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
 	target_stream->first_cluster = target_cluster;
@@ -963,7 +930,7 @@ static enum exfat_resize_error rewrite_entry_allocation(struct resize_context *c
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	if (stream_crosses_mapping_boundary(context, source_stream->first_cluster, cluster_count)) {
-		entry[flags_offset] &= (unsigned char)~EXFAT_NO_FAT_CHAIN;
+		entry[EXFAT_STREAM_FLAGS_OFFSET] &= (unsigned char)~EXFAT_NO_FAT_CHAIN;
 		target_stream->no_fat_chain = 0;
 	}
 	return EXFAT_RESIZE_SUCCESS;
@@ -1066,14 +1033,19 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 			    EXFAT_STREAM_VALID_LENGTH_OFFSET, &valid_data_length);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			error = allocation_from_entry(secondary, EXFAT_STREAM_FLAGS_OFFSET,
+			    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET, &source_stream);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
 			if (mode == DIRECTORY_SCAN_REWRITE) {
-				error = rewrite_entry_allocation(context, secondary, EXFAT_STREAM_FLAGS_OFFSET,
-				    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET,
-				    &source_stream, &target_stream);
+				error =
+				    rewrite_stream_allocation(context, secondary, &source_stream, &target_stream);
 			} else {
-				error = validate_entry_allocation(context, secondary, EXFAT_STREAM_FLAGS_OFFSET,
-				    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET,
-				    is_directory ? EXFAT_MAX_DIRECTORY_SIZE : UINT64_MAX, &source_stream);
+				if (is_directory && source_stream.data_length > EXFAT_MAX_DIRECTORY_SIZE)
+					return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				if (source_stream.no_fat_chain && source_stream.data_length == 0)
+					return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				error = claim_allocation_stream(context, &source_stream);
 				target_stream = source_stream;
 			}
 			if (error != EXFAT_RESIZE_SUCCESS)
