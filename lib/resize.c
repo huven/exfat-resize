@@ -171,8 +171,8 @@ struct resize_context {
 	/* Indexed by target cluster minus 2; one entry for every target cluster. */
 	uint32_t *allocation_model;
 	size_t allocation_model_size;
-	uint32_t allocation_claims_since_checkpoint;
-	uint32_t displaced_clusters_since_checkpoint;
+	/* Shared by cluster loops; reset at every cancellation checkpoint. */
+	uint32_t cluster_steps_since_checkpoint;
 };
 
 enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
@@ -189,12 +189,18 @@ static void enter_stage(
 
 static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)
 {
-	context->allocation_claims_since_checkpoint = 0;
-	context->displaced_clusters_since_checkpoint = 0;
+	context->cluster_steps_since_checkpoint = 0;
 	if (context->monitor.cancellation_requested != NULL &&
 	    context->monitor.cancellation_requested(context->monitor.context) != 0)
 		return EXFAT_RESIZE_CANCELLED;
 	return EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error cluster_step_checkpoint(struct resize_context *context)
+{
+	if (++context->cluster_steps_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
+		return EXFAT_RESIZE_SUCCESS;
+	return cancellation_checkpoint(context);
 }
 
 static enum exfat_resize_error zero_allocation_model(struct resize_context *context)
@@ -440,13 +446,6 @@ static enum exfat_resize_error model_entry_for_source_cluster(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error allocation_claim_checkpoint(struct resize_context *context)
-{
-	if (++context->allocation_claims_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
-		return EXFAT_RESIZE_SUCCESS;
-	return cancellation_checkpoint(context);
-}
-
 static enum exfat_resize_error claim_allocation_stream(
     struct resize_context *context, const struct allocation_stream *stream)
 {
@@ -476,7 +475,7 @@ static enum exfat_resize_error claim_allocation_stream(
 		    (uint64_t)context->source.cluster_count + 2)
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
 		for (index = 0; index < cluster_count; ++index) {
-			error = allocation_claim_checkpoint(context);
+			error = cluster_step_checkpoint(context);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = model_entry_for_source_cluster(
@@ -501,7 +500,7 @@ static enum exfat_resize_error claim_allocation_stream(
 
 	cluster = stream->first_cluster;
 	for (index = 0; index < cluster_count; ++index) {
-		error = allocation_claim_checkpoint(context);
+		error = cluster_step_checkpoint(context);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		error = model_entry_for_source_cluster(context, cluster, &model_entry);
@@ -1481,13 +1480,6 @@ static enum exfat_resize_error copy_cluster_run(struct resize_context *context,
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error displaced_cluster_checkpoint(struct resize_context *context)
-{
-	if (++context->displaced_clusters_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
-		return EXFAT_RESIZE_SUCCESS;
-	return cancellation_checkpoint(context);
-}
-
 static enum exfat_resize_error move_displaced_clusters(struct resize_context *context)
 {
 	enum exfat_resize_error error;
@@ -1499,7 +1491,7 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 		uint32_t target_cluster;
 		uint32_t *model_entry;
 
-		error = displaced_cluster_checkpoint(context);
+		error = cluster_step_checkpoint(context);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
@@ -1521,7 +1513,7 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 			++source_index;
 			if (source_index == context->displaced_cluster_count)
 				break;
-			error = displaced_cluster_checkpoint(context);
+			error = cluster_step_checkpoint(context);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
