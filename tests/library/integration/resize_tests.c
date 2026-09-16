@@ -2106,8 +2106,10 @@ static void test_reserved_fat_entries(void)
 	callbacks = resize_allocator();
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	if (error == EXFAT_RESIZE_SUCCESS)
+	if (error == EXFAT_RESIZE_SUCCESS) {
 		CHECK(load_fat_entry(&fixture, &target, 0) == UINT32_C(0xfffffff0));
+		CHECK(load_fat_entry(&fixture, &target, 1) == UINT32_C(0xffffffff));
+	}
 	exfat_fixture_destroy(&fixture);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);

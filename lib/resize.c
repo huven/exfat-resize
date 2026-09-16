@@ -1532,25 +1532,6 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error target_fat_value(
-    const struct resize_context *context, uint32_t cluster, uint32_t *value)
-{
-	if (cluster == 0) {
-		*value = context->fat_entry_zero;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (cluster == 1) {
-		*value = EXFAT_FAT_END_OF_CHAIN;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (!cluster_is_valid(&context->target, cluster))
-		return EXFAT_RESIZE_OUT_OF_BOUNDS;
-	*value = context->allocation_model[cluster - 2];
-	if (*value == EXFAT_MODEL_NO_FAT_CHAIN)
-		*value = 0;
-	return EXFAT_RESIZE_SUCCESS;
-}
-
 static enum exfat_resize_error write_target_fat(struct resize_context *context)
 {
 	enum exfat_resize_error error;
@@ -1585,9 +1566,15 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 
 			if (entry > context->target.cluster_count + UINT64_C(1))
 				break;
-			error = target_fat_value(context, (uint32_t)entry, &value);
-			if (error != EXFAT_RESIZE_SUCCESS)
-				return error;
+			if (entry == 0) {
+				value = context->fat_entry_zero;
+			} else if (entry == 1) {
+				value = EXFAT_FAT_END_OF_CHAIN;
+			} else {
+				value = context->allocation_model[entry - 2];
+				if (value == EXFAT_MODEL_NO_FAT_CHAIN)
+					value = 0;
+			}
 			error = exfat_resize_store_le32(context->io_buffer, byte_count, index * 4, value);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return EXFAT_RESIZE_INTERNAL_ERROR;
