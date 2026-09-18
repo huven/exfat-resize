@@ -171,8 +171,8 @@ struct resize_context {
 	/* Indexed by target cluster minus 2; one entry for every target cluster. */
 	uint32_t *allocation_model;
 	size_t allocation_model_size;
-	uint32_t allocation_claims_since_checkpoint;
-	uint32_t displaced_clusters_since_checkpoint;
+	/* Shared by cluster loops; reset at every cancellation checkpoint. */
+	uint32_t cluster_steps_since_checkpoint;
 };
 
 enum directory_scan_mode { DIRECTORY_SCAN_VALIDATE, DIRECTORY_SCAN_REWRITE };
@@ -189,12 +189,18 @@ static void enter_stage(
 
 static enum exfat_resize_error cancellation_checkpoint(struct resize_context *context)
 {
-	context->allocation_claims_since_checkpoint = 0;
-	context->displaced_clusters_since_checkpoint = 0;
+	context->cluster_steps_since_checkpoint = 0;
 	if (context->monitor.cancellation_requested != NULL &&
 	    context->monitor.cancellation_requested(context->monitor.context) != 0)
 		return EXFAT_RESIZE_CANCELLED;
 	return EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error cluster_step_checkpoint(struct resize_context *context)
+{
+	if (++context->cluster_steps_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
+		return EXFAT_RESIZE_SUCCESS;
+	return cancellation_checkpoint(context);
 }
 
 static enum exfat_resize_error zero_allocation_model(struct resize_context *context)
@@ -440,13 +446,6 @@ static enum exfat_resize_error model_entry_for_source_cluster(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error allocation_claim_checkpoint(struct resize_context *context)
-{
-	if (++context->allocation_claims_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
-		return EXFAT_RESIZE_SUCCESS;
-	return cancellation_checkpoint(context);
-}
-
 static enum exfat_resize_error claim_allocation_stream(
     struct resize_context *context, const struct allocation_stream *stream)
 {
@@ -476,7 +475,7 @@ static enum exfat_resize_error claim_allocation_stream(
 		    (uint64_t)context->source.cluster_count + 2)
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
 		for (index = 0; index < cluster_count; ++index) {
-			error = allocation_claim_checkpoint(context);
+			error = cluster_step_checkpoint(context);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = model_entry_for_source_cluster(
@@ -501,7 +500,7 @@ static enum exfat_resize_error claim_allocation_stream(
 
 	cluster = stream->first_cluster;
 	for (index = 0; index < cluster_count; ++index) {
-		error = allocation_claim_checkpoint(context);
+		error = cluster_step_checkpoint(context);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		error = model_entry_for_source_cluster(context, cluster, &model_entry);
@@ -901,58 +900,25 @@ static enum exfat_resize_error allocation_from_entry(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error validate_entry_allocation(struct resize_context *context,
-    const unsigned char entry[EXFAT_DIRECTORY_ENTRY_SIZE],
-    size_t flags_offset,
-    size_t first_cluster_offset,
-    size_t data_length_offset,
-    uint64_t maximum_data_length,
-    struct allocation_stream *stream)
-{
-	enum exfat_resize_error error;
-
-	error = allocation_from_entry(
-	    entry, flags_offset, first_cluster_offset, data_length_offset, stream);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
-	if (stream->data_length > maximum_data_length)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	if ((entry[flags_offset] & EXFAT_ALLOCATION_POSSIBLE) == 0) {
-		if (stream->first_cluster != 0 || stream->data_length != 0)
-			return EXFAT_RESIZE_INVALID_FILESYSTEM;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (stream->no_fat_chain && stream->data_length == 0)
-		return EXFAT_RESIZE_INVALID_FILESYSTEM;
-	return claim_allocation_stream(context, stream);
-}
-
-static enum exfat_resize_error rewrite_entry_allocation(struct resize_context *context,
+/* The caller checks the Stream Extension type and AllocationPossible flag. */
+static enum exfat_resize_error rewrite_stream_allocation(struct resize_context *context,
     unsigned char entry[EXFAT_DIRECTORY_ENTRY_SIZE],
-    size_t flags_offset,
-    size_t first_cluster_offset,
-    size_t data_length_offset,
-    struct allocation_stream *source_stream,
+    const struct allocation_stream *source_stream,
     struct allocation_stream *target_stream)
 {
 	enum exfat_resize_error error;
 	uint32_t cluster_count;
 	uint32_t target_cluster;
 
-	error = allocation_from_entry(
-	    entry, flags_offset, first_cluster_offset, data_length_offset, source_stream);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
 	*target_stream = *source_stream;
-	if ((entry[flags_offset] & EXFAT_ALLOCATION_POSSIBLE) == 0 ||
-	    source_stream->first_cluster < 2 || source_stream->data_length == 0)
+	if (source_stream->first_cluster < 2 || source_stream->data_length == 0)
 		return EXFAT_RESIZE_SUCCESS;
 
 	error = map_cluster(context, source_stream->first_cluster, &target_cluster);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error = exfat_resize_store_le32(
-	    entry, EXFAT_DIRECTORY_ENTRY_SIZE, first_cluster_offset, target_cluster);
+	    entry, EXFAT_DIRECTORY_ENTRY_SIZE, EXFAT_STREAM_FIRST_CLUSTER_OFFSET, target_cluster);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
 	target_stream->first_cluster = target_cluster;
@@ -963,7 +929,7 @@ static enum exfat_resize_error rewrite_entry_allocation(struct resize_context *c
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	if (stream_crosses_mapping_boundary(context, source_stream->first_cluster, cluster_count)) {
-		entry[flags_offset] &= (unsigned char)~EXFAT_NO_FAT_CHAIN;
+		entry[EXFAT_STREAM_FLAGS_OFFSET] &= (unsigned char)~EXFAT_NO_FAT_CHAIN;
 		target_stream->no_fat_chain = 0;
 	}
 	return EXFAT_RESIZE_SUCCESS;
@@ -1066,14 +1032,19 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_context *contex
 			    EXFAT_STREAM_VALID_LENGTH_OFFSET, &valid_data_length);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			error = allocation_from_entry(secondary, EXFAT_STREAM_FLAGS_OFFSET,
+			    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET, &source_stream);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
 			if (mode == DIRECTORY_SCAN_REWRITE) {
-				error = rewrite_entry_allocation(context, secondary, EXFAT_STREAM_FLAGS_OFFSET,
-				    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET,
-				    &source_stream, &target_stream);
+				error =
+				    rewrite_stream_allocation(context, secondary, &source_stream, &target_stream);
 			} else {
-				error = validate_entry_allocation(context, secondary, EXFAT_STREAM_FLAGS_OFFSET,
-				    EXFAT_STREAM_FIRST_CLUSTER_OFFSET, EXFAT_STREAM_DATA_LENGTH_OFFSET,
-				    is_directory ? EXFAT_MAX_DIRECTORY_SIZE : UINT64_MAX, &source_stream);
+				if (is_directory && source_stream.data_length > EXFAT_MAX_DIRECTORY_SIZE)
+					return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				if (source_stream.no_fat_chain && source_stream.data_length == 0)
+					return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				error = claim_allocation_stream(context, &source_stream);
 				target_stream = source_stream;
 			}
 			if (error != EXFAT_RESIZE_SUCCESS)
@@ -1509,13 +1480,6 @@ static enum exfat_resize_error copy_cluster_run(struct resize_context *context,
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error displaced_cluster_checkpoint(struct resize_context *context)
-{
-	if (++context->displaced_clusters_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
-		return EXFAT_RESIZE_SUCCESS;
-	return cancellation_checkpoint(context);
-}
-
 static enum exfat_resize_error move_displaced_clusters(struct resize_context *context)
 {
 	enum exfat_resize_error error;
@@ -1527,7 +1491,7 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 		uint32_t target_cluster;
 		uint32_t *model_entry;
 
-		error = displaced_cluster_checkpoint(context);
+		error = cluster_step_checkpoint(context);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
@@ -1549,7 +1513,7 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 			++source_index;
 			if (source_index == context->displaced_cluster_count)
 				break;
-			error = displaced_cluster_checkpoint(context);
+			error = cluster_step_checkpoint(context);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = model_entry_for_source_cluster(context, source_index + 2, &model_entry);
@@ -1565,25 +1529,6 @@ static enum exfat_resize_error move_displaced_clusters(struct resize_context *co
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 	}
-	return EXFAT_RESIZE_SUCCESS;
-}
-
-static enum exfat_resize_error target_fat_value(
-    const struct resize_context *context, uint32_t cluster, uint32_t *value)
-{
-	if (cluster == 0) {
-		*value = context->fat_entry_zero;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (cluster == 1) {
-		*value = EXFAT_FAT_END_OF_CHAIN;
-		return EXFAT_RESIZE_SUCCESS;
-	}
-	if (!cluster_is_valid(&context->target, cluster))
-		return EXFAT_RESIZE_OUT_OF_BOUNDS;
-	*value = context->allocation_model[cluster - 2];
-	if (*value == EXFAT_MODEL_NO_FAT_CHAIN)
-		*value = 0;
 	return EXFAT_RESIZE_SUCCESS;
 }
 
@@ -1621,9 +1566,15 @@ static enum exfat_resize_error write_target_fat(struct resize_context *context)
 
 			if (entry > context->target.cluster_count + UINT64_C(1))
 				break;
-			error = target_fat_value(context, (uint32_t)entry, &value);
-			if (error != EXFAT_RESIZE_SUCCESS)
-				return error;
+			if (entry == 0) {
+				value = context->fat_entry_zero;
+			} else if (entry == 1) {
+				value = EXFAT_FAT_END_OF_CHAIN;
+			} else {
+				value = context->allocation_model[entry - 2];
+				if (value == EXFAT_MODEL_NO_FAT_CHAIN)
+					value = 0;
+			}
 			error = exfat_resize_store_le32(context->io_buffer, byte_count, index * 4, value);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return EXFAT_RESIZE_INTERNAL_ERROR;

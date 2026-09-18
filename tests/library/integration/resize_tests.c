@@ -1491,6 +1491,66 @@ static void test_stream_extension_structure_is_validated(void)
 	}
 }
 
+static void test_stream_extension_requires_allocation_possible(void)
+{
+	static const struct {
+		int no_fat_chain;
+		int empty;
+	} cases[] = {
+		{ 0, 0 },
+		{ 1, 0 },
+		{ 0, 1 },
+	};
+	struct exfat_resize_allocator callbacks = resize_allocator();
+	size_t index;
+	int allocation_possible;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		for (allocation_possible = 0; allocation_possible <= 1; ++allocation_possible) {
+			struct exfat_fixture fixture;
+			unsigned char root[SECTOR_SIZE];
+			unsigned char *entry_set = root + 32 * 2;
+			unsigned char *stream = entry_set + 32;
+			enum exfat_resize_error error;
+			enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_COMPLETED;
+			uint64_t root_sector;
+
+			CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
+			root_sector = exfat_fixture_cluster_sector(&fixture.geometry, 2);
+			CHECK(exfat_fixture_read_sector(&fixture, root_sector, root, sizeof(root)) == 0);
+			stream[1] = (allocation_possible ? ALLOCATION_POSSIBLE : 0) |
+			    (cases[index].no_fat_chain ? NO_FAT_CHAIN : 0);
+			if (cases[index].empty) {
+				CHECK(exfat_resize_store_le64(stream, 32, 8, 0) == EXFAT_RESIZE_SUCCESS);
+				CHECK(exfat_resize_store_le32(stream, 32, 20, 0) == EXFAT_RESIZE_SUCCESS);
+				CHECK(exfat_resize_store_le64(stream, 32, 24, 0) == EXFAT_RESIZE_SUCCESS);
+				/* Release the original file's cluster so the empty control has no orphan. */
+				CHECK(set_bitmap_cluster(&fixture, 5, 0) == 0);
+			}
+			CHECK(store_fat_entry(&fixture, &fixture.geometry, 5,
+			          !cases[index].empty && !cases[index].no_fat_chain ? UINT32_C(0xffffffff)
+			                                                            : 0) == 0);
+			CHECK(exfat_resize_store_le16(entry_set, 32, 2, entry_set_checksum(entry_set)) ==
+			    EXFAT_RESIZE_SUCCESS);
+			CHECK(fixture.memory.device.write(
+			          fixture.memory.device.context, root_sector, 1, root) == 0);
+			memory_block_device_clear_operations(&fixture.memory);
+
+			error = exfat_fixture_resize(
+			    &fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, &stage);
+			if (allocation_possible) {
+				CHECK(error == EXFAT_RESIZE_SUCCESS);
+				CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
+			} else {
+				CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
+				CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
+				check_operations_are_read_only(&fixture);
+			}
+			exfat_fixture_destroy(&fixture);
+		}
+	}
+}
+
 static void test_unsupported_directory_entries(void)
 {
 	static const struct {
@@ -2046,8 +2106,10 @@ static void test_reserved_fat_entries(void)
 	callbacks = resize_allocator();
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	if (error == EXFAT_RESIZE_SUCCESS)
+	if (error == EXFAT_RESIZE_SUCCESS) {
 		CHECK(load_fat_entry(&fixture, &target, 0) == UINT32_C(0xfffffff0));
+		CHECK(load_fat_entry(&fixture, &target, 1) == UINT32_C(0xffffffff));
+	}
 	exfat_fixture_destroy(&fixture);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
@@ -3392,6 +3454,7 @@ int main(void)
 	test_preflight_is_read_only();
 	test_invalid_entry_checksum_does_not_follow_fat();
 	test_stream_extension_structure_is_validated();
+	test_stream_extension_requires_allocation_possible();
 	test_unsupported_directory_entries();
 	test_insufficient_growth_is_rejected();
 	test_bitmap_entry_rejections();
