@@ -642,19 +642,19 @@ int exfat_fixture_initialize_with_sectors_per_cluster(
 	    write_cluster_marker(fixture, 4, 0x44) != 0 ||
 	    write_cluster_marker(fixture, 5, 0x55) != 0 ||
 	    write_cluster_marker(fixture, 8, 0x88) != 0) {
-		exfat_fixture_destroy(fixture);
+		(void)exfat_fixture_destroy(fixture);
 		return -1;
 	}
 	for (cluster = 0; cluster < 3; ++cluster) {
 		if (write_cluster_pattern(fixture, fixture->fragmented_clusters[cluster]) != 0) {
-			exfat_fixture_destroy(fixture);
+			(void)exfat_fixture_destroy(fixture);
 			return -1;
 		}
 	}
 	for (cluster = fixture->crossing_first_cluster;
 	    cluster < fixture->crossing_first_cluster + fixture->crossing_cluster_count; ++cluster) {
 		if (write_cluster_pattern(fixture, cluster) != 0) {
-			exfat_fixture_destroy(fixture);
+			(void)exfat_fixture_destroy(fixture);
 			return -1;
 		}
 	}
@@ -667,10 +667,12 @@ int exfat_fixture_initialize(struct exfat_fixture *fixture, uint64_t device_sect
 	return exfat_fixture_initialize_with_sectors_per_cluster(fixture, device_sector_count, 1);
 }
 
-void exfat_fixture_destroy(struct exfat_fixture *fixture)
+int exfat_fixture_destroy(struct exfat_fixture *fixture)
 {
-	memory_block_device_destroy(&fixture->memory);
+	int error = memory_block_device_destroy(&fixture->memory);
+
 	memset(fixture, 0, sizeof(*fixture));
+	return error;
 }
 
 int exfat_fixture_read_sector(

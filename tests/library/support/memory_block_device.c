@@ -3,8 +3,10 @@
 #include "support/memory_block_device.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -142,6 +144,36 @@ static int copy_sectors(const struct memory_sector *source,
 	return 0;
 }
 
+static int validate_transfer(struct memory_block_device *memory,
+    enum memory_operation_kind kind,
+    uint64_t first_sector,
+    uint32_t sector_count,
+    const void *buffer)
+{
+	const char *error = NULL;
+
+	if (sector_count == 0)
+		error = "zero-length transfer";
+	else if (buffer == NULL)
+		error = "null transfer buffer";
+	else if (memory->device.sector_size == 0)
+		error = "zero sector size";
+	else if (sector_count > SIZE_MAX / memory->device.sector_size)
+		error = "transfer byte count exceeds SIZE_MAX";
+	else if (first_sector > memory->device.sector_count ||
+	    (uint64_t)sector_count > memory->device.sector_count - first_sector)
+		error = "transfer outside device bounds";
+	if (error == NULL)
+		return 0;
+	if (memory->contract_error == NULL) {
+		memory->contract_error = error;
+		memory->contract_error_operation.kind = kind;
+		memory->contract_error_operation.first_sector = first_sector;
+		memory->contract_error_operation.sector_count = sector_count;
+	}
+	return EINVAL;
+}
+
 static int memory_read(void *context, uint64_t first_sector, uint32_t sector_count, void *buffer)
 {
 	struct memory_block_device *memory = context;
@@ -152,6 +184,9 @@ static int memory_read(void *context, uint64_t first_sector, uint32_t sector_cou
 	uint32_t index;
 	int error;
 
+	error = validate_transfer(memory, MEMORY_OPERATION_READ, first_sector, sector_count, buffer);
+	if (error != 0)
+		return error;
 	error = record_operation(
 	    memory, MEMORY_OPERATION_READ, first_sector, sector_count, &operation_index);
 	if (error != 0)
@@ -184,6 +219,9 @@ static int memory_write(
 	uint32_t index;
 	int error;
 
+	error = validate_transfer(memory, MEMORY_OPERATION_WRITE, first_sector, sector_count, buffer);
+	if (error != 0)
+		return error;
 	error = record_operation(
 	    memory, MEMORY_OPERATION_WRITE, first_sector, sector_count, &operation_index);
 	if (error != 0)
@@ -242,12 +280,24 @@ void memory_block_device_init(
 	memory->device.sync = memory_sync;
 }
 
-void memory_block_device_destroy(struct memory_block_device *memory)
+int memory_block_device_destroy(struct memory_block_device *memory)
 {
+	const char *contract_error = memory->contract_error;
+
+	if (contract_error != NULL) {
+		const struct memory_operation *operation = &memory->contract_error_operation;
+
+		fprintf(stderr,
+		    "memory block device contract violation: %s during %s "
+		    "(first_sector=%" PRIu64 ", sector_count=%" PRIu32 ")\n",
+		    contract_error, operation->kind == MEMORY_OPERATION_READ ? "read" : "write",
+		    operation->first_sector, operation->sector_count);
+	}
 	free_sectors(memory->sectors, memory->sector_count);
 	free_sectors(memory->durable_sectors, memory->durable_sector_count);
 	free(memory->operations);
 	memset(memory, 0, sizeof(*memory));
+	return contract_error == NULL ? 0 : EINVAL;
 }
 
 void memory_block_device_clear_operations(struct memory_block_device *memory)

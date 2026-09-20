@@ -186,7 +186,7 @@ static void initialize_fixture(struct boot_fixture *fixture, uint32_t sector_siz
 static void destroy_fixture(struct boot_fixture *fixture)
 {
 	free(fixture->image);
-	memory_block_device_destroy(&fixture->memory);
+	CHECK(memory_block_device_destroy(&fixture->memory) == 0);
 }
 
 static enum exfat_resize_error read_fixture(
@@ -609,7 +609,7 @@ static void test_sector_size_probe(void)
 	CHECK(device.operations[0].first_sector == 0);
 	CHECK(device.operations[0].sector_count == 1);
 
-	memory_block_device_destroy(&device);
+	CHECK(memory_block_device_destroy(&device) == 0);
 	destroy_fixture(&fixture);
 }
 
