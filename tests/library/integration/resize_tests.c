@@ -1196,7 +1196,7 @@ static void test_resize(void)
 	CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
 	CHECK(test_allocator_is_clean(&allocator.tracker));
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 
@@ -1278,7 +1278,7 @@ static void test_resize(void)
 	CHECK(bitmap_cluster_is_set(&fixture, &target, bitmap_cluster, bitmap_cluster));
 	CHECK(load_fat_entry(&fixture, &target, bitmap_cluster) != 0);
 
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_entry_checksum_unsigned_wrap(void)
@@ -1294,7 +1294,7 @@ static void test_entry_checksum_unsigned_wrap(void)
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT + 1) == 0);
 	if (configure_checksum_wrap_entry_set(&fixture) != 0) {
 		CHECK(0);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
@@ -1302,7 +1302,7 @@ static void test_entry_checksum_unsigned_wrap(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 
@@ -1315,7 +1315,7 @@ static void test_entry_checksum_unsigned_wrap(void)
 	CHECK(
 	    exfat_resize_load_le16(child, sizeof(child), 2, &stored_checksum) == EXFAT_RESIZE_SUCCESS);
 	CHECK(stored_checksum == entry_set_checksum_count(child, 4));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_fat_boundary_geometry(void)
@@ -1333,7 +1333,7 @@ static void test_fat_boundary_geometry(void)
 	error = plan_fixture_growth(&fixture, target_sector_count, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	CHECK(target.fat_length == 232);
@@ -1355,7 +1355,7 @@ static void test_fat_boundary_geometry(void)
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		check_cluster_marker(&fixture, &target, mapped, 0x55);
 	}
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_fat_padding_is_not_written(void)
@@ -1393,7 +1393,7 @@ static void test_fat_padding_is_not_written(void)
 	}
 	for (sector = required_fat_sectors; sector < target.fat_length; ++sector)
 		check_sector_is_not_written(&fixture, (uint64_t)target.fat_offset + sector);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_preflight_is_read_only(void)
@@ -1417,7 +1417,7 @@ static void test_preflight_is_read_only(void)
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_invalid_entry_checksum_does_not_follow_fat(void)
@@ -1450,7 +1450,7 @@ static void test_invalid_entry_checksum_does_not_follow_fat(void)
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	check_operations_are_read_only(&fixture);
 	check_source_fat_snapshot_read(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_stream_extension_structure_is_validated(void)
@@ -1487,7 +1487,7 @@ static void test_stream_extension_structure_is_validated(void)
 		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1546,7 +1546,7 @@ static void test_stream_extension_requires_allocation_possible(void)
 				CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 				check_operations_are_read_only(&fixture);
 			}
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 		}
 	}
 }
@@ -1608,7 +1608,7 @@ static void test_unsupported_directory_entries(void)
 		CHECK(error == cases[index].expected);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1625,7 +1625,7 @@ static void test_insufficient_growth_is_rejected(void)
 	CHECK(error == EXFAT_RESIZE_INSUFFICIENT_GROWTH);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_bitmap_entry_rejections(void)
@@ -1677,7 +1677,7 @@ static void test_bitmap_entry_rejections(void)
 		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1726,7 +1726,7 @@ static void test_malformed_bitmap_fat_chain_is_rejected(void)
 		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1777,7 +1777,7 @@ static void test_unallocated_benign_entries_are_preserved(void)
 		CHECK(exfat_fixture_read_sector(&fixture,
 		          exfat_fixture_cluster_sector(&target, mapped_root), root, sizeof(root)) == 0);
 		CHECK(memcmp(root + 32 * 14, expected, sizeof(expected)) == 0);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1818,7 +1818,7 @@ static void test_unknown_benign_primaries_are_rejected(void)
 		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1851,7 +1851,7 @@ static void test_malformed_fat_streams_are_rejected(void)
 		CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -1875,7 +1875,7 @@ static void test_misplaced_system_entry_is_rejected(void)
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_truncated_entry_set_is_rejected(void)
@@ -1898,7 +1898,7 @@ static void test_truncated_entry_set_is_rejected(void)
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_secondary_entry_io_errors_are_preserved(void)
@@ -1945,7 +1945,7 @@ static void test_secondary_entry_io_errors_are_preserved(void)
 	}
 	CHECK(preflight_operation != SIZE_MAX);
 	CHECK(rewrite_operation != SIZE_MAX);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	if (preflight_operation != SIZE_MAX) {
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
@@ -1957,7 +1957,7 @@ static void test_secondary_entry_io_errors_are_preserved(void)
 		CHECK(error == EXFAT_RESIZE_IO_ERROR);
 		CHECK(stage == EXFAT_RESIZE_STAGE_PREFLIGHT);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 
 	if (rewrite_operation != SIZE_MAX) {
@@ -1974,7 +1974,7 @@ static void test_secondary_entry_io_errors_are_preserved(void)
 		CHECK(exfat_resize_load_le16(boot_sector, sizeof(boot_sector), VOLUME_FLAGS_OFFSET,
 		          &volume_flags) == EXFAT_RESIZE_SUCCESS);
 		CHECK((volume_flags & 0x0002) != 0);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2054,7 +2054,7 @@ static void test_oversized_child_directory_is_rejected(void)
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
 	check_source_fat_snapshot_read(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_oversized_root_directory_is_rejected(void)
@@ -2087,7 +2087,7 @@ static void test_oversized_root_directory_is_rejected(void)
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
 	check_sector_is_not_read(&fixture, root_sector);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_reserved_fat_entries(void)
@@ -2110,7 +2110,7 @@ static void test_reserved_fat_entries(void)
 		CHECK(load_fat_entry(&fixture, &target, 0) == UINT32_C(0xfffffff0));
 		CHECK(load_fat_entry(&fixture, &target, 1) == UINT32_C(0xffffffff));
 	}
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(store_fat_entry(&fixture, &fixture.geometry, 0, UINT32_C(0xfffefff8)) == 0);
@@ -2120,7 +2120,7 @@ static void test_reserved_fat_entries(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(store_fat_entry(&fixture, &fixture.geometry, 1, UINT32_C(0xfffffffe)) == 0);
@@ -2130,7 +2130,7 @@ static void test_reserved_fat_entries(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_allocation_model_validates_bitmap(void)
@@ -2151,7 +2151,7 @@ static void test_allocation_model_validates_bitmap(void)
 	CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
 	CHECK(test_allocator_is_clean(&allocator.tracker));
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(set_bitmap_cluster(&fixture, 9, 1) == 0);
@@ -2160,7 +2160,7 @@ static void test_allocation_model_validates_bitmap(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_allocation_model_rejects_shared_directory(void)
@@ -2182,7 +2182,7 @@ static void test_allocation_model_rejects_shared_directory(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_FILESYSTEM);
 	check_operations_are_read_only(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_displaced_bad_cluster_is_rejected(void)
@@ -2242,7 +2242,7 @@ static void test_displaced_bad_cluster_is_rejected(void)
 		CHECK((volume_flags & UINT16_C(0x0002)) == 0);
 		check_operations_are_read_only(&fixture);
 		check_sector_is_not_written(&fixture, bad_sector);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2271,7 +2271,7 @@ static void test_non_displaced_bad_cluster_is_preserved(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 
@@ -2287,7 +2287,7 @@ static void test_non_displaced_bad_cluster_is_preserved(void)
 	CHECK(exfat_resize_load_le32(root, sizeof(root), 20, &bitmap_cluster) == EXFAT_RESIZE_SUCCESS);
 	CHECK(bitmap_cluster_is_set(&fixture, &target, bitmap_cluster, mapped_cluster));
 	check_sector_is_not_written(&fixture, source_sector);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_allocator_failure_is_read_only(void)
@@ -2310,7 +2310,7 @@ static void test_allocator_failure_is_read_only(void)
 		CHECK(allocator.tracker.largest_requested_size == WORK_BUFFER_SIZE);
 		CHECK(test_allocator_is_clean(&allocator.tracker));
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2332,7 +2332,7 @@ static void test_directory_worklist_growth(void)
 	CHECK(allocator.tracker.deallocation_calls == allocator.tracker.successful_allocations);
 	CHECK(test_allocator_is_clean(&allocator.tracker));
 	CHECK(!allocator.allocation_after_write);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_directory_worklist_allocation_failure(void)
@@ -2358,7 +2358,7 @@ static void test_directory_worklist_allocation_failure(void)
 		CHECK(test_allocator_is_clean(&allocator.tracker));
 		CHECK(!allocator.allocation_after_write);
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2438,7 +2438,7 @@ static void test_deep_directory_tree(void)
 	error = plan_fixture_growth(&fixture, TARGET_SECTOR_COUNT, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	fixture_result = exfat_fixture_add_directory_chain(&fixture, FIRST_CLUSTER, DIRECTORY_COUNT);
@@ -2467,7 +2467,7 @@ static void test_deep_directory_tree(void)
 	}
 
 done:
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void run_multi_cluster_no_fat_chain_child_directory(
@@ -2494,7 +2494,7 @@ static void run_multi_cluster_no_fat_chain_child_directory(
 	error = plan_fixture_growth(&fixture, target_sector_count, &target);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	boundary = expected_displaced_cluster_count(&fixture.geometry, &target) + 2;
@@ -2521,7 +2521,7 @@ static void run_multi_cluster_no_fat_chain_child_directory(
 	error = exfat_fixture_resize(&fixture.memory.device, target_sector_count, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	for (index = 0; index < DIRECTORY_CLUSTER_COUNT; ++index) {
@@ -2588,7 +2588,7 @@ static void run_multi_cluster_no_fat_chain_child_directory(
 		}
 		CHECK(load_fat_entry(&fixture, &target, target_directory_cluster) == expected_next);
 	}
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_multi_cluster_no_fat_chain_child_directory(void)
@@ -2644,7 +2644,7 @@ static void test_identity_mapping_rewrites_only_bitmap(void)
 			CHECK(sector_operation_count(&fixture, MEMORY_OPERATION_WRITE, target_sector) ==
 			    cases[index].expected_directory_writes);
 		}
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2673,7 +2673,7 @@ static void test_no_fat_chain_ignores_stale_fat(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	if (error != EXFAT_RESIZE_SUCCESS) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 
@@ -2703,7 +2703,7 @@ static void test_no_fat_chain_ignores_stale_fat(void)
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(load_fat_entry(&fixture, &target, mapped_cluster) == 0);
 
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_failure_leaves_volume_dirty(void)
@@ -2729,7 +2729,7 @@ static void test_failure_leaves_volume_dirty(void)
 		}
 	}
 	CHECK(failing_operation != SIZE_MAX);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	memory_block_device_fail_operation(&fixture.memory, failing_operation, 1);
@@ -2741,7 +2741,7 @@ static void test_failure_leaves_volume_dirty(void)
 	CHECK(exfat_resize_load_le16(boot_sector, sizeof(boot_sector), VOLUME_FLAGS_OFFSET,
 	          &volume_flags) == EXFAT_RESIZE_SUCCESS);
 	CHECK((volume_flags & 0x0002) != 0);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_resize_stages(void)
@@ -2797,7 +2797,7 @@ static void test_resize_stages(void)
 	cases[case_count].operation = fixture.memory.operation_count - 1;
 	cases[case_count].expected_stage = EXFAT_RESIZE_STAGE_FINALIZING;
 	cases[case_count++].expected_dirty = 0;
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 	for (index = 0; index < case_count; ++index) {
 		CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
@@ -2813,7 +2813,7 @@ static void test_resize_stages(void)
 			          &volume_flags) == EXFAT_RESIZE_SUCCESS);
 			CHECK(((volume_flags & 0x0002) != 0) == cases[index].expected_dirty);
 		}
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2839,7 +2839,7 @@ static void test_allocator_validation(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_INVALID_ARGUMENT);
 	CHECK(fixture.memory.operation_count == 0);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_mapping_extremes(void)
@@ -2917,7 +2917,7 @@ static void test_mapping_extremes(void)
 				CHECK((root[32 * 9 + 1] & 0x02) != 0);
 			}
 		}
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -2985,7 +2985,7 @@ static void test_contiguous_relocation_is_batched(void)
 		}
 		CHECK(saw_batched_read);
 		CHECK(saw_batched_write);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -3000,7 +3000,7 @@ static void test_source_fat_snapshot_reads_are_bounded(void)
 	error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	check_source_fat_snapshot_read(&fixture);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_allocation_stream_claims_are_cancellable(void)
@@ -3036,19 +3036,19 @@ static void test_allocation_stream_claims_are_cancellable(void)
 		    configure_large_allocation_claim(&fixture, no_fat_chain, &target_sector_count);
 		CHECK(fixture_result == 0);
 		if (fixture_result != 0) {
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		error = plan_fixture_growth(&fixture, target_sector_count, &target);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		if (error != EXFAT_RESIZE_SUCCESS) {
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		model_size = (uint64_t)target.cluster_count * sizeof(uint32_t);
 		CHECK(model_size <= SIZE_MAX);
 		if (model_size > SIZE_MAX) {
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		state.expected_model_size = (size_t)model_size;
@@ -3056,7 +3056,7 @@ static void test_allocation_stream_claims_are_cancellable(void)
 		    &fixture.geometry, &target, ALLOCATION_CLAIM_FIRST_CLUSTER, &mapped_cluster);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		if (error != EXFAT_RESIZE_SUCCESS) {
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		state.claimed_index = mapped_cluster - 2;
@@ -3065,7 +3065,7 @@ static void test_allocation_stream_claims_are_cancellable(void)
 		    &mapped_cluster);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		if (error != EXFAT_RESIZE_SUCCESS) {
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		state.unclaimed_index = mapped_cluster - 2;
@@ -3077,7 +3077,7 @@ static void test_allocation_stream_claims_are_cancellable(void)
 		CHECK(state.contents_checked);
 		CHECK(test_allocator_is_clean(&state.allocator));
 		check_operations_are_read_only(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -3096,7 +3096,7 @@ static void test_file_fat_stream_uses_source_snapshot(void)
 		error = exfat_fixture_resize(&fixture.memory.device, TARGET_SECTOR_COUNT, &callbacks, NULL);
 		CHECK(error == EXFAT_RESIZE_SUCCESS);
 		check_source_fat_snapshot_read(&fixture);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -3151,7 +3151,7 @@ static void run_directory_read_ahead(
 	CHECK(exfat_fixture_initialize(&fixture, TARGET_SECTOR_COUNT) == 0);
 	CHECK(exfat_fixture_read_sector(&fixture, exfat_fixture_cluster_sector(&fixture.geometry, 2),
 	          root, sizeof(root)) == 0);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 	memset(&fixture, 0, sizeof(fixture));
 	memory_block_device_init(&fixture.memory, SECTOR_SIZE, target_sector_count);
 	fixture.geometry.sectors_per_cluster = sectors_per_cluster;
@@ -3188,7 +3188,7 @@ static void run_directory_read_ahead(
 	directory = calloc(1, directory_size);
 	CHECK(directory != NULL);
 	if (directory == NULL) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		return;
 	}
 	for (offset = 0; offset < directory_size; offset += 32)
@@ -3244,7 +3244,7 @@ static void run_directory_read_ahead(
 	CHECK(exfat_resize_store_le16(entry_set, 32, 2, entry_set_checksum(entry_set)) ==
 	    EXFAT_RESIZE_SUCCESS);
 	CHECK(memcmp(result + entry_offset % SECTOR_SIZE, entry_set, sizeof(entry_set)) == 0);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_directory_read_ahead_is_bounded(void)
@@ -3291,7 +3291,7 @@ static void test_directory_fat_stream_uses_source_snapshot_and_target_model(void
 		if (source_clusters == NULL || target_clusters == NULL) {
 			free(source_clusters);
 			free(target_clusters);
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 			continue;
 		}
 		CHECK(configure_fat_chained_root_directory(&fixture, fragmented, source_clusters) == 0);
@@ -3334,7 +3334,7 @@ static void test_directory_fat_stream_uses_source_snapshot_and_target_model(void
 		}
 		free(source_clusters);
 		free(target_clusters);
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 
 		if (!fragmented) {
 			enum exfat_resize_stage stage = EXFAT_RESIZE_STAGE_PREFLIGHT;
@@ -3351,7 +3351,7 @@ static void test_directory_fat_stream_uses_source_snapshot_and_target_model(void
 			CHECK(error == EXFAT_RESIZE_IO_ERROR);
 			CHECK(stage == EXFAT_RESIZE_STAGE_RESIZING);
 			CHECK(fixture.memory.operation_count == metadata_write_operation + 1);
-			exfat_fixture_destroy(&fixture);
+			CHECK(exfat_fixture_destroy(&fixture) == 0);
 		}
 	}
 }
@@ -3442,7 +3442,7 @@ static void test_multi_sector_cluster_copy(void)
 	}
 	CHECK(saw_multi_sector_read);
 	CHECK(saw_multi_sector_write);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 int main(void)

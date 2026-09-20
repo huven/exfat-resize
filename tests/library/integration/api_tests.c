@@ -6,6 +6,7 @@
 #include "support/memory_block_device.h"
 #include "support/test_allocator.h"
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -293,7 +294,7 @@ static void test_invalid_devices(void)
 		CHECK(allocator.deallocation_calls == 0);
 		CHECK(test_allocator_is_clean(&allocator));
 		CHECK(memory.operation_count == 0);
-		memory_block_device_destroy(&memory);
+		CHECK(memory_block_device_destroy(&memory) == 0);
 	}
 }
 
@@ -336,7 +337,7 @@ static void test_invalid_allocators(void)
 		CHECK(allocator.deallocation_calls == 0);
 		CHECK(test_allocator_is_clean(&allocator));
 		CHECK(memory.operation_count == 0);
-		memory_block_device_destroy(&memory);
+		CHECK(memory_block_device_destroy(&memory) == 0);
 	}
 }
 
@@ -372,7 +373,7 @@ static void test_invalid_arguments_do_not_invoke_monitor(void)
 	CHECK(state.cancellation_calls == 0);
 	CHECK(allocator.allocation_attempts == 0);
 	CHECK(memory.operation_count == 0);
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 static void test_invalid_targets(void)
@@ -444,7 +445,7 @@ static void test_invalid_targets(void)
 			    record->first_sector >=
 			        (uint64_t)fixture.geometry.fat_offset + fixture.geometry.fat_length);
 		}
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -466,7 +467,7 @@ static void test_preflight_io_error(void)
 	CHECK(test_allocator_is_clean(&allocator));
 	CHECK(fixture.memory.operation_count == 1);
 	CHECK(fixture.memory.operations[0].kind == MEMORY_OPERATION_READ);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_unsupported_sector_mapping(void)
@@ -498,7 +499,7 @@ static void test_unsupported_sector_mapping(void)
 	CHECK(test_allocator_is_clean(&allocator));
 	CHECK(memory.operation_count == 1);
 	CHECK(memory.operations[0].kind == MEMORY_OPERATION_READ);
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 static void test_monitor_event_stream_and_disabled_behavior(void)
@@ -561,10 +562,10 @@ static void test_monitor_event_stream_and_disabled_behavior(void)
 	CHECK(test_allocator_is_clean(&empty_allocator));
 	CHECK(test_allocator_is_clean(&reported_allocator));
 	CHECK(test_allocator_is_clean(&polled_allocator));
-	exfat_fixture_destroy(&baseline);
-	exfat_fixture_destroy(&empty);
-	exfat_fixture_destroy(&reported);
-	exfat_fixture_destroy(&polled);
+	CHECK(exfat_fixture_destroy(&baseline) == 0);
+	CHECK(exfat_fixture_destroy(&empty) == 0);
+	CHECK(exfat_fixture_destroy(&reported) == 0);
+	CHECK(exfat_fixture_destroy(&polled) == 0);
 }
 
 static void test_cache_window_turnover_cancellation(void)
@@ -594,7 +595,7 @@ static void test_cache_window_turnover_cancellation(void)
 	CHECK(!operation_covers_sector(&fixture.memory, MEMORY_OPERATION_READ, child_sector));
 	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_WRITE) == 0);
 	CHECK(test_allocator_is_clean(&allocator));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_cluster_copy_chunk_boundary_cancellation(void)
@@ -647,7 +648,7 @@ static void test_cluster_copy_chunk_boundary_cancellation(void)
 	CHECK(!operation_covers_sector(
 	    &fixture.memory, MEMORY_OPERATION_WRITE, target_sector + copy_chunk_sectors));
 	CHECK(test_allocator_is_clean(&allocator));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_target_fat_buffer_boundary_cancellation(void)
@@ -695,7 +696,7 @@ static void test_target_fat_buffer_boundary_cancellation(void)
 	CHECK(test_allocator_is_clean(&allocator));
 
 done:
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_target_bitmap_generation_boundary_cancellation(void)
@@ -761,7 +762,7 @@ static void test_target_bitmap_generation_boundary_cancellation(void)
 	CHECK(test_allocator_is_clean(&state.allocator));
 
 destroy_fixture:
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 free_snapshot:
 	free(state.snapshot);
 }
@@ -788,7 +789,7 @@ static void test_cancellation_before_boot_region_commit(void)
 	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_SYNC) == 2);
 	CHECK(!operation_covers_sector(&fixture.memory, MEMORY_OPERATION_WRITE, BACKUP_BOOT_REGION));
 	CHECK(test_allocator_is_clean(&allocator));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_stage_cancellation(void)
@@ -837,7 +838,7 @@ static void test_stage_cancellation(void)
 		if (cases[index].requested_stage == EXFAT_RESIZE_STAGE_COMPLETED && state.event_count == 5)
 			CHECK(state.events[4].values[1] == exfat_fixture_target_size(TARGET_SECTOR_COUNT));
 		CHECK(test_allocator_is_clean(&allocator));
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
 }
 
@@ -865,7 +866,7 @@ static void test_cancellation_without_event_reporting(void)
 	CHECK(allocator.allocation_attempts == 0);
 	CHECK(fixture.memory.operation_count == 0);
 	CHECK(test_allocator_is_clean(&allocator));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 struct allocation_zero_state {
@@ -967,7 +968,7 @@ static void test_allocation_model_zero_chunk_boundary_cancellation(void)
 	CHECK(state.contents_checked);
 	CHECK(operation_kind_count(&fixture.memory, MEMORY_OPERATION_WRITE) == 0);
 	CHECK(test_allocator_is_clean(&state.allocator));
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 enum precedence_failure_kind {
@@ -1082,12 +1083,25 @@ static void test_concrete_failures_precede_cancellation(void)
 		check_event_stream(&state, 1);
 		if (cases[index] != PRECEDENCE_ALLOCATION_FAILURE)
 			CHECK(test_allocator_is_clean(&allocator));
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 	}
+}
+
+static void test_fixture_teardown_reports_contract_error(void)
+{
+	struct exfat_fixture fixture = { 0 };
+	unsigned char sector[512];
+
+	memory_block_device_init(&fixture.memory, sizeof(sector), 8);
+	CHECK(fixture.memory.device.read(fixture.memory.device.context, 8, 1, sector) == EINVAL);
+	CHECK(exfat_fixture_destroy(&fixture) == EINVAL);
+	CHECK(fixture.memory.contract_error == NULL);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 int main(void)
 {
+	test_fixture_teardown_reports_contract_error();
 	test_invalid_devices();
 	test_invalid_allocators();
 	test_invalid_arguments_do_not_invoke_monitor();

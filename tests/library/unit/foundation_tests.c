@@ -7,6 +7,7 @@
 #include "support/memory_block_device.h"
 #include "support/test_allocator.h"
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -198,7 +199,7 @@ static void test_device_geometry(void)
 	device.sector_count = UINT64_MAX;
 	error = exfat_resize_validate_block_device(&device);
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 static void test_memory_block_device(void)
@@ -314,7 +315,177 @@ static void test_memory_block_device(void)
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(memory.operations[memory.operation_count - 1].kind == MEMORY_OPERATION_SYNC);
 
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
+}
+
+static void test_memory_block_device_callback_boundaries(void)
+{
+	struct memory_block_device memory;
+	unsigned char written[1024];
+	unsigned char read_back[1024];
+	size_t operation_count;
+
+	memory_block_device_init(&memory, 512, 8);
+	memset(written, 0x5a, sizeof(written));
+	CHECK(memory.device.write(memory.device.context, 7, 1, written) == 0);
+	CHECK(memory.device.read(memory.device.context, 7, 1, read_back) == 0);
+	CHECK(memcmp(read_back, written, 512) == 0);
+	CHECK(memory.device.write(memory.device.context, 6, 2, written) == 0);
+	CHECK(memory.device.read(memory.device.context, 6, 2, read_back) == 0);
+	CHECK(memcmp(read_back, written, sizeof(read_back)) == 0);
+	CHECK(memory.contract_error == NULL);
+
+	memory.device.sector_count = 16;
+	CHECK(memory.device.write(memory.device.context, 15, 1, written) == 0);
+	CHECK(memory.device.read(memory.device.context, 15, 1, read_back) == 0);
+	CHECK(memcmp(read_back, written, 512) == 0);
+	CHECK(memory.sector_count == 3);
+	memory.device.sector_count = 8;
+	operation_count = memory.operation_count;
+	CHECK(memory.device.read(memory.device.context, 15, 1, read_back) == EINVAL);
+	CHECK(memory.device.write(memory.device.context, 15, 1, written) == EINVAL);
+	CHECK(memory.operation_count == operation_count);
+	CHECK(memory.contract_error != NULL);
+	CHECK(memory_block_device_destroy(&memory) == EINVAL);
+}
+
+static void test_memory_block_device_callback_rejections(void)
+{
+	static const struct {
+		uint64_t capacity;
+		uint64_t first_sector;
+		uint32_t sector_count;
+		uint32_t sector_size;
+		int null_buffer;
+	} cases[] = {
+		{ 8, 8, 1, 512, 0 },
+		{ 8, 9, 1, 512, 0 },
+		{ 8, 7, 2, 512, 0 },
+		{ 8, 0, 0, 512, 0 },
+		{ UINT64_MAX, UINT64_MAX - 1, 2, 512, 0 },
+		{ 8, 0, 1, 512, 1 },
+		{ 8, 0, 1, 0, 0 },
+#if SIZE_MAX < UINT64_MAX
+		{ UINT64_MAX, 0, UINT32_MAX, UINT32_MAX, 0 },
+#endif
+	};
+	struct memory_block_device memory;
+	unsigned char original[1024];
+	unsigned char buffer[1024];
+	unsigned char unchanged[1024];
+	size_t index;
+	int writing;
+	int result;
+
+	memset(original, 0x11, sizeof(original));
+	memset(unchanged, 0xa5, sizeof(unchanged));
+	for (writing = 0; writing <= 1; ++writing) {
+		for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+			memory_block_device_init(&memory, 512, 8);
+			CHECK(memory.device.write(memory.device.context, 6, 2, original) == 0);
+			memory.device.sector_count = cases[index].capacity;
+			memory.device.sector_size = cases[index].sector_size;
+			memcpy(buffer, unchanged, sizeof(buffer));
+			if (writing)
+				result = memory.device.write(memory.device.context, cases[index].first_sector,
+				    cases[index].sector_count, cases[index].null_buffer ? NULL : buffer);
+			else
+				result = memory.device.read(memory.device.context, cases[index].first_sector,
+				    cases[index].sector_count, cases[index].null_buffer ? NULL : buffer);
+			CHECK(result == EINVAL);
+			CHECK(memory.contract_error != NULL);
+			CHECK(memory.contract_error_operation.kind ==
+			    (writing ? MEMORY_OPERATION_WRITE : MEMORY_OPERATION_READ));
+			CHECK(memory.contract_error_operation.first_sector == cases[index].first_sector);
+			CHECK(memory.contract_error_operation.sector_count == cases[index].sector_count);
+			CHECK(memory.operation_count == 1);
+			CHECK(memory.operation_index == 1);
+			CHECK(memory.operations[0].kind == MEMORY_OPERATION_WRITE);
+			CHECK(memory.operations[0].first_sector == 6);
+			CHECK(memory.operations[0].sector_count == 2);
+			CHECK(memory.sector_count == 2);
+			CHECK(memory.sectors[0].sector == 6);
+			CHECK(memory.sectors[1].sector == 7);
+			CHECK(memcmp(memory.sectors[0].data, original, 512) == 0);
+			CHECK(memcmp(memory.sectors[1].data, original + 512, 512) == 0);
+			CHECK(memcmp(buffer, unchanged, sizeof(buffer)) == 0);
+			CHECK(memory_block_device_destroy(&memory) == EINVAL);
+		}
+	}
+}
+
+static void test_memory_block_device_sticky_contract_error(void)
+{
+	struct memory_block_device memory;
+	unsigned char original[1024];
+	unsigned char replacement[1024];
+	unsigned char read_back[1024];
+	const char *first_error;
+
+	memory_block_device_init(&memory, 512, 8);
+	memset(original, 0x11, sizeof(original));
+	memset(replacement, 0x22, sizeof(replacement));
+	memset(read_back, 0xa5, sizeof(read_back));
+	CHECK(memory.device.write(memory.device.context, 6, 2, original) == 0);
+	memory_block_device_clear_operations(&memory);
+	memory_block_device_fail_operation(&memory, 0, 1234);
+	CHECK(memory.device.read(memory.device.context, 7, 2, read_back) == EINVAL);
+	CHECK(memory.operation_count == 0);
+	CHECK(memory.operation_index == 0);
+	CHECK(read_back[0] == 0xa5);
+	CHECK(read_back[sizeof(read_back) - 1] == 0xa5);
+	first_error = memory.contract_error;
+	CHECK(first_error != NULL);
+	CHECK(memory.device.read(memory.device.context, 6, 2, read_back) == 1234);
+	CHECK(memory.operation_count == 1);
+	CHECK(memory.operation_index == 1);
+	CHECK(memory.contract_error == first_error);
+
+	memory_block_device_clear_operations(&memory);
+	CHECK(memory.contract_error == first_error);
+	memory_block_device_clear_failure(&memory);
+	CHECK(memory.contract_error == first_error);
+	memory_block_device_fail_after_operation(&memory, 0, 1, 1234);
+	CHECK(memory.device.write(memory.device.context, 7, 2, replacement) == EINVAL);
+	CHECK(memory.operation_count == 0);
+	CHECK(memory.operation_index == 0);
+	CHECK(memory.sector_count == 2);
+	CHECK(memcmp(memory.sectors[1].data, original + 512, 512) == 0);
+	CHECK(memory.contract_error == first_error);
+	CHECK(memory.contract_error_operation.kind == MEMORY_OPERATION_READ);
+	CHECK(memory.contract_error_operation.first_sector == 7);
+	CHECK(memory.contract_error_operation.sector_count == 2);
+	CHECK(memory.device.write(memory.device.context, 6, 2, replacement) == 1234);
+	CHECK(memcmp(memory.sectors[0].data, replacement, 512) == 0);
+	CHECK(memcmp(memory.sectors[1].data, original + 512, 512) == 0);
+	CHECK(memory.operation_count == 1);
+	CHECK(memory.operation_index == 1);
+
+	memory_block_device_clear_failure(&memory);
+	CHECK(memory.device.sync(memory.device.context) == 0);
+	CHECK(memory.contract_error == first_error);
+	CHECK(memory_block_device_make_durable(&memory) == 0);
+	CHECK(memory.contract_error == first_error);
+	CHECK(memory_block_device_crash(&memory) == 0);
+	CHECK(memory.contract_error == first_error);
+	CHECK(memory.contract_error_operation.kind == MEMORY_OPERATION_READ);
+	CHECK(memory.contract_error_operation.first_sector == 7);
+	CHECK(memory.contract_error_operation.sector_count == 2);
+	memory_block_device_clear_operations(&memory);
+	CHECK(memory_block_device_destroy(&memory) == EINVAL);
+	CHECK(memory.sectors == NULL);
+	CHECK(memory.sector_count == 0);
+	CHECK(memory.sector_capacity == 0);
+	CHECK(memory.durable_sectors == NULL);
+	CHECK(memory.durable_sector_count == 0);
+	CHECK(memory.operations == NULL);
+	CHECK(memory.operation_count == 0);
+	CHECK(memory.operation_capacity == 0);
+	CHECK(memory.operation_index == 0);
+	CHECK(memory.contract_error == NULL);
+	CHECK(memory.contract_error_operation.kind == 0);
+	CHECK(memory.contract_error_operation.first_sector == 0);
+	CHECK(memory.contract_error_operation.sector_count == 0);
 }
 
 static void test_sector_adapter(void)
@@ -364,7 +535,7 @@ static void test_sector_adapter(void)
 	memory.device.sector_count = 8;
 	error = exfat_resize_adapt_block_device(&memory.device, 512, &adapter);
 	CHECK(error == EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING);
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 static void test_memory_block_device_durability(void)
@@ -419,7 +590,7 @@ static void test_memory_block_device_durability(void)
 	CHECK(error == EXFAT_RESIZE_SUCCESS);
 	CHECK(memcmp(read_back, replacement, sizeof(read_back)) == 0);
 
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 static void test_sparse_large_device(void)
@@ -449,7 +620,7 @@ static void test_sparse_large_device(void)
 	    &memory.device, sector_count, 1, read_back, sizeof(read_back));
 	CHECK(error == EXFAT_RESIZE_OUT_OF_BOUNDS);
 
-	memory_block_device_destroy(&memory);
+	CHECK(memory_block_device_destroy(&memory) == 0);
 }
 
 int main(void)
@@ -462,6 +633,9 @@ int main(void)
 	test_endian_access();
 	test_device_geometry();
 	test_memory_block_device();
+	test_memory_block_device_callback_boundaries();
+	test_memory_block_device_callback_rejections();
+	test_memory_block_device_sticky_contract_error();
 	test_sector_adapter();
 	test_memory_block_device_durability();
 	test_sparse_large_device();

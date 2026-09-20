@@ -54,7 +54,7 @@ static int initialize_durable_fixture(struct exfat_fixture *fixture, uint64_t ta
 	if (exfat_fixture_initialize(fixture, target_sector_count) != 0)
 		return -1;
 	if (memory_block_device_make_durable(&fixture->memory) != 0) {
-		exfat_fixture_destroy(fixture);
+		CHECK(exfat_fixture_destroy(fixture) == 0);
 		return -1;
 	}
 	memory_block_device_clear_operations(&fixture->memory);
@@ -302,7 +302,7 @@ static void run_fault_case(const struct memory_operation *baseline,
 		++completed_sync_count;
 	memory_block_device_clear_failure(&fixture.memory);
 	check_durable_boundary(&fixture, completed_fixture, target, completed_sync_count);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
 static void test_transaction_failures(uint64_t target_sector_count)
@@ -344,7 +344,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 		    &first_transaction_operation, &first_fat_write);
 	if (baseline == NULL || first_transaction_operation == SIZE_MAX ||
 	    first_fat_write == SIZE_MAX) {
-		exfat_fixture_destroy(&fixture);
+		CHECK(exfat_fixture_destroy(&fixture) == 0);
 		free(baseline);
 		return;
 	}
@@ -382,7 +382,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	CHECK(saw_preparing_read);
 	CHECK(saw_resizing_read);
 	CHECK(saw_finalizing_read);
-	exfat_fixture_destroy(&fixture);
+	CHECK(exfat_fixture_destroy(&fixture) == 0);
 	free(baseline);
 }
 
