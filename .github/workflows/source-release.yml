@@ -68,7 +68,7 @@ jobs:
           overwrite: true
 
   build_linux:
-    name: Linux binary archive
+    name: Linux binary archives (x86-64 and ARM64)
     needs: build_source
     permissions:
       contents: read
@@ -115,10 +115,11 @@ jobs:
           name: source-release-${{ github.ref_name }}-${{ github.run_id }}
           path: release-assets
 
-      - name: Download tested Linux archive
+      - name: Download tested Linux archives
         uses: actions/download-artifact@v4
         with:
-          name: linux-release-${{ github.ref_name }}-${{ github.run_id }}
+          pattern: linux-release-${{ github.ref_name }}-${{ github.run_id }}-*
+          merge-multiple: true
           path: release-assets
 
       - name: Download tested Windows archive
@@ -134,10 +135,12 @@ jobs:
           set -euo pipefail
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
-          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          linux_x86_64_archive=exfat-resize-$version-linux-x86_64.tar.gz
+          linux_arm64_archive=exfat-resize-$version-linux-arm64.tar.gz
           windows_archive=exfat-resize-$version-windows-x86_64.zip
           expected=$(
-            printf '%s\n' "$source_archive" "$linux_archive" "$windows_archive" | sort
+            printf '%s\n' "$source_archive" "$linux_x86_64_archive" "$linux_arm64_archive" \
+              "$windows_archive" | sort
           )
           actual=$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if [ "$actual" != "$expected" ]; then
@@ -155,7 +158,8 @@ jobs:
           set -euo pipefail
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
-          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          linux_x86_64_archive=exfat-resize-$version-linux-x86_64.tar.gz
+          linux_arm64_archive=exfat-resize-$version-linux-arm64.tar.gz
           windows_archive=exfat-resize-$version-windows-x86_64.zip
           title="exfat-resize $version"
 
@@ -178,11 +182,13 @@ jobs:
             done
           gh release upload "$RELEASE_REF" \
             "release-assets/$source_archive" \
-            "release-assets/$linux_archive" \
+            "release-assets/$linux_x86_64_archive" \
+            "release-assets/$linux_arm64_archive" \
             "release-assets/$windows_archive"
 
           expected=$(
-            for asset in "$source_archive" "$linux_archive" "$windows_archive"; do
+            for asset in "$source_archive" "$linux_x86_64_archive" "$linux_arm64_archive" \
+              "$windows_archive"; do
               digest=$(sha256sum "release-assets/$asset" | cut -d ' ' -f 1)
               printf '%s\tsha256:%s\n' "$asset" "$digest"
             done | sort
@@ -290,7 +296,8 @@ jobs:
 
           version=${RELEASE_REF#v}
           source_archive=exfat-resize-$version.tar.gz
-          linux_archive=exfat-resize-$version-linux-x86_64-glibc.tar.gz
+          linux_x86_64_archive=exfat-resize-$version-linux-x86_64.tar.gz
+          linux_arm64_archive=exfat-resize-$version-linux-arm64.tar.gz
           windows_archive=exfat-resize-$version-windows-x86_64.zip
           macos_archive=exfat-resize-$version-macos-arm64.tar.gz
           signed_executable=exfat-resize-$version-macos-arm64.signed
@@ -306,8 +313,8 @@ jobs:
           test "$published_digest" = "sha256:$archive_sha256"
 
           expected=$(
-            printf '%s\n' "$source_archive" "$linux_archive" "$windows_archive" \
-              "$macos_archive" "$signed_executable" | sort
+            printf '%s\n' "$source_archive" "$linux_x86_64_archive" "$linux_arm64_archive" \
+              "$windows_archive" "$macos_archive" "$signed_executable" | sort
           )
           actual=$(gh release view "$RELEASE_REF" --json assets --jq '.assets[].name' | sort)
           if [ "$actual" != "$expected" ]; then

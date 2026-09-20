@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-name: Linux binary
+name: Linux binaries
 
 on:
   workflow_call:
@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       binary_artifact_name:
-        description: Artifact name for the tested Linux archive
+        description: Artifact name prefix for the tested Linux archives
         required: true
         type: string
       expected_version:
@@ -29,105 +29,144 @@ permissions:
 
 jobs:
   build:
-    name: Build and test (AlmaLinux 8.10, x86-64 glibc)
-    runs-on: ubuntu-latest
-    container: almalinux:8.10
+    name: Build and test (${{ matrix.arch }}, Alpine 3.22, static musl PIE)
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       EXPECTED_VERSION: ${{ inputs.expected_version }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      TARGET_MACHINE: ${{ matrix.machine }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            machine: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            machine: aarch64
+            runner: ubuntu-24.04-arm
 
     steps:
-      - name: Install build tools
-        run: |
-          dnf install --assumeyes \
-            binutils ca-certificates cmake diffutils findutils gcc gzip make tar
-
       - name: Download tested source archive
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.source_artifact_name }}
           path: source-artifacts
 
-      - name: Record builder environment
-        run: |
-          cat /etc/os-release
-          uname -a
-          getconf GNU_LIBC_VERSION
-          gcc --version
-          cmake --version
-          readelf --version
-
       - name: Build and test Linux binary archive
         run: |
           set -eu
-          test "$(uname -m)" = x86_64
+          test "$(uname -m)" = "$TARGET_MACHINE"
+          # Run artifact actions on the Ubuntu host; build with Alpine's native musl toolchain.
+          # The device tests need loop devices and FUSE inside the disposable builder.
+          docker run --rm --privileged -i -v "$PWD:/work" -w /work \
+            -e EXPECTED_VERSION -e TARGET_ARCH -e TARGET_MACHINE alpine:3.22 sh -eu <<'BUILD'
+          apk add --no-cache build-base binutils ca-certificates cmake coreutils diffutils tar \
+            exfatprogs findutils fuse-exfat git gzip linux-headers openssh-keygen sudo util-linux
+          cat /etc/os-release
+          uname -a
+          apk info -v
+          gcc --version
+          cmake --version
+          readelf --version
+          test "$(uname -m)" = "$TARGET_MACHINE"
+
+          # Alpine omits the musl notice from installed packages; use its matching source archive.
+          musl_version=$(apk info -v | sed -n 's/^musl-\([0-9][^-]*\)-r[0-9]*$/\1/p')
+          test -n "$musl_version"
+          wget -O musl.tar.gz \
+            "https://distfiles.alpinelinux.org/distfiles/v3.22/musl-$musl_version.tar.gz"
+          tar -xOf musl.tar.gz "musl-$musl_version/COPYRIGHT" > LICENSE.musl
+
           archive=$(find source-artifacts -maxdepth 1 -type f -name 'exfat-resize-*.tar.gz' -print)
           test -n "$archive"
           test "$(printf '%s\n' "$archive" | wc -l)" -eq 1
-
           mkdir source-tree
           tar -xzf "$archive" -C source-tree
           source_directory=$(find source-tree -mindepth 1 -maxdepth 1 \
             -type d -name 'exfat-resize-*' -print)
           test -n "$source_directory"
           test "$(printf '%s\n' "$source_directory" | wc -l)" -eq 1
-
           if [ -n "$EXPECTED_VERSION" ]; then
             expected_version=${EXPECTED_VERSION#v}
             test "$(sed -n '1p' "$source_directory/.tarball-version")" = "$expected_version"
           fi
 
-          "$source_directory/tools/build-linux-binary.sh" "$source_directory" linux-artifacts
+          cmake -S "$source_directory" -B musl-tests -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS=-fPIE -DCMAKE_EXE_LINKER_FLAGS=-static-pie \
+            -DEXFAT_RESIZE_BUILD_CLI=ON -DEXFAT_RESIZE_BUILD_TESTS=ON
+          cmake --build musl-tests --parallel
+          ctest --test-dir musl-tests --output-on-failure --no-tests=error
+
+          "$source_directory/tools/build-linux-binary.sh" \
+            "$source_directory" linux-artifacts LICENSE.musl
           binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
-            -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
+            -name "exfat-resize-*-linux-$TARGET_ARCH.tar.gz" -print)
           test -n "$binary_archive"
           test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
           "$source_directory/tests/package/linux-binary-test.sh" \
-            "$binary_archive" "$source_directory"
+            "$binary_archive" "$source_directory" LICENSE.musl
+          BUILD
 
       - name: Upload tested Linux archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.binary_artifact_name }}
-          path: linux-artifacts/exfat-resize-*-linux-x86_64-glibc.tar.gz
+          name: ${{ inputs.binary_artifact_name }}-${{ matrix.arch }}
+          path: linux-artifacts/exfat-resize-*-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
           overwrite: true
           retention-days: ${{ inputs.retention_days }}
 
   compatibility:
-    name: Compatibility (${{ matrix.name }})
+    name: Compatibility (${{ matrix.arch }}, ${{ matrix.distribution.name }})
     needs: build
-    runs-on: ubuntu-latest
-    container: ${{ matrix.image }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
+    env:
+      TARGET_ARCH: ${{ matrix.arch }}
+      TEST_IMAGE: ${{ matrix.distribution.image }}
 
     strategy:
       fail-fast: false
       matrix:
-        include:
+        arch: [x86_64, arm64]
+        distribution:
           - name: Debian 12
             image: debian:12
           - name: Ubuntu 22.04 LTS
             image: ubuntu:22.04
+          - name: Alpine 3.22
+            image: alpine:3.22
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
-      - name: Install exFAT and archive tools
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            ca-certificates exfatprogs findutils gzip tar
-
       - name: Download tested Linux archive
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.binary_artifact_name }}
+          name: ${{ inputs.binary_artifact_name }}-${{ matrix.arch }}
           path: linux-artifacts
 
       - name: Run regular-file resize compatibility test
         run: |
           set -eu
+          docker run --rm -i -v "$PWD:/work" -w /work -e TARGET_ARCH "$TEST_IMAGE" sh -eu <<'TEST'
+          if command -v apk >/dev/null; then
+            apk add --no-cache coreutils exfatprogs findutils gzip tar
+          else
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+              ca-certificates exfatprogs findutils gzip tar
+          fi
+          cat /etc/os-release
+          uname -a
           binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
-            -name 'exfat-resize-*-linux-x86_64-glibc.tar.gz' -print)
+            -name "exfat-resize-*-linux-$TARGET_ARCH.tar.gz" -print)
           test -n "$binary_archive"
           test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
 
@@ -142,3 +181,4 @@ jobs:
           truncate -s 128M "$image"
           "$binary" "$image"
           fsck.exfat -n "$image"
+          TEST

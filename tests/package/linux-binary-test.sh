@@ -4,13 +4,14 @@
 set -eu
 set -f
 
-if [ "$#" -ne 2 ]; then
-	echo "usage: $0 LINUX_ARCHIVE SOURCE_DIRECTORY" >&2
+if [ "$#" -ne 3 ]; then
+	echo "usage: $0 LINUX_ARCHIVE SOURCE_DIRECTORY MUSL_LICENSE" >&2
 	exit 2
 fi
 
 archive=$1
 source_directory=$2
+musl_license=$3
 archive_directory=$(CDPATH= cd -- "$(dirname "$archive")" && pwd)
 archive_name=${archive##*/}
 archive=$archive_directory/$archive_name
@@ -22,18 +23,19 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-case $archive_name in
-	exfat-resize-*-linux-x86_64-glibc.tar.gz) ;;
+case $(uname -m) in
+	x86_64) architecture=x86_64 ;;
+	aarch64 | arm64) architecture=arm64 ;;
 	*)
-		echo "unexpected Linux archive name: $archive_name" >&2
+		echo "Linux binary archive tests require an x86_64 or ARM64 host" >&2
 		exit 1
 		;;
 esac
 
 build_version=$(sed -n '1p' "$source_directory/.tarball-version")
-package=exfat-resize-$build_version-linux-x86_64-glibc
+package=exfat-resize-$build_version-linux-$architecture
 if [ "$archive_name" != "$package.tar.gz" ]; then
-	echo "Linux archive and source build versions disagree" >&2
+	echo "Linux archive name disagrees with source build version or host architecture" >&2
 	exit 1
 fi
 
@@ -46,7 +48,7 @@ if [ "$top_level" != "$package" ] || [ ! -d "$package_directory" ]; then
 	exit 1
 fi
 expected=$(
-	printf '%s\n' CONTRIBUTING.md LICENSE README.md docs exfat-resize exfat-resize.8 \
+	printf '%s\n' CONTRIBUTING.md LICENSE LICENSE.musl README.md docs exfat-resize exfat-resize.8 \
 		install.sh uninstall.sh |
 		sort
 )
@@ -71,6 +73,7 @@ fi
 if [ "$(stat -c '%a' "$package_directory/exfat-resize.8")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/CONTRIBUTING.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/LICENSE")" != 644 ] ||
+	[ "$(stat -c '%a' "$package_directory/LICENSE.musl")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/README.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/docs/LIBRARY.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/docs/PARTITIONING.md")" != 644 ] ||
@@ -78,6 +81,7 @@ if [ "$(stat -c '%a' "$package_directory/exfat-resize.8")" != 644 ] ||
 	echo "Linux archive data-file modes are incorrect" >&2
 	exit 1
 fi
+"$source_directory/tools/check-linux-binary.sh" "$package_directory/exfat-resize" "$architecture"
 if [ "$("$package_directory/exfat-resize" --version)" != "exfat-resize $build_version" ]; then
 	echo "archived CLI version is incorrect" >&2
 	exit 1
@@ -88,6 +92,7 @@ if ! grep -F "exfat-resize $build_version" "$package_directory/exfat-resize.8" >
 fi
 cmp "$source_directory/CONTRIBUTING.md" "$package_directory/CONTRIBUTING.md"
 cmp "$source_directory/LICENSE" "$package_directory/LICENSE"
+cmp "$musl_license" "$package_directory/LICENSE.musl"
 cmp "$source_directory/README.md" "$package_directory/README.md"
 cmp "$source_directory/docs/LIBRARY.md" "$package_directory/docs/LIBRARY.md"
 cmp "$source_directory/docs/PARTITIONING.md" "$package_directory/docs/PARTITIONING.md"
@@ -99,19 +104,22 @@ installed_binary=$install_prefix/bin/exfat-resize
 installed_manual=$install_prefix/share/man/man8/exfat-resize.8
 installed_contributing=$install_prefix/share/doc/exfat-resize/CONTRIBUTING.md
 installed_license=$install_prefix/share/doc/exfat-resize/LICENSE
+installed_musl_license=$install_prefix/share/doc/exfat-resize/LICENSE.musl
 installed_readme=$install_prefix/share/doc/exfat-resize/README.md
 installed_library=$install_prefix/share/doc/exfat-resize/docs/LIBRARY.md
 installed_partitioning=$install_prefix/share/doc/exfat-resize/docs/PARTITIONING.md
 installed_transaction=$install_prefix/share/doc/exfat-resize/docs/TRANSACTION.md
 if [ "$("$installed_binary" --version)" != "exfat-resize $build_version" ] ||
 	[ ! -f "$installed_manual" ] || [ ! -f "$installed_license" ] ||
+	[ ! -f "$installed_musl_license" ] ||
 	[ ! -f "$installed_contributing" ] || [ ! -f "$installed_readme" ] ||
 	[ ! -f "$installed_library" ] || [ ! -f "$installed_partitioning" ] ||
 	[ ! -f "$installed_transaction" ]; then
 	echo "installed Linux archive is incomplete" >&2
 	exit 1
 fi
-if [ "$(find "$install_prefix" -type f | wc -l)" -ne 8 ]; then
+cmp "$package_directory/LICENSE.musl" "$installed_musl_license"
+if [ "$(find "$install_prefix" -type f | wc -l)" -ne 9 ]; then
 	echo "installer created an unexpected file set" >&2
 	exit 1
 fi
@@ -121,6 +129,7 @@ touch "$install_prefix/bin/unrelated" "$install_prefix/share/man/man8/unrelated.
 	"$install_prefix/share/doc/exfat-resize/docs/unrelated"
 DESTDIR=$temporary/install-root "$package_directory/uninstall.sh"
 if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ] ||
+	[ -e "$installed_musl_license" ] ||
 	[ -e "$installed_contributing" ] || [ -e "$installed_readme" ] ||
 	[ -e "$installed_library" ] || [ -e "$installed_partitioning" ] ||
 	[ -e "$installed_transaction" ]; then
