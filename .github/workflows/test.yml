@@ -299,7 +299,7 @@ jobs:
           sh tests/package/release-check.sh
           sh tests/package/release-package.sh
 
-      - name: Upload source package for Linux binary build
+      - name: Upload source package for binary builds
         if: matrix.name == 'Linux'
         uses: actions/upload-artifact@v4
         with:
@@ -310,7 +310,7 @@ jobs:
           retention-days: 1
 
   linux-binary:
-    name: Linux binary archive
+    name: Linux binary archives (x86-64 and ARM64)
     needs: release-package
     uses: ./.github/workflows/linux-binary.yml
     with:

@@ -12,16 +12,17 @@ exfat-resize provides:
 
 Prebuilt CLI binaries are provided for these platforms:
 
-- Linux x86-64 with glibc
+- Linux x86-64 and ARM64 (statically linked)
 - macOS 11 or newer on Apple silicon (ARM64)
 - Windows x86-64
 
 Download the prebuilt CLI from
 [GitHub Releases](https://github.com/huven/exfat-resize/releases) and verify the
-SHA-256 digest shown by GitHub. On Linux:
+SHA-256 digest shown by GitHub. On Linux x86-64 (replace `x86_64` with `arm64`
+for ARM64):
 
-    tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
-    cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+    tar -xzf exfat-resize-X.Y.Z-linux-x86_64.tar.gz
+    cd exfat-resize-X.Y.Z-linux-x86_64
     sudo ./install.sh
 
 On macOS:
@@ -324,15 +325,26 @@ can require a compatible 2.x release:
 
 ### Linux and macOS
 
-GitHub Releases provide two Unix CLI archives:
+GitHub Releases provide these Unix CLI archives:
 
 - `exfat-resize-X.Y.Z-macos-arm64.tar.gz` supports macOS 11 or newer on Apple
   silicon. It is ARM64-only, Developer ID-signed, and notarized by Apple.
-- `exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz` supports conventional `x86_64`
-  Linux distributions using glibc 2.28 or newer. It is built on AlmaLinux 8.10
-  and tested by performing an exFAT resize on Debian 12 and Ubuntu 22.04 LTS.
-  Musl-based distributions such as Alpine, non-FHS systems such as NixOS, and
-  other CPU architectures require a different build or compatibility setup.
+- `exfat-resize-X.Y.Z-linux-x86_64.tar.gz` supports x86-64 Linux.
+- `exfat-resize-X.Y.Z-linux-arm64.tar.gz` supports ARM64 Linux.
+
+Both Linux binaries are statically linked with musl and built as
+position-independent executables (PIE). They require no installed C library or
+dynamic loader, so the same executable can run on glibc-based and musl-based
+distributions. They are built on Alpine 3.22 and tested by performing exFAT
+resizes on Debian 12, Ubuntu 22.04 LTS, and Alpine 3.22 for each architecture.
+
+For kernel compatibility, [musl documents Linux 2.6.39 or newer](https://wiki.musl-libc.org/supported-platforms)
+as its baseline for POSIX-conformant behavior. Updates to the bundled C
+library arrive with new binary releases.
+
+Run `uname -m` on the target Linux system to choose its archive: use `x86_64`
+for `x86_64`, or `arm64` for `aarch64` or `arm64`. Other CPU architectures
+require a source build.
 
 Download the archive for the target platform from the corresponding
 [GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
@@ -347,11 +359,12 @@ Then extract the macOS archive and enter its directory:
     tar -xzf exfat-resize-X.Y.Z-macos-arm64.tar.gz
     cd exfat-resize-X.Y.Z-macos-arm64
 
-On Linux, compare and extract with:
+On Linux x86-64, compare and extract with (replace `x86_64` with `arm64` for
+ARM64):
 
-    sha256sum exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
-    tar -xzf exfat-resize-X.Y.Z-linux-x86_64-glibc.tar.gz
-    cd exfat-resize-X.Y.Z-linux-x86_64-glibc
+    sha256sum exfat-resize-X.Y.Z-linux-x86_64.tar.gz
+    tar -xzf exfat-resize-X.Y.Z-linux-x86_64.tar.gz
+    cd exfat-resize-X.Y.Z-linux-x86_64
 
 Replace `X.Y.Z` with the release version. From the extracted directory on
 either platform, install the CLI, manual page, and documentation with:
