@@ -78,7 +78,7 @@ jobs:
           test -n "$musl_version"
           wget -O musl.tar.gz \
             "https://distfiles.alpinelinux.org/distfiles/v3.22/musl-$musl_version.tar.gz"
-          tar -xOf musl.tar.gz "musl-$musl_version/COPYRIGHT" > LICENSE.musl
+          tar -xOf musl.tar.gz "musl-$musl_version/COPYRIGHT" > LICENSE-musl
 
           archive=$(find source-artifacts -maxdepth 1 -type f -name 'exfat-resize-*.tar.gz' -print)
           test -n "$archive"
@@ -101,13 +101,13 @@ jobs:
           ctest --test-dir musl-tests --output-on-failure --no-tests=error
 
           "$source_directory/tools/build-linux-binary.sh" \
-            "$source_directory" linux-artifacts LICENSE.musl
+            "$source_directory" linux-artifacts LICENSE-musl
           binary_archive=$(find linux-artifacts -maxdepth 1 -type f \
             -name "exfat-resize-*-linux-$TARGET_ARCH.tar.gz" -print)
           test -n "$binary_archive"
           test "$(printf '%s\n' "$binary_archive" | wc -l)" -eq 1
           "$source_directory/tests/package/linux-binary-test.sh" \
-            "$binary_archive" "$source_directory" LICENSE.musl
+            "$binary_archive" "$source_directory" LICENSE-musl
           BUILD
 
       - name: Upload tested Linux archive
