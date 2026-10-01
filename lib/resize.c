@@ -1631,8 +1631,7 @@ static enum exfat_resize_error write_target_bitmap(struct resize_context *contex
 					if (target_bit >= context->target.cluster_count)
 						break;
 					if (context->allocation_model[target_bit] != 0) {
-						context->io_buffer[byte_index] |=
-						    (unsigned char)(1u << bit_index);
+						context->io_buffer[byte_index] |= (unsigned char)(1u << bit_index);
 						++context->used_cluster_count;
 					}
 				}
@@ -1801,6 +1800,13 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	error = move_displaced_clusters(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
+	error = write_target_bitmap(context);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	/* Preserve the relocated data before the enlarged FAT overwrites its source. */
+	error = exfat_resize_block_device_sync(context->device);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 
 	error = cancellation_checkpoint(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
@@ -1810,9 +1816,6 @@ static enum exfat_resize_error run_transaction(struct resize_context *context)
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 	error = write_target_fat(context);
-	if (error != EXFAT_RESIZE_SUCCESS)
-		return error;
-	error = write_target_bitmap(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
 

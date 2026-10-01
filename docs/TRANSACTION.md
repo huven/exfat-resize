@@ -21,16 +21,22 @@ validation fails, the device is not modified.
 | `PREFLIGHT` | Preflight and allocation-model construction | None | Old | No write was attempted; correct the reported error and retry when appropriate |
 | `PREPARING` | Begin transaction | Main `VolumeDirty` set and synchronized | Old | Source layout remains authoritative; run a checker before retrying |
 | `PREPARING` | Relocate heap prefix | Allocated displaced clusters copied to non-authoritative target locations | Old | Source layout remains authoritative; run a checker before retrying |
+| `PREPARING` | Write bitmap | Replacement bitmap contents written in newly added tail clusters from the validated allocation model | Old | Source layout remains authoritative; run a checker before retrying |
+| `PREPARING` | Synchronize preparation | Relocated data and replacement bitmap contents synchronized | Old | Source layout remains authoritative; run a checker before retrying |
 | `RESIZING` | Write FAT | Rebuilt target FAT written from the validated allocation model | Old | Restore the verified backup; old FAT is no longer authoritative |
-| `RESIZING` | Write bitmap | Replacement bitmap written in newly added tail clusters from the same model | Old | Restore the verified backup |
 | `RESIZING` | Rewrite directories | Cluster references and affected entry-set checksums updated | Old | Restore the verified backup |
 | `RESIZING` | Commit backup boot region | Backup geometry and checksum describe the target | Main old, backup new | Restore the verified backup |
 | `RESIZING` | Commit main boot region | Both boot regions describe the target | New | Restore the verified backup |
 | `FINALIZING` | Complete transaction | Attempt to clear and synchronize main `VolumeDirty` | New | Target is complete; run a checker and do not retry the resize |
 | `COMPLETED` | Return success | None | New | Clean target is ready for use |
 
-The dirty flag is synchronized before any other destructive write. Metadata
-and relocated data are synchronized before either boot region is changed. The
+The dirty flag is synchronized before any other destructive write. Relocated
+data and replacement bitmap contents are synchronized before entering
+`RESIZING`, so the enlarged FAT cannot overwrite the source of a relocation
+copy that is not yet durable. The replacement bitmap is not linked into the
+on-disk FAT or root directory during `PREPARING`; the old bitmap remains
+authoritative.
+Target metadata is synchronized before either boot region is changed. The
 backup region is committed before the main region, and the main dirty flag is
 cleared only after both regions and their checksums have been synchronized.
 
@@ -50,11 +56,12 @@ cancellation contract is documented under [Cancellation checkpoints and
 responsiveness](LIBRARY.md#cancellation-checkpoints-and-responsiveness).
 
 A `PREPARING` failure may leave `VolumeDirty` set and may leave relocated data
-in locations which are not authoritative under the source geometry. The source
-layout itself remains intact. A `RESIZING` failure may leave a mixture of old
-and target metadata and requires the verified backup. A `FINALIZING` failure
-occurs only after all target metadata and both target boot regions have been
-synchronized; only the final dirty-state update is uncertain.
+and replacement bitmap contents in locations which are not authoritative under
+the source geometry. The source layout itself remains intact. A `RESIZING`
+failure may leave a mixture of old and target metadata and
+requires the verified backup. A `FINALIZING` failure occurs only after all
+target metadata and both target boot regions have been synchronized; only the
+final dirty-state update is uncertain.
 
 If execution terminates before the caller receives a stage, the caller cannot
 determine which transaction boundary was reached. It must conservatively

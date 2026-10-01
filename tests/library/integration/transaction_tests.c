@@ -114,20 +114,20 @@ static void check_durable_boundary(struct exfat_fixture *fixture,
 	uint64_t expected_backup_volume;
 	int expected_dirty;
 
-	CHECK(completed_sync_count <= 5);
+	CHECK(completed_sync_count <= 6);
 	CHECK(memory_block_device_crash(&fixture->memory) == 0);
 	main = read_boot_state(fixture, 0);
 	backup = read_boot_state(fixture, BACKUP_BOOT_REGION);
 
-	expected_main_volume = completed_sync_count >= 4 ? target->volume_sector_count
+	expected_main_volume = completed_sync_count >= 5 ? target->volume_sector_count
 	                                                 : fixture->geometry.volume_sector_count;
-	expected_backup_volume = completed_sync_count >= 3 ? target->volume_sector_count
+	expected_backup_volume = completed_sync_count >= 4 ? target->volume_sector_count
 	                                                   : fixture->geometry.volume_sector_count;
-	expected_dirty = completed_sync_count >= 1 && completed_sync_count < 5;
+	expected_dirty = completed_sync_count >= 1 && completed_sync_count < 6;
 	CHECK(main.volume_sector_count == expected_main_volume);
 	CHECK(backup.volume_sector_count == expected_backup_volume);
 	CHECK(((main.volume_flags & UINT16_C(0x0002)) != 0) == expected_dirty);
-	if (completed_sync_count >= 4)
+	if (completed_sync_count >= 5)
 		CHECK(durable_image_matches_except_dirty(&fixture->memory, &completed_fixture->memory));
 }
 
@@ -177,29 +177,36 @@ static enum exfat_resize_stage expected_stage(const struct memory_operation *ope
 	if (operations[operation_index].kind == MEMORY_OPERATION_SYNC) {
 		switch (completed_sync_count + 1) {
 		case 1:
-			return EXFAT_RESIZE_STAGE_PREPARING;
 		case 2:
+			return EXFAT_RESIZE_STAGE_PREPARING;
 		case 3:
 		case 4:
-			return EXFAT_RESIZE_STAGE_RESIZING;
 		case 5:
+			return EXFAT_RESIZE_STAGE_RESIZING;
+		case 6:
 			return EXFAT_RESIZE_STAGE_FINALIZING;
 		}
 	}
 	if (completed_sync_count == 0 || operation_index < first_fat_write)
 		return EXFAT_RESIZE_STAGE_PREPARING;
-	if (completed_sync_count < 4)
+	if (completed_sync_count < 5)
 		return EXFAT_RESIZE_STAGE_RESIZING;
 	return EXFAT_RESIZE_STAGE_FINALIZING;
 }
 
 static void check_transaction_order(const struct memory_operation *operations,
     size_t operation_count,
-    uint32_t fat_offset,
-    size_t syncs[5],
+    const struct exfat_resize_geometry *target,
+    size_t syncs[6],
     size_t *first_transaction_operation,
     size_t *first_fat_write)
 {
+	uint64_t cluster_size = (uint64_t)target->sectors_per_cluster * SECTOR_SIZE;
+	uint64_t bitmap_length = ((uint64_t)target->cluster_count + 7) / 8;
+	uint64_t bitmap_clusters = (bitmap_length + cluster_size - 1) / cluster_size;
+	uint64_t bitmap_first_sector = target->cluster_heap_offset +
+	    (target->cluster_count - bitmap_clusters) * target->sectors_per_cluster;
+	uint64_t bitmap_sectors_written = 0;
 	size_t sync_count = 0;
 	size_t index;
 	int backup_sector_written = 0;
@@ -211,17 +218,17 @@ static void check_transaction_order(const struct memory_operation *operations,
 	*first_fat_write = SIZE_MAX;
 	for (index = 0; index < operation_count; ++index) {
 		if (operations[index].kind == MEMORY_OPERATION_SYNC) {
-			CHECK(sync_count < 5);
-			if (sync_count < 5)
+			CHECK(sync_count < 6);
+			if (sync_count < 6)
 				syncs[sync_count++] = index;
 		}
 		if (operations[index].kind == MEMORY_OPERATION_WRITE &&
-		    operations[index].first_sector == fat_offset && *first_fat_write == SIZE_MAX)
+		    operations[index].first_sector == target->fat_offset && *first_fat_write == SIZE_MAX)
 			*first_fat_write = index;
 	}
-	CHECK(sync_count == 5);
+	CHECK(sync_count == 6);
 	CHECK(*first_fat_write != SIZE_MAX);
-	if (sync_count != 5 || *first_fat_write == SIZE_MAX)
+	if (sync_count != 6 || *first_fat_write == SIZE_MAX)
 		return;
 
 	CHECK(syncs[0] != 0);
@@ -233,11 +240,23 @@ static void check_transaction_order(const struct memory_operation *operations,
 	*first_transaction_operation = syncs[0] - 2;
 	CHECK(operations[*first_transaction_operation].kind == MEMORY_OPERATION_READ);
 	CHECK(operations[*first_transaction_operation].first_sector == 0);
-	CHECK(*first_fat_write > syncs[0]);
-	CHECK(*first_fat_write < syncs[1]);
-	CHECK(syncs[4] + 1 == operation_count);
+	CHECK(*first_fat_write > syncs[1]);
+	CHECK(*first_fat_write < syncs[2]);
+	CHECK(syncs[5] + 1 == operation_count);
 
-	for (index = syncs[1] + 1; index < syncs[2]; ++index) {
+	for (index = 0; index < operation_count; ++index) {
+		const struct memory_operation *operation = &operations[index];
+
+		if (operation->kind != MEMORY_OPERATION_WRITE ||
+		    operation->first_sector < bitmap_first_sector)
+			continue;
+		CHECK(index > syncs[0]);
+		CHECK(index < syncs[1]);
+		bitmap_sectors_written += operation->sector_count;
+	}
+	CHECK(bitmap_sectors_written == bitmap_clusters * target->sectors_per_cluster);
+
+	for (index = syncs[2] + 1; index < syncs[3]; ++index) {
 		if (operations[index].kind == MEMORY_OPERATION_WRITE &&
 		    operations[index].first_sector == BACKUP_BOOT_REGION)
 			backup_sector_written = 1;
@@ -245,7 +264,7 @@ static void check_transaction_order(const struct memory_operation *operations,
 		    operations[index].first_sector == BACKUP_BOOT_REGION + 11)
 			backup_checksum_written = 1;
 	}
-	for (index = syncs[2] + 1; index < syncs[3]; ++index) {
+	for (index = syncs[3] + 1; index < syncs[4]; ++index) {
 		if (operations[index].kind == MEMORY_OPERATION_WRITE && operations[index].first_sector == 0)
 			main_sector_written = 1;
 		if (operations[index].kind == MEMORY_OPERATION_WRITE &&
@@ -256,14 +275,82 @@ static void check_transaction_order(const struct memory_operation *operations,
 	CHECK(backup_checksum_written);
 	CHECK(main_sector_written);
 	CHECK(main_checksum_written);
-	for (index = syncs[3] + 1; index < syncs[4]; ++index) {
+	for (index = syncs[4] + 1; index < syncs[5]; ++index) {
 		if (operations[index].kind == MEMORY_OPERATION_WRITE) {
 			CHECK(operations[index].first_sector == 0);
 			CHECK(operations[index].sector_count == 1);
 		}
 	}
-	CHECK(operations[syncs[4] - 1].kind == MEMORY_OPERATION_WRITE);
-	CHECK(operations[syncs[4] - 1].first_sector == 0);
+	CHECK(operations[syncs[5] - 1].kind == MEMORY_OPERATION_WRITE);
+	CHECK(operations[syncs[5] - 1].first_sector == 0);
+}
+
+static void check_prepared_image(struct exfat_fixture *fixture,
+    const struct exfat_fixture *completed_fixture,
+    const struct exfat_resize_geometry *target)
+{
+	struct exfat_fixture source;
+	unsigned char actual[SECTOR_SIZE];
+	unsigned char expected[SECTOR_SIZE];
+	uint64_t cluster_size = (uint64_t)target->sectors_per_cluster * SECTOR_SIZE;
+	uint64_t bitmap_length = ((uint64_t)target->cluster_count + 7) / 8;
+	uint64_t bitmap_clusters = (bitmap_length + cluster_size - 1) / cluster_size;
+	uint64_t bitmap_first_sector = target->cluster_heap_offset +
+	    (target->cluster_count - bitmap_clusters) * target->sectors_per_cluster;
+	size_t index;
+	int result;
+
+	result = exfat_fixture_initialize(&source, fixture->memory.device.sector_count);
+	CHECK(result == 0);
+	if (result != 0)
+		return;
+	for (index = 0; index < source.memory.sector_count; ++index) {
+		const struct memory_sector *sector = &source.memory.sectors[index];
+		uint32_t source_cluster;
+		uint32_t target_cluster;
+		uint32_t bitmap_index;
+		uint64_t target_sector;
+		enum exfat_resize_error error;
+
+		/* Preparation leaves every source sector intact except for VolumeDirty. */
+		CHECK(exfat_fixture_read_sector(fixture, sector->sector, actual, sizeof(actual)) == 0);
+		if (sector->sector == 0)
+			actual[VOLUME_FLAGS_OFFSET] &= (unsigned char)~UINT8_C(0x02);
+		CHECK(memcmp(actual, sector->data, sizeof(actual)) == 0);
+
+		/* Stored heap sectors belong to allocations; the old bitmap is not copied. */
+		if (sector->sector < source.geometry.cluster_heap_offset ||
+		    sector->sector >= target->cluster_heap_offset)
+			continue;
+		source_cluster = 2 +
+		    (uint32_t)((sector->sector - source.geometry.cluster_heap_offset) /
+		        source.geometry.sectors_per_cluster);
+		for (bitmap_index = 0; bitmap_index < source.bitmap_cluster_count; ++bitmap_index) {
+			if (source_cluster == source.bitmap_clusters[bitmap_index])
+				break;
+		}
+		if (bitmap_index != source.bitmap_cluster_count)
+			continue;
+		error = exfat_resize_map_growth_cluster(
+		    &source.geometry, target, source_cluster, &target_cluster);
+		CHECK(error == EXFAT_RESIZE_SUCCESS);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			continue;
+		target_sector = exfat_fixture_cluster_sector(target, target_cluster) +
+		    (sector->sector - source.geometry.cluster_heap_offset) %
+		        source.geometry.sectors_per_cluster;
+		CHECK(exfat_fixture_read_sector(fixture, target_sector, actual, sizeof(actual)) == 0);
+		CHECK(memcmp(actual, sector->data, sizeof(actual)) == 0);
+	}
+	for (uint64_t offset = 0; offset < bitmap_clusters * target->sectors_per_cluster; ++offset) {
+		CHECK(exfat_fixture_read_sector(
+		          fixture, bitmap_first_sector + offset, actual, sizeof(actual)) == 0);
+		CHECK(exfat_resize_block_device_read(&completed_fixture->memory.device,
+		          bitmap_first_sector + offset, 1, expected,
+		          sizeof(expected)) == EXFAT_RESIZE_SUCCESS);
+		CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
+	}
+	CHECK(exfat_fixture_destroy(&source) == 0);
 }
 
 static void run_fault_case(const struct memory_operation *baseline,
@@ -302,6 +389,8 @@ static void run_fault_case(const struct memory_operation *baseline,
 		++completed_sync_count;
 	memory_block_device_clear_failure(&fixture.memory);
 	check_durable_boundary(&fixture, completed_fixture, target, completed_sync_count);
+	if (operation_index == first_fat_write && !fail_after)
+		check_prepared_image(&fixture, completed_fixture, target);
 	CHECK(exfat_fixture_destroy(&fixture) == 0);
 }
 
@@ -318,7 +407,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 	size_t first_fat_write = SIZE_MAX;
 	size_t operation_count;
 	size_t operation_index;
-	size_t syncs[5];
+	size_t syncs[6];
 	int saw_preflight_read = 0;
 	int saw_preparing_read = 0;
 	int saw_resizing_read = 0;
@@ -340,7 +429,7 @@ static void test_transaction_failures(uint64_t target_sector_count)
 			memcpy(baseline, fixture.memory.operations, operation_count * sizeof(*baseline));
 	}
 	if (baseline != NULL)
-		check_transaction_order(baseline, operation_count, target.fat_offset, syncs,
+		check_transaction_order(baseline, operation_count, &target, syncs,
 		    &first_transaction_operation, &first_fat_write);
 	if (baseline == NULL || first_transaction_operation == SIZE_MAX ||
 	    first_fat_write == SIZE_MAX) {
