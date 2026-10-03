@@ -187,6 +187,7 @@ foreach(required_text
         "restore the verified backup"
         "## Filesystem compatibility"
         "exfat-resize --grow-partition device size"
+        "exfat-resize --shrink-partition device size"
         "Conform to exFAT revision 1.00"
         "Vendor Allocation directory entries"
         "docs/PARTITIONING.md"
@@ -260,7 +261,8 @@ file(READ "${partitioning_document}" partitioning_contents)
 foreach(required_text
         "# Partition resizing outside exfat-resize"
         "focused on resizing exFAT filesystems correctly"
-        "Apart from that explicit option"
+        "Windows provides two explicit exceptions"
+        "--shrink-partition"
         "## growpart"
         "growpart --dry-run /dev/sdX PARTITION_NUMBER"
         "## GParted Live"

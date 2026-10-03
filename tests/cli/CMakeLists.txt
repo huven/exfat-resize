@@ -46,6 +46,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND MSVC)
         ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
         ${PROJECT_SOURCE_DIR}/src/windows/entry.c
         ${PROJECT_SOURCE_DIR}/src/windows/partition.c
+        ${PROJECT_SOURCE_DIR}/src/windows/partition_layout.c
+        ${PROJECT_SOURCE_DIR}/src/windows/partition_shrink.c
         windows-partition-fault.c
     )
     target_include_directories(

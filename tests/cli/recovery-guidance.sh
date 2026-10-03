@@ -55,6 +55,9 @@ trap cleanup EXIT HUP INT TERM
 
 expect_no_write_failure missing-target
 expect_no_write_failure unknown-option --unknown
+expect_no_write_failure shrink-missing --shrink-partition /missing
+expect_no_write_failure shrink-platform --shrink-partition /missing 32M
+expect_no_write_failure partition-conflict --grow-partition --shrink-partition /missing 32M
 expect_no_write_failure grow-partition --grow-partition "$temporary/missing" 1
 if ! grep -F "supported only for logical Windows volumes" \
 	"$temporary/grow-partition.out" >/dev/null; then

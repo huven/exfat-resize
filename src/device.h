@@ -32,7 +32,8 @@ struct device {
 enum device_partition_state {
 	DEVICE_PARTITION_UNCHANGED,
 	DEVICE_PARTITION_UPDATE_ATTEMPTED,
-	DEVICE_PARTITION_GROWN
+	DEVICE_PARTITION_GROWN,
+	DEVICE_PARTITION_SHRUNK
 };
 
 enum device_partition_growth_result {
@@ -50,6 +51,22 @@ enum device_partition_growth_result device_grow_partition(struct device *device,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size);
+#if defined(_WIN32)
+struct device_partition_shrink;
+int device_prepare_partition_shrink(struct device *device,
+    const char *path,
+    uint64_t target_size,
+    struct device_partition_shrink **plan,
+    char *error,
+    size_t error_size);
+int device_shrink_partition(struct device *device,
+    const char *path,
+    struct device_partition_shrink *plan,
+    enum device_partition_state *state,
+    char *error,
+    size_t error_size);
+void device_free_partition_shrink(struct device_partition_shrink *plan);
+#endif
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size);
 void device_format_io_error(const struct device *device, char *error, size_t error_size);
 void device_close(struct device *device);

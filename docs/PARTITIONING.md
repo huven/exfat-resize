@@ -1,10 +1,11 @@
 # Partition resizing outside exfat-resize
 
 `exfat-resize` is focused on resizing exFAT filesystems correctly, not on
-general disk partitioning. The one exception is the Windows-only
-[`--grow-partition`](../README.md#growing-the-containing-partition) option,
-which covers the common case of a basic GPT or MBR partition followed by enough
-unallocated space. Apart from that explicit option, `exfat-resize` never
+general disk partitioning. Windows provides two explicit exceptions:
+[`--grow-partition`](../README.md#growing-the-containing-partition) enlarges a
+basic GPT or MBR partition into immediately trailing unallocated space;
+[`--shrink-partition`](../README.md#shrinking-the-containing-partition) reduces
+its end after successful filesystem shrink. Otherwise `exfat-resize` never
 changes a partition table.
 
 When the containing partition is too small, enlarge it first with a suitable
@@ -56,9 +57,13 @@ hardware and provides the required utility before relying on it.
 
 Windows DiskPart is not a substitute: its [documented `extend`
 operation][diskpart-extend] automatically extends NTFS and fails without a
-partition change for other formatted filesystems.
+partition change for other formatted filesystems. Its [documented `shrink`
+operation][diskpart-shrink] supports NTFS and unformatted volumes, not exFAT.
+Use the explicit `exfat-resize --shrink-partition DEVICE SIZE` option for
+supported basic partitions, or a separate partitioning utility.
 
 [debian-rescue]: https://www.debian.org/releases/stable/installmanual
+[diskpart-shrink]: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/shrink
 [diskpart-extend]: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/extend
 [gparted-live]: https://gparted.org/livecd.php
 [growpart]: https://github.com/canonical/cloud-utils
@@ -82,7 +87,7 @@ size mismatch; verify the sizes and the successful resize result before changing
 the partition.
 
 For a regular image the same order applies: shrink the filesystem successfully,
-then truncate the image. The CLI performs neither truncation nor partition
-shrink. A cancelled shrink at `SOURCE_READY` leaves a clean filesystem at its
+then truncate the image. The CLI does not truncate images. On Windows,
+`--shrink-partition` combines filesystem shrink and the partition update. A cancelled shrink at `SOURCE_READY` leaves a clean filesystem at its
 original size, so its backing storage must also retain that size. Never reduce
 backing storage as a recovery step after an unsuccessful resize.

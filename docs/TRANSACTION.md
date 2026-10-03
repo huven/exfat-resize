@@ -169,3 +169,29 @@ do not need retained descriptors. Shrink uses the existing bitmap in place,
 so it needs no second bitmap allocation. One-cluster publication uses several
 synchronizations per move and prioritizes small consistent checkpoints over
 bulk-compaction throughput.
+
+## Windows containing-partition shrink
+
+The CLI's optional `--shrink-partition` operation surrounds the library call;
+the library contract and filesystem transaction remain unchanged. Partition
+preflight validates a complete basic GPT or primary MBR data partition and
+allocates the layout snapshot and readback buffer before filesystem mutation.
+The library must return success before the CLI dismounts the volume and issues
+`IOCTL_DISK_SET_DRIVE_LAYOUT_EX`. A final layout comparison rejects changes to
+the snapshot before publication. A pre-publication failure leaves the clean
+smaller filesystem inside the original partition; the same command and size
+can complete that partition step without repeating filesystem shrink.
+
+After publication, the old volume handle may be invalid. The CLI closes it,
+flushes the physical disk, refreshes its properties, verifies the entire layout,
+and locates a fresh volume using the disk extent and partition identity. It
+never relies on a persistent drive letter. Synchronization or layout readback
+failures report an uncertain partition update; a confirmed layout with a missing
+volume reports that distinct state and requires refresh/remount verification.
+
+Cancellation before or during filesystem compaction leaves the partition
+unchanged. Once the library's final commit begins, the CLI finishes partition
+publication and verification without another cancellation checkpoint. Errors
+take precedence over late cancellation; successful completion returns success.
+Neither the partition update nor its combination with the filesystem commit is
+power-fail atomic.

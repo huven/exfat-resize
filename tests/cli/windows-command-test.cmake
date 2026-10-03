@@ -51,6 +51,7 @@ if(TEST_CASE STREQUAL "help")
     foreach(required_text
             "Usage: exfat-resize DEVICE [SIZE]"
             "exfat-resize --grow-partition DEVICE SIZE"
+            "exfat-resize --shrink-partition DEVICE SIZE"
             "Arguments:"
             "Desired filesystem size in bytes or with an optional"
             "K, M, or G suffix (powers of 1024)"
@@ -74,6 +75,10 @@ elseif(TEST_CASE STREQUAL "recovery-guidance")
     expect_no_write_failure(--unknown)
     expect_no_write_failure(--grow-partition [[E:]])
     require_text("${command_output}" "--grow-partition requires an explicit SIZE")
+    expect_no_write_failure(--shrink-partition [[E:]])
+    require_text("${command_output}" "--shrink-partition requires an explicit SIZE")
+    expect_no_write_failure(--shrink-partition --grow-partition [[E:]] 1G)
+    require_text("${command_output}" "mutually exclusive")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 0)
     require_text("${command_output}" "invalid size: 0")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 1G)

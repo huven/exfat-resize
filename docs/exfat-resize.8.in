@@ -19,7 +19,12 @@ grows or shrinks an existing exFAT filesystem in a regular file or raw block
 device.
 For growth, enlarge the backing object first. For shrink, keep its original
 size until the filesystem resize succeeds. The command does not resize regular
-files or partitions or inspect partition tables.
+files or partitions or inspect partition tables on macOS and Linux.
+The Windows build additionally offers explicit
+.B \-\-grow-partition
+and
+.B \-\-shrink-partition
+options for supported basic partitions; see README.md for their requirements.
 .PP
 The selected device must present the exFAT main boot sector at sector zero.
 When
@@ -40,8 +45,10 @@ retain the partition start and at least the reported filesystem size.
 .PP
 Windows CHKDSK requires the partition length to match the filesystem length.
 After successful shrink, it can report RAW while the partition is still larger,
-even if Windows mounts the filesystem. Complete the separate partition resize
-before checking the smaller filesystem with CHKDSK.
+even if Windows mounts the filesystem. Complete the partition resize, using
+the Windows
+.B \-\-shrink-partition
+option or a separate utility, before checking with CHKDSK.
 .SH ARGUMENTS
 .TP
 .I DEVICE

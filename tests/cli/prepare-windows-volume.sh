@@ -122,4 +122,23 @@ qemu-img check -f vhdx "$vhdx"
 mkdir -p "$output"
 cp "$vhdx" "$output/prepared.vhdx"
 printf '%s\n' "$payload_hash" >"$output/payload.sha256"
+# Reuse the same filesystem in a primary MBR data partition. Clear both GPT
+# headers/tables outside the filesystem and write a conventional type-07 entry.
+python3 - "$raw" <<'PYMBR'
+import struct
+import sys
+
+with open(sys.argv[1], "r+b") as disk:
+    mbr = bytearray(512)
+    struct.pack_into("<I", mbr, 440, 0x45585253)
+    struct.pack_into("<B3sB3sII", mbr, 446, 0, b"\xfe\xff\xff", 7,
+                     b"\xfe\xff\xff", 2048, 196608)
+    mbr[510:] = b"\x55\xaa"
+    disk.write(mbr)
+    disk.write(bytes(33 * 512))
+    disk.seek(-33 * 512, 2)
+    disk.write(bytes(33 * 512))
+PYMBR
+qemu-img convert -f raw -O vhdx -o subformat=dynamic "$raw" "$output/prepared-mbr.vhdx"
+qemu-img check -f vhdx "$output/prepared-mbr.vhdx"
 printf 'prepare-windows-volume: passed\n'
