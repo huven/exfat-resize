@@ -12,8 +12,10 @@ $ErrorActionPreference = 'Stop'
 # Drive letters and volume handles can change after SET_DRIVE_LAYOUT_EX.
 function Find-TestPartition {
     param([string] $Image, [uint64] $Offset)
+    Write-Host "Discovering partition at offset $Offset in $Image"
     for ($Attempt = 0; $Attempt -lt 50; ++$Attempt) {
-        Update-HostStorageCache
+        # Mount/re-attach and the CLI's IOCTL_DISK_UPDATE_PROPERTIES already
+        # refresh this disk. Do not rescan all host disks on every polling attempt.
         $Disk = Get-DiskImage -ImagePath $Image | Get-Disk
         $Matches = @(Get-Partition -DiskNumber $Disk.Number |
             Where-Object { $_.Offset -eq $Offset })
@@ -43,6 +45,7 @@ function Get-TestTarget {
 
 function Invoke-TestCommand {
     param([string] $Exe, [string[]] $Arguments, [int] $ExitCode, [string] $Text)
+    Write-Host "Running $Exe $Arguments"
     $Output = & $Exe @Arguments 2>&1
     $Actual = $LASTEXITCODE
     $Output | ForEach-Object { Write-Host $_ }
@@ -57,6 +60,7 @@ function Test-ShrinkPartition {
     Copy-Item -LiteralPath $Fixture -Destination $Image -Force
     $Mounted = $false
     try {
+        Write-Host "windows-shrink-partition ($Case): attaching $Image"
         $DiskImage = Mount-DiskImage -ImagePath $Image -StorageType VHDX -PassThru
         $Mounted = $true
         $Disk = $DiskImage | Get-Disk
@@ -97,11 +101,14 @@ function Test-ShrinkPartition {
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT
 
         # Reattach to inspect persisted partition geometry, including after injected errors.
+        Write-Host "windows-shrink-partition ($Case): detaching for persistence check"
         Dismount-DiskImage -ImagePath $Image -StorageType VHDX | Out-Null
         $Mounted = $false
+        Write-Host "windows-shrink-partition ($Case): reattaching for persistence check"
         Mount-DiskImage -ImagePath $Image -StorageType VHDX | Out-Null
         $Mounted = $true
         $Partition = Find-TestPartition $Image $Initial.Offset
+        Write-Host "windows-shrink-partition ($Case): verifying persisted layout"
         $Disk = Get-DiskImage -ImagePath $Image | Get-Disk
         Assert-Condition ($Disk.UniqueId -eq $DiskId) 'Disk identity changed'
         Assert-Condition ($Partition.Offset -eq $Initial.Offset) 'Partition start changed'
@@ -118,6 +125,7 @@ function Test-ShrinkPartition {
             'shrink-before-set', 'shrink-layout-changed', 'dismount')
         $ExpectedSize = if ($NotPublished) { [uint64] 96MB } else { $Size }
         Assert-Condition ($Partition.Size -eq $ExpectedSize) 'Unexpected persisted partition size'
+        Write-Host "windows-shrink-partition ($Case): waiting for volume and checking contents"
         $Volume = Wait-Volume ([char] $Partition.DriveLetter)
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
             "Fixture after $Case"
@@ -131,25 +139,28 @@ function Test-ShrinkPartition {
             $Volume = Wait-Volume ([char] $Partition.DriveLetter)
             $Target = Get-TestTarget $Partition $UseGuid
         }
+        Write-Host "windows-shrink-partition ($Case): checking the smaller filesystem"
         Invoke-CleanCheck ([char] $Partition.DriveLetter)
         $Volume = Wait-Volume ([char] $Partition.DriveLetter)
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
             "Fixture after CHKDSK for $Case"
         # Ensure the shared discovery refactor and the new end still allow growth.
+        Write-Host "windows-shrink-partition ($Case): growing back to 160 MiB"
         Invoke-TestCommand $Program @('--grow-partition', $Target, [string] ([uint64] 160MB)) `
             0 'grew the partition'
         $Volume = Wait-Volume ([char] $Partition.DriveLetter)
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
             "Fixture after regrowth for $Case"
         Invoke-CleanCheck ([char] $Partition.DriveLetter)
-        Write-Host "windows-shrink-partition ($Case): passed"
     }
     finally {
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT -ErrorAction SilentlyContinue
         if ($Mounted) {
+            Write-Host "windows-shrink-partition ($Case): detaching during cleanup"
             Dismount-DiskImage -ImagePath $Image -StorageType VHDX -ErrorAction Continue | Out-Null
         }
     }
+    Write-Host "windows-shrink-partition ($Case): passed"
 }
 
 $Program = (Resolve-Path -LiteralPath $Program).Path

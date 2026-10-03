@@ -149,6 +149,7 @@ jobs:
 
   windows-volume:
     name: Windows logical volumes
+    timeout-minutes: 30
     needs:
       - windows-binary
       - windows-volume-fixture
