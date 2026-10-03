@@ -8,6 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/windows-volume-common.ps1"
+. "$PSScriptRoot/windows-disk-image.ps1"
 
 # Drive letters and volume handles can change after SET_DRIVE_LAYOUT_EX.
 function Find-TestPartition {
@@ -102,7 +103,7 @@ function Test-ShrinkPartition {
 
         # Reattach to inspect persisted partition geometry, including after injected errors.
         Write-Host "windows-shrink-partition ($Case): detaching for persistence check"
-        Dismount-DiskImage -ImagePath $Image -StorageType VHDX | Out-Null
+        Dismount-TestDiskImage $Image
         $Mounted = $false
         Write-Host "windows-shrink-partition ($Case): reattaching for persistence check"
         Mount-DiskImage -ImagePath $Image -StorageType VHDX | Out-Null
@@ -157,7 +158,7 @@ function Test-ShrinkPartition {
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT -ErrorAction SilentlyContinue
         if ($Mounted) {
             Write-Host "windows-shrink-partition ($Case): detaching during cleanup"
-            Dismount-DiskImage -ImagePath $Image -StorageType VHDX -ErrorAction Continue | Out-Null
+            Dismount-TestDiskImage $Image
         }
     }
     Write-Host "windows-shrink-partition ($Case): passed"
