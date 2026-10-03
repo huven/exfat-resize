@@ -14,6 +14,12 @@ struct resize_operation {
 	enum exfat_resize_stage stage;
 	/* Shared by cluster loops; reset at every cancellation checkpoint. */
 	uint32_t cluster_steps_since_checkpoint;
+	/* The operation may suppress polling across a metadata publication batch.
+	 * Set before its first mutation; restore after required flushes and sync.
+	 * On success, explicitly check cancellation after restoring. On failure,
+	 * return the concrete error without polling. No request is consumed while
+	 * deferred, so no pending-cancellation state is needed. Grow leaves this zero. */
+	int cancellation_deferred;
 };
 
 void exfat_resize_enter_stage(

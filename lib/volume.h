@@ -79,4 +79,29 @@ enum exfat_resize_error exfat_resize_copy_cluster_run(struct resize_volume *volu
     uint32_t target_cluster,
     uint32_t cluster_count);
 
+/* Coherent direct I/O: reads/copies reject overlapping dirty caches. Writes
+ * invalidate clean aliases BEFORE attempting I/O, including partial failures.
+ * These helpers never flush dirty data or synchronize the device implicitly. */
+enum exfat_resize_error exfat_resize_read_volume(struct resize_volume *volume,
+    uint64_t first_sector,
+    uint32_t sector_count,
+    void *buffer,
+    size_t buffer_size);
+enum exfat_resize_error exfat_resize_write_volume(struct resize_volume *volume,
+    uint64_t first_sector,
+    uint32_t sector_count,
+    const void *buffer,
+    size_t buffer_size);
+enum exfat_resize_error exfat_resize_invalidate_volume_range(
+    struct resize_volume *volume, uint64_t first_sector, uint64_t sector_count);
+/* Explicit publication; flush matching windows, without device synchronization. */
+enum exfat_resize_error exfat_resize_flush_volume_range(
+    struct resize_volume *volume, uint64_t first_sector, uint64_t sector_count);
+/* Call before modifying cached bytes. Reject dirty aliases and invalidate clean
+ * ones; the selected window must already contain the whole modified range. */
+enum exfat_resize_error exfat_resize_prepare_cached_write(struct resize_volume *volume,
+    enum sector_cache_index cache_index,
+    uint64_t first_sector,
+    uint32_t sector_count);
+
 #endif

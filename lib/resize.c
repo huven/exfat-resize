@@ -20,6 +20,8 @@ void exfat_resize_enter_stage(
 
 enum exfat_resize_error exfat_resize_cancellation_checkpoint(struct resize_operation *operation)
 {
+	if (operation->cancellation_deferred)
+		return EXFAT_RESIZE_SUCCESS;
 	operation->cluster_steps_since_checkpoint = 0;
 	if (operation->monitor.cancellation_requested != NULL &&
 	    operation->monitor.cancellation_requested(operation->monitor.context) != 0)
@@ -29,6 +31,8 @@ enum exfat_resize_error exfat_resize_cancellation_checkpoint(struct resize_opera
 
 enum exfat_resize_error exfat_resize_cluster_step_checkpoint(struct resize_operation *operation)
 {
+	if (operation->cancellation_deferred)
+		return EXFAT_RESIZE_SUCCESS;
 	if (++operation->cluster_steps_since_checkpoint < EXFAT_CLUSTER_CHECKPOINT_INTERVAL)
 		return EXFAT_RESIZE_SUCCESS;
 	return exfat_resize_cancellation_checkpoint(operation);

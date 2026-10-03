@@ -2,8 +2,8 @@
 
 #include "common.h"
 
-#include "allocation.h"
 #include "checked_math.h"
+#include "resize_internal.h"
 #include "stream.h"
 #include "volume.h"
 
@@ -29,27 +29,20 @@ enum exfat_resize_error exfat_resize_stream_cluster_count(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error next_stream_cluster(
-    const struct resize_allocation *allocation, struct stream_cursor *cursor)
+static enum exfat_resize_error next_stream_cluster(struct stream_cursor *cursor)
 {
 	enum exfat_resize_error error;
 	uint32_t next;
 
 	if (cursor->no_fat_chain) {
 		next = cursor->current_cluster + 1;
-	} else if (cursor->chain_source == STREAM_CHAIN_SOURCE_FAT) {
-		error = exfat_resize_source_fat_get(allocation, cursor->current_cluster, &next);
+	} else {
+		error = cursor->chain.next(cursor->chain.context, cursor->current_cluster, &next);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-	} else {
-		if (!exfat_resize_cluster_is_valid(allocation->target, cursor->current_cluster))
-			return EXFAT_RESIZE_INTERNAL_ERROR;
-		next = allocation->allocation_model[cursor->current_cluster - 2];
-		if (next == 0 || next == EXFAT_MODEL_NO_FAT_CHAIN || next == EXFAT_FAT_BAD_CLUSTER)
-			return EXFAT_RESIZE_INTERNAL_ERROR;
 	}
 	if (!cursor->no_fat_chain) {
-		if (exfat_resize_fat_value_is_end_of_chain(next)) {
+		if (next == EXFAT_FAT_END_OF_CHAIN) {
 			if (!cursor->root_directory && cursor->remaining_bytes != 0)
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
 			cursor->exhausted = 1;
@@ -70,16 +63,18 @@ enum exfat_resize_error exfat_resize_initialize_stream_cursor(
     const struct exfat_resize_geometry *geometry,
     const struct allocation_stream *stream,
     enum sector_cache_index data_cache,
-    enum stream_chain_source chain_source,
+    const struct stream_chain_reader *chain,
     struct stream_cursor *cursor)
 {
+	if (chain == NULL || (!stream->no_fat_chain && chain->next == NULL))
+		return EXFAT_RESIZE_INVALID_ARGUMENT;
 	if (!exfat_resize_cluster_is_valid(geometry, stream->first_cluster))
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 
 	memset(cursor, 0, sizeof(*cursor));
 	cursor->geometry = geometry;
 	cursor->data_cache = data_cache;
-	cursor->chain_source = chain_source;
+	cursor->chain = *chain;
 	cursor->current_cluster = stream->first_cluster;
 	cursor->no_fat_chain = stream->no_fat_chain;
 	cursor->root_directory = stream->root_directory;
@@ -89,10 +84,8 @@ enum exfat_resize_error exfat_resize_initialize_stream_cursor(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error advance_stream_cursor(struct resize_volume *volume,
-    const struct resize_allocation *allocation,
-    struct stream_cursor *cursor,
-    size_t count)
+static enum exfat_resize_error advance_stream_cursor(
+    struct resize_volume *volume, struct stream_cursor *cursor, size_t count)
 {
 	enum exfat_resize_error error;
 
@@ -104,7 +97,7 @@ static enum exfat_resize_error advance_stream_cursor(struct resize_volume *volum
 		return EXFAT_RESIZE_SUCCESS;
 	}
 	if (cursor->cluster_offset == volume->cluster_size) {
-		error = next_stream_cluster(allocation, cursor);
+		error = next_stream_cluster(cursor);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 	}
@@ -112,7 +105,6 @@ static enum exfat_resize_error advance_stream_cursor(struct resize_volume *volum
 }
 
 static enum exfat_resize_error contiguous_stream_sector_count(struct resize_volume *volume,
-    const struct resize_allocation *allocation,
     const struct stream_cursor *cursor,
     uint32_t maximum_sector_count,
     uint32_t *sector_count)
@@ -141,7 +133,7 @@ static enum exfat_resize_error contiguous_stream_sector_count(struct resize_volu
 		advance = volume->sector_size - sector_offset;
 		if (!probe.root_directory && probe.remaining_bytes < advance)
 			advance = (size_t)probe.remaining_bytes;
-		error = advance_stream_cursor(volume, allocation, &probe, advance);
+		error = advance_stream_cursor(volume, &probe, advance);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 	}
@@ -151,11 +143,8 @@ static enum exfat_resize_error contiguous_stream_sector_count(struct resize_volu
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-enum exfat_resize_error exfat_resize_read_stream(struct resize_volume *volume,
-    const struct resize_allocation *allocation,
-    struct stream_cursor *cursor,
-    void *buffer,
-    size_t count)
+enum exfat_resize_error exfat_resize_read_stream(
+    struct resize_volume *volume, struct stream_cursor *cursor, void *buffer, size_t count)
 {
 	struct sector_cache *cache = &volume->caches[cursor->data_cache];
 	unsigned char *destination = buffer;
@@ -202,7 +191,7 @@ enum exfat_resize_error exfat_resize_read_stream(struct resize_volume *volume,
 					maximum_sector_count = (uint32_t)consumed_sectors + 1;
 			}
 			error = contiguous_stream_sector_count(
-			    volume, allocation, cursor, maximum_sector_count, &read_sector_count);
+			    volume, cursor, maximum_sector_count, &read_sector_count);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			error = exfat_resize_load_cache(volume, cursor->data_cache, sector, read_sector_count);
@@ -212,10 +201,32 @@ enum exfat_resize_error exfat_resize_read_stream(struct resize_volume *volume,
 		cache_sector_offset = sector - cache->first_sector;
 		memcpy(destination,
 		    cache->data + (size_t)cache_sector_offset * volume->sector_size + sector_offset, part);
-		error = advance_stream_cursor(volume, allocation, cursor, part);
+		error = advance_stream_cursor(volume, cursor, part);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		destination += part;
+		count -= part;
+	}
+	return EXFAT_RESIZE_SUCCESS;
+}
+
+enum exfat_resize_error exfat_resize_skip_stream(
+    struct resize_volume *volume, struct stream_cursor *cursor, uint64_t count)
+{
+	enum exfat_resize_error error;
+	if (!cursor->root_directory && count > cursor->remaining_bytes)
+		return EXFAT_RESIZE_OUT_OF_BOUNDS;
+	while (count != 0) {
+		uint64_t available = volume->cluster_size - cursor->cluster_offset;
+		size_t part = (size_t)(count < available ? count : available);
+		if (cursor->exhausted)
+			return EXFAT_RESIZE_OUT_OF_BOUNDS;
+		error = exfat_resize_cluster_step_checkpoint(volume->operation);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
+		error = advance_stream_cursor(volume, cursor, part);
+		if (error != EXFAT_RESIZE_SUCCESS)
+			return error;
 		count -= part;
 	}
 	return EXFAT_RESIZE_SUCCESS;

@@ -12,6 +12,53 @@ _Static_assert(EXFAT_SECTOR_CACHE_SIZE >= EXFAT_RESIZE_MAX_SECTOR_SIZE,
 _Static_assert(EXFAT_IO_MAX_CHUNK_SIZE >= EXFAT_RESIZE_MAX_SECTOR_SIZE,
     "an I/O chunk must hold at least one maximum-sized sector");
 
+static int ranges_overlap(uint64_t first, uint64_t count, uint64_t other, uint64_t other_count)
+{
+	if (count == 0 || other_count == 0)
+		return 0;
+	return first <= other ? other - first < count : first - other < other_count;
+}
+
+static enum exfat_resize_error check_range(
+    const struct resize_volume *volume, uint64_t first, uint64_t count)
+{
+	return first > volume->device->sector_count || count > volume->device->sector_count - first
+	    ? EXFAT_RESIZE_OUT_OF_BOUNDS
+	    : EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error require_clean_range(
+    struct resize_volume *volume, uint64_t first, uint64_t count, enum sector_cache_index excluded)
+{
+	size_t index;
+	enum exfat_resize_error error = check_range(volume, first, count);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	for (index = 0; index < SECTOR_CACHE_COUNT; ++index) {
+		const struct sector_cache *cache = &volume->caches[index];
+		if (index != (size_t)excluded && cache->dirty_first != cache->dirty_end &&
+		    ranges_overlap(first, count, cache->first_sector, cache->sector_count))
+			return EXFAT_RESIZE_INTERNAL_ERROR;
+	}
+	return EXFAT_RESIZE_SUCCESS;
+}
+
+static enum exfat_resize_error invalidate_aliases(
+    struct resize_volume *volume, uint64_t first, uint64_t count, enum sector_cache_index excluded)
+{
+	size_t index;
+	enum exfat_resize_error error = require_clean_range(volume, first, count, excluded);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	for (index = 0; index < SECTOR_CACHE_COUNT; ++index) {
+		struct sector_cache *cache = &volume->caches[index];
+		if (index != (size_t)excluded &&
+		    ranges_overlap(first, count, cache->first_sector, cache->sector_count))
+			cache->sector_count = 0;
+	}
+	return EXFAT_RESIZE_SUCCESS;
+}
+
 enum exfat_resize_error exfat_resize_flush_cache(
     struct resize_volume *volume, enum sector_cache_index cache_index)
 {
@@ -26,6 +73,10 @@ enum exfat_resize_error exfat_resize_flush_cache(
 		return EXFAT_RESIZE_SUCCESS;
 	dirty_count = cache->dirty_end - cache->dirty_first;
 	buffer_size = (size_t)(cache->sector_capacity - cache->dirty_first) * volume->sector_size;
+	error = invalidate_aliases(
+	    volume, cache->first_sector + cache->dirty_first, dirty_count, cache_index);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = exfat_resize_block_device_write(volume->device,
 	    cache->first_sector + cache->dirty_first, dirty_count,
 	    cache->data + (size_t)cache->dirty_first * volume->sector_size, buffer_size);
@@ -70,7 +121,7 @@ enum exfat_resize_error exfat_resize_load_cache(struct resize_volume *volume,
 		return error;
 
 	cache->sector_count = 0;
-	error = exfat_resize_block_device_read(volume->device, first_sector, sector_count, cache->data,
+	error = exfat_resize_read_volume(volume, first_sector, sector_count, cache->data,
 	    (size_t)cache->sector_capacity * volume->sector_size);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
@@ -128,12 +179,12 @@ enum exfat_resize_error exfat_resize_copy_cluster_run(struct resize_volume *volu
 		error = exfat_resize_cancellation_checkpoint(volume->operation);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-		error = exfat_resize_block_device_read(
-		    volume->device, source_sector + copied, count, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+		error = exfat_resize_read_volume(
+		    volume, source_sector + copied, count, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-		error = exfat_resize_block_device_write(
-		    volume->device, target_sector + copied, count, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+		error = exfat_resize_write_volume(
+		    volume, target_sector + copied, count, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		copied += count;
@@ -195,4 +246,66 @@ void exfat_resize_close_volume(struct resize_volume *volume)
 		    volume->operation->allocator.context, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		volume->io_buffer = NULL;
 	}
+}
+
+enum exfat_resize_error exfat_resize_read_volume(struct resize_volume *volume,
+    uint64_t first_sector,
+    uint32_t sector_count,
+    void *buffer,
+    size_t buffer_size)
+{
+	enum exfat_resize_error error =
+	    require_clean_range(volume, first_sector, sector_count, SECTOR_CACHE_COUNT);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	return exfat_resize_block_device_read(
+	    volume->device, first_sector, sector_count, buffer, buffer_size);
+}
+
+enum exfat_resize_error exfat_resize_write_volume(struct resize_volume *volume,
+    uint64_t first_sector,
+    uint32_t sector_count,
+    const void *buffer,
+    size_t buffer_size)
+{
+	enum exfat_resize_error error =
+	    exfat_resize_invalidate_volume_range(volume, first_sector, sector_count);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	return exfat_resize_block_device_write(
+	    volume->device, first_sector, sector_count, buffer, buffer_size);
+}
+
+enum exfat_resize_error exfat_resize_invalidate_volume_range(
+    struct resize_volume *volume, uint64_t first_sector, uint64_t sector_count)
+{
+	return invalidate_aliases(volume, first_sector, sector_count, SECTOR_CACHE_COUNT);
+}
+
+enum exfat_resize_error exfat_resize_prepare_cached_write(struct resize_volume *volume,
+    enum sector_cache_index cache_index,
+    uint64_t first_sector,
+    uint32_t sector_count)
+{
+	if (!cache_contains_range(&volume->caches[cache_index], first_sector, sector_count))
+		return EXFAT_RESIZE_INTERNAL_ERROR;
+	return invalidate_aliases(volume, first_sector, sector_count, cache_index);
+}
+
+enum exfat_resize_error exfat_resize_flush_volume_range(
+    struct resize_volume *volume, uint64_t first_sector, uint64_t sector_count)
+{
+	size_t index;
+	enum exfat_resize_error error = check_range(volume, first_sector, sector_count);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	for (index = 0; index < SECTOR_CACHE_COUNT; ++index) {
+		struct sector_cache *cache = &volume->caches[index];
+		if (ranges_overlap(first_sector, sector_count, cache->first_sector, cache->sector_count)) {
+			error = exfat_resize_flush_cache(volume, (enum sector_cache_index)index);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
+		}
+	}
+	return EXFAT_RESIZE_SUCCESS;
 }

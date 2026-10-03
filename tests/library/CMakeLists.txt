@@ -72,3 +72,12 @@ exfat_resize_add_library_test(
     support/test_allocator.c
     integration/transaction_tests.c
 )
+
+exfat_resize_add_library_test(
+    exfat_resize_mechanism_tests
+    library.mechanisms
+    support/exfat_fixture.c
+    support/memory_block_device.c
+    support/test_allocator.c
+    integration/mechanism_tests.c
+)
