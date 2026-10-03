@@ -8,6 +8,7 @@
 #include "exfat_resize.h"
 #include "grow.h"
 #include "resize_internal.h"
+#include "shrink.h"
 #include "volume.h"
 
 void exfat_resize_enter_stage(
@@ -85,7 +86,10 @@ enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *dev
 	volume.io_sector_capacity = EXFAT_IO_BUFFER_SIZE / volume.sector_size;
 	volume.cluster_size = (uint64_t)volume.geometry.sectors_per_cluster * volume.sector_size;
 
-	error = exfat_resize_grow(&volume, target_sector_count);
+	if (target_sector_count < volume.geometry.volume_sector_count)
+		error = exfat_resize_shrink(&volume, target_sector_count);
+	else
+		error = exfat_resize_grow(&volume, target_sector_count);
 
 out:
 	final_stage = operation.stage;

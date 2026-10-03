@@ -2,7 +2,7 @@
 
 exfat-resize provides:
 
-- A portable C11 library for growing existing exFAT filesystems.
+- A portable C11 library for growing and shrinking existing exFAT filesystems.
 - A command-line tool (thin wrapper around the library) for Linux, macOS,
   and Windows.
 
@@ -95,7 +95,7 @@ a loop or disk-image device. Platform locking helps detect cooperating users,
 but regular-file locks are advisory and cannot exclude a process that ignores
 them.
 
-The backing object or partition must already be enlarged unless a supported
+For growth, the backing object or partition must already be enlarged unless a supported
 Windows logical volume is used with `--grow-partition`. The tool never enlarges
 regular files. A failed or interrupted resize is not automatically repaired,
 rolled back, or resumable. Follow the recovery guidance printed with an error;
@@ -140,7 +140,9 @@ With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of bytes.
 It may have an uppercase `K`, `M`, or `G` suffix, which multiplies the number by
 1024, 1024 squared, or 1024 cubed, respectively. The size is rounded down to a
-whole filesystem sector. Shrinking is not supported.
+whole filesystem sector. A smaller size requests shrink; an equal rounded size
+is rejected. The backing storage must retain its original size until shrink
+completes successfully.
 
 The backing image, device, or partition must provide enough space for the
 requested size before the command runs. The CLI never enlarges an image file.
@@ -152,6 +154,31 @@ Only filesystems meeting the
 
 During the operation, the CLI reports each transaction stage. After successful
 completion, it reports the resulting filesystem size in bytes.
+
+### Shrinking
+
+Supply the desired smaller filesystem size explicitly:
+
+    exfat-resize image.exfat 32M
+
+After the command succeeds, the image may be truncated to the reported size:
+
+    truncate -s 32M image.exfat
+
+For partitions, shrink the filesystem first, then use a separate partitioning
+utility to reduce only the partition end. Keep its start fixed and its size at
+least the reported filesystem size. See [partition resizing](docs/PARTITIONING.md).
+The CLI never truncates images or shrinks partitions, and `--grow-partition`
+cannot be combined with a shrink target.
+
+Shrink moves allocated tail clusters into free space below the new boundary.
+It retains the heap offset and completes each move before observing cancellation.
+If cancellation reports a clean original-size filesystem, it can be used or the
+shrink can be retried; completed moves remain. Do not truncate after cancellation.
+Cancellation during the final geometry commit is deferred through completion,
+which returns success if all writes succeed. I/O failures and abnormal termination
+still require the reported recovery procedure; individual metadata writes are
+not power-fail atomic.
 
 ### macOS and Linux
 
@@ -264,9 +291,13 @@ The filesystem must meet these prerequisites:
   a multiple of the block device's sector size.
 - Not contain Vendor Allocation directory entries, whose allocation semantics
   cannot be interpreted without recognizing their vendor GUID.
-- Gain enough clusters to hold the replacement allocation bitmap in the newly
-  added tail space.
-- Not have a source cluster recorded as bad where the expanded FAT would
+- For growth, gain enough clusters to hold the replacement allocation bitmap
+  in the newly added tail space.
+- For shrink, fit all current allocations, including the full current bitmap,
+  below the new heap boundary. The bitmap is shortened only at final commit;
+  exceptionally tight targets can therefore be rejected even when a smaller
+  final bitmap would fit.
+- For growth, not have a source cluster recorded as bad where the expanded FAT would
   overlap it. Bad clusters that remain in the Cluster Heap at the same physical
   location are preserved.
 

@@ -83,7 +83,11 @@ fi
 
 check_exfat_image "$image"
 expect_failure "$program" "$image" "$target_bytes"
-expect_failure "$program" "$image" "$((target_sectors * sector_size - 1))"
+"$program" "$image" "$((target_sectors * sector_size - 1))"
+if [ "$(read_volume_sector_count "$image")" -ne "$((target_sectors - 1))" ]; then
+	echo "smaller explicit size did not shrink the filesystem" >&2
+	exit 1
+fi
 expect_failure "$program" "$image" "$((backing_bytes + sector_size))"
 expect_failure "$program" "$image" 18446744073709551615
 check_exfat_image "$image"

@@ -208,6 +208,8 @@ foreach(required_text
         "## Allocator contract"
         "## Operation monitor"
         "EXFAT_RESIZE_CANCELLED"
+        "EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE"
+        "EXFAT_RESIZE_STAGE_SOURCE_READY"
         "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
         "EXFAT_RESIZE_EVENT_VALUE_COUNT"
         "unknown event codes"
@@ -256,8 +258,8 @@ endforeach()
 
 file(READ "${partitioning_document}" partitioning_contents)
 foreach(required_text
-        "# Partition growth outside exfat-resize"
-        "focused on growing exFAT filesystems correctly"
+        "# Partition resizing outside exfat-resize"
+        "focused on resizing exFAT filesystems correctly"
         "Apart from that explicit option"
         "## growpart"
         "growpart --dry-run /dev/sdX PARTITION_NUMBER"
@@ -280,7 +282,9 @@ endforeach()
 file(READ "${transaction_document}" transaction_contents)
 foreach(required_text
         "# Resize transaction"
-        "## Transaction sequence"
+        "## Growth transaction sequence"
+        "## Shrink transaction sequence"
+        "SOURCE_READY"
         "does not promise automatic resume or rollback"
         "before the caller receives a stage"
         "must not retry the resize"
@@ -319,6 +323,8 @@ foreach(required_text
         "EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED"
         "EXFAT_RESIZE_EVENT_VALUE_COUNT"
         "EXFAT_RESIZE_CANCELLED"
+        "EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE"
+        "EXFAT_RESIZE_STAGE_SOURCE_READY"
 )
     string(FIND "${header_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)

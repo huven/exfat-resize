@@ -24,7 +24,7 @@ static const char target_name[] = "DEVICE";
 static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n"
                             "       exfat-resize --grow-partition DEVICE SIZE\n";
 static const char introduction[] =
-    "Grow an existing exFAT filesystem in a Windows image file or logical volume.";
+    "Grow or shrink an existing exFAT filesystem in a Windows image file or logical volume.";
 static const char target_description[] =
     "Regular image file, drive letter such as E:, or\n"
     "                     volume-GUID path with the exFAT main boot sector\n"
@@ -39,7 +39,7 @@ static const char platform_note[] =
 #else
 static const char target_name[] = "DEVICE";
 static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n";
-static const char introduction[] = "Grow an existing exFAT filesystem.";
+static const char introduction[] = "Grow or shrink an existing exFAT filesystem.";
 static const char target_description[] = "Regular file or raw block device with the exFAT\n"
                                          "                     main boot sector at sector zero";
 static const char platform_safety[] =
@@ -78,7 +78,7 @@ static void print_help(void)
 	       "  %-18s %s\n"
 	       "  SIZE               Desired filesystem size in bytes or with an optional\n"
 	       "                     K, M, or G suffix (powers of 1024)\n"
-	       "                     (default: all available space)\n"
+	       "                     (default: all available space); smaller sizes shrink\n"
 	       "\n"
 	       "Options:\n"
 	       "%s"
@@ -87,6 +87,7 @@ static void print_help(void)
 	       "\n"
 	       "Safety:\n"
 	       "  Make and verify a backup before using this tool.\n"
+	       "  Shrink the filesystem successfully before reducing its backing storage.\n"
 	       "%s"
 	       "\n"
 	       "Documentation:\n"
@@ -144,6 +145,8 @@ static const char *resize_error(enum exfat_resize_error error)
 		return "expanded FAT conflicts with a source bad cluster";
 	case EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING:
 		return "filesystem sector size is incompatible with device sector size";
+	case EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE:
+		return "target cannot hold current allocations, including the full allocation bitmap";
 	case EXFAT_RESIZE_CANCELLED:
 		return "operation cancelled";
 	}
@@ -317,6 +320,10 @@ static void report_resize_event(void *opaque, const struct exfat_resize_event *e
 		case EXFAT_RESIZE_STAGE_FINALIZING:
 			printf("exfat-resize: finalizing resize\n");
 			goto flush;
+		case EXFAT_RESIZE_STAGE_SOURCE_READY:
+			printf("exfat-resize: cancelled; clean filesystem remains at %" PRIu64 " bytes\n",
+			    event->values[1]);
+			goto flush;
 		case EXFAT_RESIZE_STAGE_COMPLETED:
 			printf(
 			    "exfat-resize: resized %s to %" PRIu64 " bytes\n", context->path, event->values[1]);
@@ -353,6 +360,11 @@ static void print_recovery_guidance(
 		fprintf(stderr,
 		    "exfat-resize: the resize completed, but its dirty state is uncertain; run a "
 		    "filesystem checker and do not retry the resize\n");
+		break;
+	case EXFAT_RESIZE_STAGE_SOURCE_READY:
+		fprintf(stderr,
+		    "exfat-resize: the original-size filesystem is clean; retry when ready; "
+		    "do not reduce the backing device size\n");
 		break;
 	case EXFAT_RESIZE_STAGE_COMPLETED:
 		break;

@@ -351,3 +351,35 @@ int memory_block_device_crash(struct memory_block_device *memory)
 		memory->sector_capacity = memory->sector_count;
 	return error;
 }
+
+int memory_block_device_persist_range(
+    struct memory_block_device *memory, uint64_t first_sector, uint32_t sector_count)
+{
+	uint32_t index;
+	for (index = 0; index < sector_count; ++index) {
+		size_t current = find_sector(memory, first_sector + index);
+		size_t durable;
+		if (current == SIZE_MAX)
+			continue;
+		for (durable = 0; durable < memory->durable_sector_count; ++durable) {
+			if (memory->durable_sectors[durable].sector == first_sector + index)
+				break;
+		}
+		if (durable == memory->durable_sector_count) {
+			struct memory_sector *sectors =
+			    realloc(memory->durable_sectors, (durable + 1) * sizeof(*sectors));
+			unsigned char *data;
+			if (sectors == NULL)
+				return ENOMEM;
+			memory->durable_sectors = sectors;
+			data = malloc(memory->device.sector_size);
+			if (data == NULL)
+				return ENOMEM;
+			memory->durable_sectors[durable] = (struct memory_sector){ first_sector + index, data };
+			++memory->durable_sector_count;
+		}
+		memcpy(memory->durable_sectors[durable].data, memory->sectors[current].data,
+		    memory->device.sector_size);
+	}
+	return 0;
+}

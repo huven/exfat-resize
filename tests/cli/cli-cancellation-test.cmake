@@ -52,3 +52,24 @@ foreach(mode before-open after-open after-open-dismount-failure)
         endforeach()
     endif()
 endforeach()
+
+foreach(mode shrink shrink-cleanup-failure)
+    execute_process(
+        COMMAND "${PROGRAM}" "${mode}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error
+    )
+    set(combined "${output}${error}")
+    if(mode STREQUAL "shrink")
+        if(NOT result EQUAL 130 OR NOT combined MATCHES "original-size filesystem is clean"
+                OR NOT combined MATCHES "clean filesystem remains at")
+            message(FATAL_ERROR "shrink cancellation failed (${result}):\n${combined}")
+        endif()
+    else()
+        if(NOT result EQUAL 1 OR NOT combined MATCHES "restore the verified backup"
+                OR combined MATCHES "original-size filesystem is clean")
+            message(FATAL_ERROR "shrink cleanup failure was misreported (${result}):\n${combined}")
+        endif()
+    endif()
+endforeach()

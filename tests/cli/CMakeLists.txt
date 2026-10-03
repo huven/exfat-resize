@@ -72,6 +72,9 @@ endif()
 add_executable(
     exfat_resize_cli_cancellation_test
     cli-cancellation.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/exfat_fixture.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/shrink_fixture.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/memory_block_device.c
     ${PROJECT_SOURCE_DIR}/src/cli.c
 )
 target_include_directories(
@@ -79,6 +82,7 @@ target_include_directories(
     PRIVATE
         ${PROJECT_SOURCE_DIR}/lib
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests/library
 )
 target_compile_definitions(
     exfat_resize_cli_cancellation_test
@@ -260,6 +264,7 @@ set(
     help.sh
     recovery-guidance.sh
     grow-image.sh
+    shrink-image.sh
     preserve-data.sh
     explicit-size.sh
     sector-size.sh
@@ -288,3 +293,14 @@ foreach(script IN LISTS EXFAT_RESIZE_CLI_TEST_SCRIPTS)
             SKIP_RETURN_CODE 77
     )
 endforeach()
+
+add_test(
+    NAME cli.shrink-image-4096
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+            "FILESYSTEM_SECTOR_SIZE=4096"
+            "DIRECTORY_METADATA_TEST=$<TARGET_FILE:exfat_resize_directory_metadata>"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shrink-image.sh"
+            "$<TARGET_FILE:exfat-resize>"
+)
+set_tests_properties(cli.shrink-image-4096 PROPERTIES LABELS cli SKIP_RETURN_CODE 77)

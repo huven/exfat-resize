@@ -2,7 +2,7 @@
 .\"
 .TH EXFAT-RESIZE 8 "2026-07-28" "exfat-resize @EXFAT_RESIZE_BUILD_VERSION@" "System Administration"
 .SH NAME
-exfat-resize \- grow an existing exFAT filesystem
+exfat-resize \- grow or shrink an existing exFAT filesystem
 .SH SYNOPSIS
 .B exfat-resize
 .I DEVICE
@@ -15,21 +15,27 @@ exfat-resize \- grow an existing exFAT filesystem
 .BR \-V " | " \-\-version
 .SH DESCRIPTION
 .B exfat-resize
-grows an existing exFAT filesystem in a regular file or raw block device.
-The backing object must be enlarged before the filesystem is resized.
-The command does not enlarge regular files or partitions, inspect partition
-tables, or support shrinking.
+grows or shrinks an existing exFAT filesystem in a regular file or raw block device.
+For growth, enlarge the backing object first. For shrink, keep its original
+size until the filesystem resize succeeds. The command does not resize regular
+files or partitions or inspect partition tables.
 .PP
 The selected device must present the exFAT main boot sector at sector zero.
 When
 .I SIZE
 is omitted, the filesystem grows to all space available in the backing object.
 When it is supplied, the requested size is rounded down to a whole filesystem
-sector.
+sector. A smaller size requests shrink; an equal rounded size is rejected.
 .PP
 During the operation, the command reports each transaction stage.
 After successful completion, it reports the resulting filesystem size in
 bytes.
+.PP
+Shrink requires room below the new boundary for all current allocations,
+including the full original allocation bitmap. The bitmap is shortened only
+at final commit. This can reject exceptionally tight targets. After successful
+shrink, a separate tool may truncate the image or reduce the partition end;
+retain the partition start and at least the reported filesystem size.
 .SH ARGUMENTS
 .TP
 .I DEVICE
@@ -94,6 +100,11 @@ loss, assume that destructive metadata updates may have started; do not retry
 the resize, and restore the verified backup.
 Follow a less conservative checker-and-retry path only when the command
 explicitly reports that it is safe.
+.PP
+Shrink cancellation during compaction leaves a clean filesystem at its original
+size when cleanup succeeds. Completed moves remain, and shrink may be retried.
+Do not reduce backing storage after cancellation. Once the final geometry
+commit begins, cancellation is deferred through completion.
 .SH "FILESYSTEM COMPATIBILITY"
 The filesystem must meet all of the following prerequisites:
 .IP \(bu 2
@@ -108,17 +119,20 @@ multiple of the block device's sector size.
 Not contain Vendor Allocation directory entries, whose allocation semantics
 cannot be interpreted without recognizing their vendor GUID.
 .IP \(bu 2
-Gain enough clusters to hold the replacement allocation bitmap in the newly
-added tail space.
+For growth, gain enough clusters to hold the replacement allocation bitmap
+in the newly added tail space.
 .IP \(bu 2
-Not have a source cluster recorded as bad where the expanded FAT would overlap
-it.
+For growth, not have a source cluster recorded as bad where the expanded FAT
+would overlap it.
 Bad clusters that remain in the Cluster Heap at the same physical location are
 preserved.
 .SH "RECOVERY AFTER FAILURE"
 On failure,
 .B exfat-resize
 prints guidance for the recovery boundary reached:
+.IP \(bu 2
+If shrink cancellation left the original-size filesystem clean, use it or
+retry shrink; do not reduce its backing storage.
 .IP \(bu 2
 If no filesystem write was attempted, correct the reported error and retry
 when appropriate.
@@ -138,7 +152,7 @@ the conservative interruption procedure in
 Before writing,
 .B exfat-resize
 constructs and validates an in-memory allocation model for the target cluster
-heap.
+heap during growth, or the original heap during shrink.
 Detailed allocator-backed working-memory requirements are documented in
 .I docs/TRANSACTION.md
 distributed with exfat-resize.
@@ -148,8 +162,9 @@ and releases them with
 .BR free (3),
 so its working set is ordinary heap memory.
 Peak heap use includes the 1 MiB I/O buffer, 768 KiB cache block, source-FAT
-snapshot, four-byte-per-target-cluster allocation model, and directory
-worklist described there.
+snapshot, four-byte-per-model-cluster allocation model, and directory worklist.
+Shrink also retains relocation records for affected tail clusters and streams
+and a directory identity index, allocated before the first write.
 .SH EXAMPLES
 Enlarge a regular image by 2 GiB, then grow its filesystem to use all available
 space:

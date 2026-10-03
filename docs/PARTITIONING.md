@@ -1,6 +1,6 @@
-# Partition growth outside exfat-resize
+# Partition resizing outside exfat-resize
 
-`exfat-resize` is focused on growing exFAT filesystems correctly, not on
+`exfat-resize` is focused on resizing exFAT filesystems correctly, not on
 general disk partitioning. The one exception is the Windows-only
 [`--grow-partition`](../README.md#growing-the-containing-partition) option,
 which covers the common case of a basic GPT or MBR partition followed by enough
@@ -10,7 +10,8 @@ changes a partition table.
 When the containing partition is too small, enlarge it first with a suitable
 partitioning tool, then run `exfat-resize`. The following are starting points,
 not a partitioning guide. Make a verified backup, keep the exFAT filesystem
-unmounted, never move its start sector, and never shrink it.
+unmounted, never move its start sector, and never shrink it during growth or
+failure recovery.
 
 ## growpart
 
@@ -63,3 +64,17 @@ partition change for other formatted filesystems.
 [growpart]: https://github.com/canonical/cloud-utils
 [resizepart]: https://www.gnu.org/software/parted/manual/html_node/resizepart.html
 [ubuntu-server]: https://ubuntu.com/download/server
+
+## Shrinking a containing partition
+
+Keep the original partition size while running `exfat-resize DEVICE SIZE` with
+an explicit smaller filesystem target. Only after successful completion may a
+separate partitioning utility reduce the partition end. Preserve the start
+sector and leave at least the exact resulting filesystem size reported by the
+CLI; account for the partitioning utility's sector units and alignment.
+
+For a regular image the same order applies: shrink the filesystem successfully,
+then truncate the image. The CLI performs neither truncation nor partition
+shrink. A cancelled shrink at `SOURCE_READY` leaves a clean filesystem at its
+original size, so its backing storage must also retain that size. Never reduce
+backing storage as a recovery step after an unsuccessful resize.

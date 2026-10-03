@@ -71,7 +71,9 @@ enum exfat_resize_error {
 	/* Filesystem sectors cannot be mapped to whole device sectors. */
 	EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING = 20,
 	/* Cooperative cancellation was requested at a safe boundary. */
-	EXFAT_RESIZE_CANCELLED = 21
+	EXFAT_RESIZE_CANCELLED = 21,
+	/* The retained heap cannot hold the current allocations, including the full bitmap. */
+	EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE = 22
 };
 
 /* Recovery boundary reached by exfat_resize(). */
@@ -85,7 +87,9 @@ enum exfat_resize_stage {
 	/* The target is synchronized; check it and do not retry the resize. */
 	EXFAT_RESIZE_STAGE_FINALIZING = 3,
 	/* The resized target and its clean state were synchronized. */
-	EXFAT_RESIZE_STAGE_COMPLETED = 4
+	EXFAT_RESIZE_STAGE_COMPLETED = 4,
+	/* Shrink was cancelled; the clean original-size filesystem was synchronized. */
+	EXFAT_RESIZE_STAGE_SOURCE_READY = 5
 };
 
 /* Generic severity for structured library events. */
@@ -203,7 +207,7 @@ struct exfat_resize_monitor {
 };
 
 /*
- * Grows the exFAT filesystem at sector zero to target_size bytes.
+ * Grows or shrinks the exFAT filesystem at sector zero to target_size bytes.
  *
  * The caller must provide exclusive access to the backing device. The device,
  * allocator, and any nonnull monitor objects must remain valid and unchanged
@@ -219,7 +223,9 @@ struct exfat_resize_monitor {
  * progress. A nonzero cancellation result aborts the resize through its normal
  * error path. Concrete operation failures take precedence. COMPLETED is
  * terminal: after reporting it, exfat_resize() returns success without polling
- * for cancellation again.
+ * for cancellation again. Shrink cancellation during compaction synchronizes a
+ * clean original-size filesystem and reports SOURCE_READY. Once its final
+ * geometry commit begins, shrink defers cancellation through completion.
  *
  * Event reporting is observational. Event codes and their payload semantics
  * are documented in docs/LIBRARY.md, distributed with exfat-resize. Unknown
@@ -232,7 +238,8 @@ struct exfat_resize_monitor {
  * It receives the resize stage reached even when the function returns an
  * error. The exFAT filesystem sector size must be a multiple of device
  * sector_size. Growth must add enough clusters for a replacement allocation
- * bitmap.
+ * bitmap. Shrink must fit the current allocations, including the full current
+ * bitmap, below the new heap boundary. Neither operation resizes backing storage.
  *
  * device supplies the sector-addressed backing-device view and callbacks;
  * target_size is the requested filesystem length in bytes and is rounded down

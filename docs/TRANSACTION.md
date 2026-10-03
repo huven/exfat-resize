@@ -1,20 +1,20 @@
 # Resize transaction
 
-The library grows exFAT in place. It is intentionally not a journaled or
+The library grows and shrinks exFAT in place. It is intentionally not a journaled or
 automatically resumable operation. The caller must keep the filesystem
 unmounted, prevent concurrent access, and make a verified backup first.
 
 The complete directory tree, allocation references, boot regions, and geometry
 are validated before the first write. During preflight, the library rebuilds
-the target allocation model from directory and system-file metadata, validates
+an allocation model from directory and system-file metadata, validates
 FAT-described chains and bad-cluster markers, and reconciles ownership with the
 source allocation bitmap. Shared clusters, referenced-but-free clusters, and
 allocated clusters with no recognized owner are rejected. FAT entries
-belonging to `NoFatChain` allocations are ignored, as required by exFAT. The
-replacement allocation bitmap is placed entirely in newly added clusters. If
+belonging to `NoFatChain` allocations are ignored, as required by exFAT. For
+growth, the replacement allocation bitmap is placed entirely in newly added clusters. If
 validation fails, the device is not modified.
 
-## Transaction sequence
+## Growth transaction sequence
 
 | API stage | Step | Writes issued | Boot geometry | Recovery after failure |
 |---|---|---|---|---|
@@ -72,6 +72,55 @@ The rows between synchronization points describe execution order, not separate
 durability guarantees. A power loss may persist an arbitrary subset of writes
 issued since the preceding synchronization.
 
+## Shrink transaction sequence
+
+Shrink keeps the heap offset, cluster size, and original geometry throughout
+compaction. Preflight validates every allocation, reserves all working memory,
+and requires enough usable free clusters below the target boundary to evacuate
+all allocated tail clusters, including the full original bitmap. Bad clusters
+inside the retained heap stay at their physical locations; bad clusters outside
+it disappear from the final volume.
+
+After setting and synchronizing the main dirty flag, shrink enters `RESIZING`.
+It processes affected chains in reverse logical order. For each cluster:
+
+1. Write the destination FAT entry, reserve its bitmap bit, copy the current
+   source contents, and synchronize. Reserving before copying is essential when
+   the source is itself bitmap storage.
+2. Publish the predecessor or owner reference, flush directory edits, and
+   synchronize. A moved root head is published to both boot regions using the
+   original geometry and the existing backup-before-main ordering.
+3. Clear the old FAT entry and bitmap bit through the current bitmap chain,
+   then synchronize. The original-size filesystem is consistent again.
+
+Affected `NoFatChain` streams first receive a complete, synchronized FAT chain
+while the old flag still makes those entries inactive. Only then is the flag
+and directory checksum updated and synchronized. File lengths, valid data
+lengths, and unrelated metadata are preserved. Dirty directory caches are
+flushed before their clusters can be copied.
+
+Cancellation is deferred across publication and its durability barriers. At a
+safe compaction checkpoint, cancellation synchronizes any pending inactive FAT
+writes and clears/synchronizes the dirty flag. It returns `CANCELLED` with
+`SOURCE_READY`, retaining the original volume size and any completed moves.
+Cleanup failure returns the concrete error with conservative recovery guidance,
+never `SOURCE_READY`. This is a fresh-retry boundary, not a resume journal.
+
+After evacuation, shrink takes its last cancellation checkpoint. It then shortens
+the bitmap entry and FAT chain, frees surplus bitmap clusters, and synchronizes
+target metadata. It commits the reduced volume length, cluster count, FAT length,
+root reference, and usage percentage to backup and main boot regions. The heap
+stays in place; unused former FAT space remains a gap before it. `FINALIZING`
+and `COMPLETED` have the same meanings as for growth. Cancellation arriving
+during this final commit does not interrupt it.
+
+Only completed compaction checkpoints guarantee a consistent original-size
+allocation graph. Intermediate writes can leave leaked allocations, torn entry
+sets, or mismatched boot regions after failure. `RESIZING` remains conservative:
+restore the backup after an error at that stage. Crash recovery cannot infer a
+safe checkpoint from the last displayed event. Do not truncate backing storage
+until the call succeeds.
+
 ## Memory requirements
 
 The library requests a 1 MiB I/O work buffer through the caller's allocator.
@@ -92,10 +141,12 @@ discontinuity. Directory entry sets are still checksummed and rewritten one
 32-byte entry at a time within those windows.
 
 In addition, `exfat_resize()` requests a writable allocation model containing
-one 32-bit value per target cluster. The model distinguishes free clusters,
-bad clusters, `NoFatChain` allocations, and target FAT links. It is completely
-built and checked against the source bitmap before the dirty flag is set, then
-used to generate the target FAT and bitmap and to traverse target directories.
+one 32-bit value per target cluster for growth, or per original cluster for
+shrink. The model distinguishes free clusters, bad clusters, `NoFatChain`
+allocations, and FAT links. It is completely built and checked against the
+source bitmap before the dirty flag is set. Growth uses it to generate the
+target FAT and bitmap; shrink updates it as each move is published. Both use
+it to traverse directories after changing their allocation.
 The caller controls how allocator-backed working memory is backed; anonymous
 memory and a memory-mapped temporary file are both possible.
 
@@ -108,3 +159,13 @@ A bad-cluster marker remains valid only while it describes the same physical
 sectors. Preflight rejects a target whose enlarged FAT would consume a source
 cluster recorded as bad; bad clusters that remain at the same physical heap
 location are preserved.
+
+Shrink additionally retains one record per tail cluster requiring relocation,
+one descriptor per affected stream or directory (plus the bitmap), and a sorted
+directory identity index. These arrays grow only in preflight. The directory
+index resolves original directory identities to their current locations; no
+full per-cluster reverse-ownership map is allocated. Unaffected ordinary files
+do not need retained descriptors. Shrink uses the existing bitmap in place,
+so it needs no second bitmap allocation. One-cluster publication uses several
+synchronizations per move and prioritizes small consistent checkpoints over
+bulk-compaction throughput.

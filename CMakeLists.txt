@@ -141,6 +141,7 @@ add_library(
         lib/grow.c
         lib/resize.c
         lib/sector_adapter.c
+        lib/shrink.c
         lib/stream.c
         lib/volume.c
 )

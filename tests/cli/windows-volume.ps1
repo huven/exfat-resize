@@ -549,6 +549,30 @@ function Test-VolumeTarget {
         Assert-Condition (($Partition.Size - $FinalFileSystemSize) -le 4MB) `
             "Filesystem leaves more than 4 MiB of the partition unavailable"
 
+        # Filesystem shrink must not implicitly reduce the containing partition.
+        Invoke-ExpectedFailure `
+            -Arguments @("--grow-partition", $Target, [string] ([uint64] 64MB)) `
+            -ExpectedText "target does not add enough usable clusters"
+        $ShrinkOutput = & $Program $Target ([uint64] 64MB) 2>&1
+        $ShrinkStatus = $LASTEXITCODE
+        $ShrinkOutput | ForEach-Object { Write-Host $_ }
+        Assert-Condition ($ShrinkStatus -eq 0) "Filesystem shrink failed through $TargetType"
+        Update-HostStorageCache
+        $Partition = Get-Partition -DiskNumber $Disk.Number `
+            -PartitionNumber $Partition.PartitionNumber
+        Assert-Condition ($Partition.Size -eq $TargetSize) "Shrink changed the partition size"
+        $Volume = Wait-Volume $DriveLetter
+        Assert-Condition ([uint64] $Volume.Size -ge 58MB -and [uint64] $Volume.Size -le 64MB) `
+            "Shrunk usable filesystem capacity is unexpected: $($Volume.Size)"
+        Assert-ManifestEqual $Baseline @(Get-FixtureManifest $Root) `
+            "Fixture after shrink through $TargetType"
+        Invoke-CleanCheck $DriveLetter
+        Invoke-Resize $Target $TargetSize $false
+        $Volume = Wait-Volume $DriveLetter
+        Assert-ManifestEqual $Baseline @(Get-FixtureManifest $Root) `
+            "Fixture after regrowth through $TargetType"
+        Invoke-CleanCheck $DriveLetter
+
         Write-Host "windows-volume ($TargetType): passed"
     }
     finally {

@@ -66,6 +66,9 @@ void memory_block_device_fail_after_operation(struct memory_block_device *memory
 void memory_block_device_clear_failure(struct memory_block_device *memory);
 
 int memory_block_device_make_durable(struct memory_block_device *memory);
+/* Persist selected current sectors without a sync, to model writeback before a crash. */
+int memory_block_device_persist_range(
+    struct memory_block_device *memory, uint64_t first_sector, uint32_t sector_count);
 int memory_block_device_crash(struct memory_block_device *memory);
 
 #endif

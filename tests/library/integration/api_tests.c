@@ -381,14 +381,14 @@ static void test_invalid_targets(void)
 	enum target_kind {
 		ONE_BYTE_TARGET,
 		EQUAL_TARGET,
-		SMALLER_TARGET,
+		BELOW_MINIMUM_TARGET,
 		INSUFFICIENT_GROWTH_TARGET,
 		OVERSIZED_TARGET,
 	};
 	static const enum target_kind cases[] = {
 		ONE_BYTE_TARGET,
 		EQUAL_TARGET,
-		SMALLER_TARGET,
+		BELOW_MINIMUM_TARGET,
 		INSUFFICIENT_GROWTH_TARGET,
 		OVERSIZED_TARGET,
 	};
@@ -415,8 +415,8 @@ static void test_invalid_targets(void)
 			target_size = exfat_fixture_target_size(fixture.geometry.volume_sector_count);
 			expected = EXFAT_RESIZE_INVALID_ARGUMENT;
 			break;
-		case SMALLER_TARGET:
-			target_size = exfat_fixture_target_size(fixture.geometry.volume_sector_count - 1);
+		case BELOW_MINIMUM_TARGET:
+			target_size = exfat_fixture_target_size(2047);
 			expected = EXFAT_RESIZE_INVALID_ARGUMENT;
 			break;
 		case INSUFFICIENT_GROWTH_TARGET:
