@@ -8,7 +8,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/windows-volume-common.ps1"
-. "$PSScriptRoot/windows-disk-image.ps1"
 
 # Drive letters and volume handles can change after SET_DRIVE_LAYOUT_EX.
 function Find-TestPartition {
