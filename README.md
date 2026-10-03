@@ -171,6 +171,11 @@ least the reported filesystem size. See [partition resizing](docs/PARTITIONING.m
 The CLI never truncates images or shrinks partitions, and `--grow-partition`
 cannot be combined with a shrink target.
 
+On Windows, CHKDSK requires the partition size to match the filesystem size.
+While the partition is still larger after shrink, CHKDSK can report `RAW` even
+when Windows mounts the filesystem and reads its files. Complete the separate
+partition resize before checking the smaller filesystem with CHKDSK.
+
 Shrink moves allocated tail clusters into free space below the new boundary.
 It retains the heap offset and completes each move before observing cancellation.
 If cancellation reports a clean original-size filesystem, it can be used or the

@@ -73,6 +73,14 @@ separate partitioning utility reduce the partition end. Preserve the start
 sector and leave at least the exact resulting filesystem size reported by the
 CLI; account for the partitioning utility's sector units and alignment.
 
+Windows CHKDSK's exFAT recognition requires the partition length to equal the
+filesystem's `VolumeLength`. A successfully shrunk filesystem in a larger
+partition may mount and remain readable while CHKDSK reports `RAW`. To check
+the smaller filesystem with CHKDSK, first complete the separate partition resize
+to the reported filesystem size. A `RAW` result alone does not establish this
+size mismatch; verify the sizes and the successful resize result before changing
+the partition.
+
 For a regular image the same order applies: shrink the filesystem successfully,
 then truncate the image. The CLI performs neither truncation nor partition
 shrink. A cancelled shrink at `SOURCE_READY` leaves a clean filesystem at its

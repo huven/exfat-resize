@@ -566,7 +566,11 @@ function Test-VolumeTarget {
             "Shrunk usable filesystem capacity is unexpected: $($Volume.Size)"
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest $Root) `
             "Fixture after shrink through $TargetType"
-        Invoke-CleanCheck $DriveLetter
+        # CHKDSK's exFAT recognizer requires VolumeLength to equal the partition
+        # length. With the partition still at 160 MiB it reports RAW, even though
+        # Windows mounts this 64 MiB filesystem. Keep the content/metadata check
+        # above, then run CHKDSK after regrowth restores matching sizes. The native
+        # image tests also check the smaller filesystem after external truncation.
         Invoke-Resize $Target $TargetSize $false
         $Volume = Wait-Volume $DriveLetter
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest $Root) `

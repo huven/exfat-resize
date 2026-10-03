@@ -15,7 +15,8 @@ exfat-resize \- grow or shrink an existing exFAT filesystem
 .BR \-V " | " \-\-version
 .SH DESCRIPTION
 .B exfat-resize
-grows or shrinks an existing exFAT filesystem in a regular file or raw block device.
+grows or shrinks an existing exFAT filesystem in a regular file or raw block
+device.
 For growth, enlarge the backing object first. For shrink, keep its original
 size until the filesystem resize succeeds. The command does not resize regular
 files or partitions or inspect partition tables.
@@ -36,6 +37,11 @@ including the full original allocation bitmap. The bitmap is shortened only
 at final commit. This can reject exceptionally tight targets. After successful
 shrink, a separate tool may truncate the image or reduce the partition end;
 retain the partition start and at least the reported filesystem size.
+.PP
+Windows CHKDSK requires the partition length to match the filesystem length.
+After successful shrink, it can report RAW while the partition is still larger,
+even if Windows mounts the filesystem. Complete the separate partition resize
+before checking the smaller filesystem with CHKDSK.
 .SH ARGUMENTS
 .TP
 .I DEVICE
