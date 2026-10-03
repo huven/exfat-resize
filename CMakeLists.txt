@@ -130,14 +130,18 @@ endfunction()
 add_library(
     exfat_resize
     STATIC
+        lib/allocation.c
         lib/block_device.c
         lib/boot_region.c
         lib/checked_math.c
+        lib/directory.c
         lib/endian.c
         lib/event.c
         lib/geometry.c
         lib/resize.c
         lib/sector_adapter.c
+        lib/stream.c
+        lib/volume.c
 )
 add_library(exfat_resize::exfat_resize ALIAS exfat_resize)
 
