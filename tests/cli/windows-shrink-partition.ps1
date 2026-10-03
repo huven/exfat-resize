@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string] $Program,
     [Parameter(Mandatory = $true)][string] $FaultProgram,
     [Parameter(Mandatory = $true)][string] $Fixture,
-    [Parameter(Mandatory = $true)][string] $ExpectedHash
+    [Parameter(Mandatory = $true)][string] $ExpectedHash,
+    [string] $FirstCaseTrace = ''
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -169,7 +170,34 @@ $Fixture = (Resolve-Path -LiteralPath $Fixture).Path
 $PayloadHash = (Get-Content -LiteralPath $ExpectedHash -Raw).Trim().ToUpperInvariant()
 $Temporary = Join-Path $env:RUNNER_TEMP "exfat-resize-shrink-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $Temporary | Out-Null
-Test-ShrinkPartition 'combined-drive' $false $false
+# Capture the first complete case, including device creation and both detach
+# calls. Later cases run without tracing so the recording stays small.
+if ($FirstCaseTrace) {
+    $FirstCaseTrace = [System.IO.Path]::GetFullPath($FirstCaseTrace)
+    New-Item -ItemType Directory -Path (Split-Path $FirstCaseTrace) -Force | Out-Null
+    $TraceSession = "exfat-resize-$([guid]::NewGuid())"
+    Write-Host "Recording first shrink case to $FirstCaseTrace"
+    & wpr.exe -start GeneralProfile -filemode -instancename $TraceSession
+    Assert-Condition ($LASTEXITCODE -eq 0) 'Could not start Windows Performance Recorder'
+}
+try {
+    Test-ShrinkPartition 'combined-drive' $false $false
+}
+finally {
+    if ($FirstCaseTrace) {
+        & wpr.exe -stop $FirstCaseTrace -compress -instancename $TraceSession
+        $TraceSaved = $LASTEXITCODE -eq 0
+        if (-not $TraceSaved) {
+            # Only cancel our own recording, and preserve any test failure.
+            Write-Warning 'Could not save the Windows performance trace'
+            & wpr.exe -cancel -instancename $TraceSession
+        }
+    }
+}
+if ($FirstCaseTrace) {
+    Assert-Condition ($TraceSaved -and (Test-Path -LiteralPath $FirstCaseTrace)) `
+        'Performance trace was not saved'
+}
 Test-ShrinkPartition 'combined-guid' $true $false
 Test-ShrinkPartition 'partition-only' $false $true
 Test-ShrinkPartition 'cancel-before-writes' $false $false 'cancel-discovery' 130 'interrupted by user'

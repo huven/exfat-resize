@@ -197,7 +197,6 @@ function Invoke-CleanCheck {
 function Dismount-TestDiskImage {
     param([string] $Image)
 
-    $Started = Get-Date
     $Timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         Dismount-DiskImage -ImagePath $Image -StorageType VHDX -ErrorAction Stop | Out-Null
@@ -205,28 +204,6 @@ function Dismount-TestDiskImage {
     finally {
         $Timer.Stop()
         Write-Host "Dismount-DiskImage took $($Timer.Elapsed.TotalSeconds.ToString('F2')) s"
-        if ($Timer.Elapsed.TotalSeconds -ge 10) {
-            # Gather evidence for the intermittent 180-second removal wait.
-            # Event-log errors must not hide a failure from Dismount-DiskImage.
-            Write-Host 'Windows storage/removal events during the slow detach:'
-            try {
-                $Events = @(Get-WinEvent -FilterHashtable @{
-                    LogName = 'System'; StartTime = $Started
-                } -MaxEvents 200 -ErrorAction SilentlyContinue |
-                    Where-Object {
-                        $_.ProviderName -match 'Kernel-PnP|disk|stor|volmgr|partmgr|vhd|exfat'
-                    })
-                if ($Events.Count -eq 0) {
-                    Write-Host 'No matching System events were recorded.'
-                } else {
-                    $Events | Select-Object TimeCreated, ProviderName, Id, Message |
-                        Format-List | Out-String | Write-Host
-                }
-            }
-            catch {
-                Write-Host "Could not read diagnostic events: $_"
-            }
-        }
     }
     Assert-Condition (-not (Get-DiskImage -ImagePath $Image).Attached) `
         "Virtual disk is still attached after Dismount-DiskImage: $Image"
