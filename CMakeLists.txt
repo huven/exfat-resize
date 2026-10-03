@@ -138,6 +138,7 @@ add_library(
         lib/endian.c
         lib/event.c
         lib/geometry.c
+        lib/grow.c
         lib/resize.c
         lib/sector_adapter.c
         lib/stream.c

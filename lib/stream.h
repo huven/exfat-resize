@@ -7,7 +7,7 @@
 #include "geometry.h"
 #include "volume.h"
 
-struct resize_context;
+struct resize_allocation;
 
 enum stream_chain_source { STREAM_CHAIN_SOURCE_FAT, STREAM_CHAIN_TARGET_MODEL };
 
@@ -33,9 +33,8 @@ struct stream_cursor {
 
 int exfat_resize_cluster_is_valid(const struct exfat_resize_geometry *geometry, uint32_t cluster);
 
-enum exfat_resize_error exfat_resize_stream_cluster_count(const struct resize_context *context,
-    const struct allocation_stream *stream,
-    uint32_t *cluster_count);
+enum exfat_resize_error exfat_resize_stream_cluster_count(
+    uint64_t cluster_size, const struct allocation_stream *stream, uint32_t *cluster_count);
 
 enum exfat_resize_error exfat_resize_initialize_stream_cursor(
     const struct exfat_resize_geometry *geometry,
@@ -44,7 +43,10 @@ enum exfat_resize_error exfat_resize_initialize_stream_cursor(
     enum stream_chain_source chain_source,
     struct stream_cursor *cursor);
 
-enum exfat_resize_error exfat_resize_read_stream(
-    struct resize_context *context, struct stream_cursor *cursor, void *buffer, size_t count);
+enum exfat_resize_error exfat_resize_read_stream(struct resize_volume *volume,
+    const struct resize_allocation *allocation,
+    struct stream_cursor *cursor,
+    void *buffer,
+    size_t count);
 
 #endif
