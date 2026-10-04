@@ -2,6 +2,7 @@
 #include "boot_region.h"
 #include "endian.h"
 #include "exfat_resize.h"
+#include "stream.h"
 #include "support/shrink_fixture.h"
 #include "support/test_allocator.h"
 #include <errno.h>
@@ -24,6 +25,7 @@ struct monitor_state {
 	size_t cancel_at;
 	size_t allocations_before_writes;
 	size_t stage_start[6];
+	uint32_t target_clusters;
 	int validate_only;
 	int cancel;
 };
@@ -55,8 +57,10 @@ static enum exfat_resize_error resize(
 	struct exfat_resize_monitor monitor = {
 		.context = state, .cancellation_requested = cancelled, .report_event = event
 	};
-	enum exfat_resize_error error = exfat_fixture_resize_with_monitor(
-	    &f->memory.device, shrink_fixture_target(f), &callbacks, &monitor, stage);
+	enum exfat_resize_error error = exfat_fixture_resize_with_monitor(&f->memory.device,
+	    f->geometry.cluster_heap_offset +
+	        (uint64_t)state->target_clusters * f->geometry.sectors_per_cluster,
+	    &callbacks, &monitor, stage);
 	CHECK(test_allocator_is_clean(state->allocator));
 	if (*stage != EXFAT_RESIZE_STAGE_PREFLIGHT)
 		CHECK(state->allocator->allocation_attempts == state->allocations_before_writes);
@@ -82,13 +86,27 @@ static void verify_allocation(struct exfat_fixture *f, uint32_t clusters)
 	CHECK(test_allocator_is_clean(&allocator));
 }
 
-static void test_transactions(uint32_t spc)
+static void initialize_transaction_fixture(struct exfat_fixture *f, uint32_t spc, uint32_t target)
+{
+	CHECK(shrink_fixture_initialize(f, spc) == 0);
+	if (target % 8 != 0) {
+		/* This allocated bad-cluster bit becomes reserved only during final commit.
+		 * Original-size validation after cancellation must still find it set. */
+		CHECK(shrink_fixture_set_fat(f, 2005, EXFAT_FAT_BAD_CLUSTER) == 0);
+		CHECK(shrink_fixture_set_bit(f, 2005, 1) == 0);
+		CHECK(memory_block_device_make_durable(&f->memory) == 0);
+		memory_block_device_clear_operations(&f->memory);
+	}
+}
+
+static void test_transactions(uint32_t spc, uint32_t target)
 {
 	struct exfat_fixture reference;
 	struct test_allocator allocator = { 0 };
-	struct monitor_state baseline = {
-		.memory = &reference.memory, .allocator = &allocator, .cancel_at = SIZE_MAX
-	};
+	struct monitor_state baseline = { .memory = &reference.memory,
+		.allocator = &allocator,
+		.cancel_at = SIZE_MAX,
+		.target_clusters = target };
 	enum exfat_resize_stage stage;
 	size_t count;
 	size_t index;
@@ -96,7 +114,7 @@ static void test_transactions(uint32_t spc)
 	int saw_partial = 0;
 	int saw_source_ready = 0;
 	int saw_commit_completion = 0;
-	CHECK(shrink_fixture_initialize(&reference, spc) == 0);
+	initialize_transaction_fixture(&reference, spc, target);
 	CHECK(resize(&reference, &baseline, &stage) == EXFAT_RESIZE_SUCCESS);
 	count = reference.memory.operation_count;
 
@@ -107,16 +125,17 @@ static void test_transactions(uint32_t spc)
 		for (mode = 0; mode < 3; ++mode) {
 			struct exfat_fixture f;
 			struct test_allocator a = { 0 };
-			struct monitor_state state = {
-				.memory = &f.memory, .allocator = &a, .cancel_at = SIZE_MAX
-			};
+			struct monitor_state state = { .memory = &f.memory,
+				.allocator = &a,
+				.cancel_at = SIZE_MAX,
+				.target_clusters = target };
 			size_t k;
 			unsigned char boot[512];
 			uint16_t flags = 0;
 			if (mode == 2 &&
 			    (operation.kind == MEMORY_OPERATION_SYNC || operation.sector_count < 2))
 				continue;
-			CHECK(shrink_fixture_initialize(&f, spc) == 0);
+			initialize_transaction_fixture(&f, spc, target);
 			if (mode == 0)
 				memory_block_device_fail_operation(&f.memory, index, EIO);
 			else
@@ -166,15 +185,17 @@ static void test_transactions(uint32_t spc)
 	for (index = 0; index <= count; ++index) {
 		struct exfat_fixture f;
 		struct test_allocator a = { 0 };
-		struct monitor_state state = { .memory = &f.memory, .allocator = &a, .cancel_at = index };
+		struct monitor_state state = {
+			.memory = &f.memory, .allocator = &a, .cancel_at = index, .target_clusters = target
+		};
 		enum exfat_resize_error error;
-		CHECK(shrink_fixture_initialize(&f, spc) == 0);
+		initialize_transaction_fixture(&f, spc, target);
 		error = resize(&f, &state, &stage);
 		CHECK(memory_block_device_crash(&f.memory) == 0);
 		if (error == EXFAT_RESIZE_SUCCESS) {
 			CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
-			CHECK(shrink_fixture_verify(&f, 2000) == 0);
-			verify_allocation(&f, 2000);
+			CHECK(shrink_fixture_verify(&f, target) == 0);
+			verify_allocation(&f, target);
 			saw_commit_completion = 1;
 		} else {
 			CHECK(error == EXFAT_RESIZE_CANCELLED);
@@ -186,7 +207,7 @@ static void test_transactions(uint32_t spc)
 				if (!saw_source_ready) {
 					state.cancel_at = SIZE_MAX;
 					CHECK(resize(&f, &state, &stage) == EXFAT_RESIZE_SUCCESS);
-					CHECK(shrink_fixture_verify(&f, 2000) == 0);
+					CHECK(shrink_fixture_verify(&f, target) == 0);
 				}
 				saw_source_ready = 1;
 			}
@@ -201,7 +222,9 @@ static void test_cancel_cleanup_failure(void)
 {
 	struct exfat_fixture f;
 	struct test_allocator a = { 0 };
-	struct monitor_state state = { .memory = &f.memory, .allocator = &a, .cancel_at = SIZE_MAX };
+	struct monitor_state state = {
+		.memory = &f.memory, .allocator = &a, .cancel_at = SIZE_MAX, .target_clusters = 2000
+	};
 	enum exfat_resize_stage stage;
 	size_t first_move_start;
 	size_t end;
@@ -229,8 +252,9 @@ static void test_cancel_cleanup_failure(void)
 
 int main(void)
 {
-	test_transactions(1);
-	test_transactions(4);
+	test_transactions(1, 2000);
+	test_transactions(4, 2000);
+	test_transactions(1, 2001);
 	test_cancel_cleanup_failure();
 	return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

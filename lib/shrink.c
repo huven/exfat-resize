@@ -442,6 +442,36 @@ static enum exfat_resize_error cancel_cleanly(struct shrink_context *context)
 	return EXFAT_RESIZE_CANCELLED;
 }
 
+static enum exfat_resize_error clear_newly_reserved_bitmap_bits(
+    struct shrink_context *context, uint32_t last_cluster)
+{
+	struct resize_volume *volume = context->volume;
+	uint32_t first_bit = context->target.cluster_count % 8;
+	uint32_t end_bit;
+	uint64_t offset;
+	uint64_t sector;
+	unsigned char mask;
+	enum exfat_resize_error error;
+	if (first_bit == 0 || context->target.cluster_count == volume->geometry.cluster_count)
+		return EXFAT_RESIZE_SUCCESS;
+	/* Preserve padding that was already reserved in the source bitmap. */
+	end_bit = volume->geometry.cluster_count - (context->target.cluster_count - first_bit);
+	if (end_bit > 8)
+		end_bit = 8;
+	mask = (unsigned char)(((1u << end_bit) - 1) & ~((1u << first_bit) - 1));
+	/* finish() resolved this cluster through the current bitmap chain. */
+	offset = (context->target.cluster_count / 8) % volume->cluster_size;
+	error = exfat_resize_cluster_sector(&volume->geometry, last_cluster, &sector);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	sector += offset / volume->sector_size;
+	error = exfat_resize_read_volume(volume, sector, 1, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
+	volume->io_buffer[offset % volume->sector_size] &= (unsigned char)~mask;
+	return exfat_resize_write_volume(volume, sector, 1, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+}
+
 static enum exfat_resize_error finish(struct shrink_context *context)
 {
 	struct resize_volume *volume = context->volume;
@@ -481,6 +511,9 @@ static enum exfat_resize_error finish(struct shrink_context *context)
 		surplus = next;
 	}
 	context->allocation.used_cluster_count -= context->discarded_bad_clusters;
+	error = clear_newly_reserved_bitmap_bits(context, last);
+	if (error != EXFAT_RESIZE_SUCCESS)
+		return error;
 	error = synchronize(context);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
