@@ -101,3 +101,12 @@ exfat_resize_add_library_test(
     support/test_allocator.c
     integration/shrink_transaction_tests.c
 )
+
+exfat_resize_add_library_test(
+    exfat_resize_shrink_materialization_tests
+    library.shrink-materialization
+    support/exfat_fixture.c
+    support/memory_block_device.c
+    support/test_allocator.c
+    integration/shrink_materialization_tests.c
+)
