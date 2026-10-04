@@ -99,15 +99,10 @@ function Test-ShrinkPartition {
             $ExitCode $Text
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT -ErrorAction SilentlyContinue
 
-        # Reattach to inspect persisted partition geometry, including after injected errors.
-        Write-Host "windows-shrink-partition ($Case): detaching for persistence check"
-        Dismount-TestDiskImage $Image
-        $Mounted = $false
-        Write-Host "windows-shrink-partition ($Case): reattaching for persistence check"
-        Mount-DiskImage -ImagePath $Image -StorageType VHDX | Out-Null
-        $Mounted = $true
+        # Match the growth suite: refresh and inspect the layout while still attached.
+        Update-HostStorageCache
         $Partition = Find-TestPartition $Image $Initial.Offset
-        Write-Host "windows-shrink-partition ($Case): verifying persisted layout"
+        Write-Host "windows-shrink-partition ($Case): verifying current layout"
         $Disk = Get-DiskImage -ImagePath $Image | Get-Disk
         Assert-Condition ($Disk.UniqueId -eq $DiskId) 'Disk identity changed'
         Assert-Condition ($Partition.Offset -eq $Initial.Offset) 'Partition start changed'
@@ -117,7 +112,7 @@ function Test-ShrinkPartition {
         $NotPublished = $Fault -in @('cancel-discovery', 'shrink-revalidate',
             'shrink-before-set', 'shrink-layout-changed', 'dismount')
         $ExpectedSize = if ($NotPublished) { [uint64] 96MB } else { $Size }
-        Assert-Condition ($Partition.Size -eq $ExpectedSize) 'Unexpected persisted partition size'
+        Assert-Condition ($Partition.Size -eq $ExpectedSize) 'Unexpected partition size'
         Write-Host "windows-shrink-partition ($Case): waiting for volume and checking contents"
         $Volume = Wait-Volume ([char] $Partition.DriveLetter)
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
@@ -128,7 +123,9 @@ function Test-ShrinkPartition {
             # clean smaller filesystem. The same option handles both cases.
             Invoke-TestCommand $Program @('--shrink-partition', $Target, [string] $Size) `
                 0 'shrank the partition'
+            Update-HostStorageCache
             $Partition = Find-TestPartition $Image $Initial.Offset
+            Assert-Condition ($Partition.Size -eq $Size) 'Retry did not shrink the partition'
             $Volume = Wait-Volume ([char] $Partition.DriveLetter)
             $Target = Get-TestTarget $Partition $UseGuid
         }
@@ -141,12 +138,41 @@ function Test-ShrinkPartition {
         Write-Host "windows-shrink-partition ($Case): growing back to 160 MiB"
         Invoke-TestCommand $Program @('--grow-partition', $Target, [string] ([uint64] 160MB)) `
             0 'grew the partition'
+        Update-HostStorageCache
+        $Partition = Find-TestPartition $Image $Initial.Offset
+        Assert-Condition ($Partition.Size -eq 160MB) 'Regrowth did not enlarge the partition'
+        $Target = Get-TestTarget $Partition $UseGuid
         $Volume = Wait-Volume ([char] $Partition.DriveLetter)
         Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
             "Fixture after regrowth for $Case"
         Invoke-CleanCheck ([char] $Partition.DriveLetter)
+        $Volume = Wait-Volume ([char] $Partition.DriveLetter)
+
+        # Match growth's final filesystem-only shrink/regrow cycle before detach.
+        Write-Host "windows-shrink-partition ($Case): final filesystem shrink/regrow"
+        Invoke-TestCommand $Program @('--grow-partition', $Target, [string] ([uint64] 64MB)) `
+            1 'target does not add enough usable clusters'
+        Invoke-TestCommand $Program @($Target, [string] ([uint64] 64MB)) 0 'exfat-resize: resized'
+        Update-HostStorageCache
+        $Partition = Find-TestPartition $Image $Initial.Offset
+        Assert-Condition ($Partition.Size -eq 160MB) 'Filesystem shrink changed partition size'
+        $Volume = Wait-Volume ([char] $Partition.DriveLetter)
+        Assert-Condition ([uint64] $Volume.Size -ge 58MB -and [uint64] $Volume.Size -le 64MB) `
+            "Unexpected shrunk filesystem capacity: $($Volume.Size)"
+        Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
+            "Fixture after filesystem-only shrink for $Case"
+        # As in windows-volume.ps1, defer CHKDSK until filesystem and partition
+        # lengths match again; its exFAT recognizer otherwise reports RAW.
+        $Target = Get-TestTarget $Partition $UseGuid
+        Invoke-TestCommand $Program @('--grow-partition', $Target, [string] ([uint64] 160MB)) `
+            0 'exfat-resize: resized'
+        $Volume = Wait-Volume ([char] $Partition.DriveLetter)
+        Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
+            "Fixture after filesystem-only regrowth for $Case"
+        Invoke-CleanCheck ([char] $Partition.DriveLetter)
     }
     finally {
+        Set-Location $env:GITHUB_WORKSPACE
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT -ErrorAction SilentlyContinue
         if ($Mounted) {
             Write-Host "windows-shrink-partition ($Case): detaching during cleanup"
@@ -162,8 +188,8 @@ $Fixture = (Resolve-Path -LiteralPath $Fixture).Path
 $PayloadHash = (Get-Content -LiteralPath $ExpectedHash -Raw).Trim().ToUpperInvariant()
 $Temporary = Join-Path $env:RUNNER_TEMP "exfat-resize-shrink-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $Temporary | Out-Null
-# Capture the first complete case, including device creation and both detach
-# calls. Later cases run without tracing so the recording stays small.
+# Capture the first complete case, including device creation and final detach.
+# Later cases run without tracing so the recording stays small.
 if ($FirstCaseTrace) {
     $FirstCaseTrace = [System.IO.Path]::GetFullPath($FirstCaseTrace)
     New-Item -ItemType Directory -Path (Split-Path $FirstCaseTrace) -Force | Out-Null
