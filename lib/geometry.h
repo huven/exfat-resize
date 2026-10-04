@@ -36,6 +36,15 @@ enum exfat_resize_error exfat_resize_plan_growth(
     uint64_t target_volume_sector_count,
     struct exfat_resize_geometry *target);
 
+/* Keep heap coordinates while reducing the volume and advertised FAT length.
+ * Inputs are validated source/device geometries. The root may still need relocation;
+ * its source cluster is retained here. target is modified only on success. */
+enum exfat_resize_error exfat_resize_plan_shrink(
+    const struct exfat_resize_device_geometry *device_geometry,
+    const struct exfat_resize_geometry *source,
+    uint64_t target_volume_sector_count,
+    struct exfat_resize_geometry *target);
+
 /*
  * Maps a cluster number from source geometry to its cluster number in target
  * growth geometry. A partial heap shift rotates the displaced prefix after the

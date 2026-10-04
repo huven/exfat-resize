@@ -81,3 +81,23 @@ exfat_resize_add_library_test(
     support/test_allocator.c
     integration/mechanism_tests.c
 )
+
+exfat_resize_add_library_test(
+    exfat_resize_shrink_tests
+    library.shrink
+    support/exfat_fixture.c
+    support/shrink_fixture.c
+    support/memory_block_device.c
+    support/test_allocator.c
+    integration/shrink_tests.c
+)
+
+exfat_resize_add_library_test(
+    exfat_resize_shrink_transaction_tests
+    library.shrink-transaction
+    support/exfat_fixture.c
+    support/shrink_fixture.c
+    support/memory_block_device.c
+    support/test_allocator.c
+    integration/shrink_transaction_tests.c
+)

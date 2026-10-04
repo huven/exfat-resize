@@ -8,6 +8,39 @@
 
 #define EXFAT_MAX_CLUSTER_COUNT (UINT32_MAX - UINT32_C(10))
 
+enum exfat_resize_error exfat_resize_plan_shrink(
+    const struct exfat_resize_device_geometry *device_geometry,
+    const struct exfat_resize_geometry *source,
+    uint64_t target_volume_sector_count,
+    struct exfat_resize_geometry *target)
+{
+	struct exfat_resize_geometry result;
+	uint64_t count;
+	if (device_geometry == NULL || source == NULL || target == NULL ||
+	    device_geometry->logical_sector_size == 0 || source->sectors_per_cluster == 0 ||
+	    source->cluster_count > EXFAT_MAX_CLUSTER_COUNT)
+		return EXFAT_RESIZE_INVALID_ARGUMENT;
+	if (target_volume_sector_count >= source->volume_sector_count ||
+	    target_volume_sector_count < UINT64_C(1048576) / device_geometry->logical_sector_size ||
+	    target_volume_sector_count <= source->cluster_heap_offset)
+		return EXFAT_RESIZE_INVALID_ARGUMENT;
+	if (target_volume_sector_count > device_geometry->sector_count)
+		return EXFAT_RESIZE_OUT_OF_BOUNDS;
+	count =
+	    (target_volume_sector_count - source->cluster_heap_offset) / source->sectors_per_cluster;
+	if (count == 0)
+		return EXFAT_RESIZE_INVALID_ARGUMENT;
+	if (count > EXFAT_MAX_CLUSTER_COUNT)
+		count = EXFAT_MAX_CLUSTER_COUNT;
+	result = *source;
+	result.volume_sector_count = target_volume_sector_count;
+	result.cluster_count = (uint32_t)count;
+	result.fat_length = exfat_resize_used_fat_sector_count(
+	    result.cluster_count, device_geometry->logical_sector_size);
+	*target = result;
+	return EXFAT_RESIZE_SUCCESS;
+}
+
 uint32_t exfat_resize_used_fat_sector_count(uint32_t cluster_count, uint32_t sector_size)
 {
 	uint64_t byte_count = ((uint64_t)cluster_count + 2) * 4;

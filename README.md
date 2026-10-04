@@ -2,7 +2,7 @@
 
 exfat-resize provides:
 
-- A portable C11 library for growing existing exFAT filesystems.
+- A portable C11 library for growing and shrinking existing exFAT filesystems.
 - A command-line tool (thin wrapper around the library) for Linux, macOS,
   and Windows.
 
@@ -79,7 +79,7 @@ for supported targets and examples.
 Verify that the supplied path resolves to the intended filesystem. Paths may
 resolve through symbolic links, and the selected device must present the exFAT
 main boot sector at sector zero. The CLI does not modify partition tables unless
-the Windows-only `--grow-partition` option is explicitly supplied.
+the Windows-only `--grow-partition` or `--shrink-partition` option is explicitly supplied.
 
 Before resizing, run an appropriate exFAT filesystem checker while the
 filesystem is unmounted and ensure the check completes successfully.
@@ -95,7 +95,7 @@ a loop or disk-image device. Platform locking helps detect cooperating users,
 but regular-file locks are advisory and cannot exclude a process that ignores
 them.
 
-The backing object or partition must already be enlarged unless a supported
+For growth, the backing object or partition must already be enlarged unless a supported
 Windows logical volume is used with `--grow-partition`. The tool never enlarges
 regular files. A failed or interrupted resize is not automatically repaired,
 rolled back, or resumable. Follow the recovery guidance printed with an error;
@@ -129,10 +129,12 @@ recovery step.
 
     exfat-resize device [ size ]
     exfat-resize --grow-partition device size
+    exfat-resize --shrink-partition device size
     exfat-resize -h | --help
     exfat-resize -V | --version
 
-The `--grow-partition` form is available only for Windows logical volumes.
+The partition options are available only for Windows logical volumes and are
+mutually exclusive. Both require an explicit size.
 Run `exfat-resize --help` for a command summary. On macOS and Linux,
 `man exfat-resize` provides the complete command-line reference.
 
@@ -140,7 +142,10 @@ With no size, the filesystem grows to the available size of the backing object.
 A specified size is the desired filesystem size as an unsigned number of bytes.
 It may have an uppercase `K`, `M`, or `G` suffix, which multiplies the number by
 1024, 1024 squared, or 1024 cubed, respectively. The size is rounded down to a
-whole filesystem sector. Shrinking is not supported.
+whole filesystem sector. A smaller size requests shrink; an equal rounded size
+is rejected, except that `--shrink-partition` can finish the partition step when
+the filesystem is already at the requested size. The backing storage must
+retain its original size until filesystem shrink completes successfully.
 
 The backing image, device, or partition must provide enough space for the
 requested size before the command runs. The CLI never enlarges an image file.
@@ -152,6 +157,38 @@ Only filesystems meeting the
 
 During the operation, the CLI reports each transaction stage. After successful
 completion, it reports the resulting filesystem size in bytes.
+
+### Shrinking
+
+Supply the desired smaller filesystem size explicitly:
+
+    exfat-resize image.exfat 32M
+
+After the command succeeds, the image may be truncated to the reported size:
+
+    truncate -s 32M image.exfat
+
+For partitions, shrink the filesystem first, then use a separate partitioning
+utility to reduce only the partition end. Keep its start fixed and its size at
+least the reported filesystem size. See [partition resizing](docs/PARTITIONING.md).
+The CLI never truncates images. On Windows,
+[`--shrink-partition`](#shrinking-the-containing-partition) performs both steps.
+`--grow-partition` cannot be combined with a shrink target.
+
+On Windows, CHKDSK requires the partition size to match the filesystem size.
+While the partition is still larger after shrink, CHKDSK can report `RAW` even
+when Windows mounts the filesystem and reads its files. Complete the partition
+resize, using `--shrink-partition` or a separate utility, before checking the
+smaller filesystem with CHKDSK.
+
+Shrink moves allocated tail clusters into free space below the new boundary.
+It retains the heap offset and completes each move before observing cancellation.
+If cancellation reports a clean original-size filesystem, it can be used or the
+shrink can be retried; completed moves remain. Do not truncate after cancellation.
+Cancellation during the final geometry commit is deferred through completion,
+which returns success if all writes succeed. I/O failures and abnormal termination
+still require the reported recovery procedure; individual metadata writes are
+not power-fail atomic.
 
 ### macOS and Linux
 
@@ -241,17 +278,67 @@ environments.
 
 Before changing the partition table, the CLI validates both exFAT boot regions,
 checks that the filesystem can grow to the requested size, and verifies the
-volume-to-disk mapping and physical partition layout. It then uses Windows'
+volume-to-disk mapping and physical partition layout. Growth uses Windows'
 documented [`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It never moves
-a partition start or another partition, and never shrinks a partition.
+a partition start or another partition. `--grow-partition` never shrinks a partition.
 
 The full filesystem preflight runs after the partition is enlarged. If that
 preflight fails, the original filesystem remains authoritative inside the
 larger partition; do not shrink the partition. Correct the reported problem
-and retry the filesystem resize. Without `--grow-partition`, the CLI never
-changes a partition table.
+and retry the filesystem resize. Partition changes require an explicit
+`--grow-partition` or `--shrink-partition` option.
 
 [windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
+
+#### Shrinking the containing partition
+
+From an elevated terminal, supply the desired smaller filesystem and partition size:
+
+    .\exfat-resize.exe --shrink-partition E: 384M
+
+This option validates the partition layout, shrinks and synchronizes the
+filesystem, then reduces only the partition's length using
+[`IOCTL_DISK_SET_DRIVE_LAYOUT_EX`][windows-set-layout]. It keeps the start,
+partition identity, type, attributes, and other partitions unchanged. The
+released tail becomes unallocated disk space. Disk Management and DiskPart
+cannot perform this operation for exFAT through their built-in shrink commands.
+
+The target must be a single whole basic GPT data partition or primary MBR
+(type 07) partition. Extended/logical, dynamic, spanned, and overlapping layouts
+are unsupported. The explicit size is rounded down to a filesystem sector and
+must also align to the device sector size. It must be smaller than the partition
+and no larger than the filesystem. Neither this option nor ordinary filesystem
+shrink reduces the containing VHD/VHDX file or virtual disk capacity.
+
+Before filesystem writes, the CLI validates the partition mapping and allocates
+its layout buffers (2 MiB in addition to filesystem workspace). Immediately
+before updating the table it checks that the layout still matches. Prevent other
+partition-management operations on the disk throughout the command.
+
+Cancellation during compaction leaves a clean filesystem at its original size
+and leaves the partition unchanged. Once the filesystem's final commit begins,
+cancellation is deferred through the partition update and verification. A
+request arriving during this completion returns success if all steps succeed.
+A partition failure takes precedence over cancellation.
+
+If the filesystem succeeds but the partition update has not been attempted,
+the error reports a clean smaller filesystem and an unchanged partition.
+Remount the volume before access or retrying `--shrink-partition` with the same
+size to finish just the partition step.
+That path validates both clean, matching boot regions and the partition layout;
+it does not repeat filesystem compaction. If a partition update was attempted
+but synchronization or readback failed, verify the layout before retrying.
+These updates are not power-fail atomic.
+
+Windows can replace the volume device and change its drive letter during the
+update. The CLI closes the old handle, verifies the physical layout, and discovers
+a fresh volume by its disk extent and partition identity. If the layout is
+verified but no matching volume becomes available within five seconds, it
+returns an error directing you to refresh or remount and check the current drive
+letter. Do not repeat an already completed shrink. After success, run CHKDSK
+using the current drive letter.
+
+[windows-set-layout]: https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-ioctl_disk_set_drive_layout_ex
 
 ## Filesystem compatibility
 
@@ -264,9 +351,13 @@ The filesystem must meet these prerequisites:
   a multiple of the block device's sector size.
 - Not contain Vendor Allocation directory entries, whose allocation semantics
   cannot be interpreted without recognizing their vendor GUID.
-- Gain enough clusters to hold the replacement allocation bitmap in the newly
-  added tail space.
-- Not have a source cluster recorded as bad where the expanded FAT would
+- For growth, gain enough clusters to hold the replacement allocation bitmap
+  in the newly added tail space.
+- For shrink, fit all current allocations, including the full current bitmap,
+  below the new heap boundary. The bitmap is shortened only at final commit;
+  exceptionally tight targets can therefore be rejected even when a smaller
+  final bitmap would fit.
+- For growth, not have a source cluster recorded as bad where the expanded FAT would
   overlap it. Bad clusters that remain in the Cluster Heap at the same physical
   location are preserved.
 
@@ -283,7 +374,7 @@ is a thin platform-specific wrapper around the library:
 | --- | --- | --- | --- |
 | macOS | Yes | Raw block devices | Use an external partitioning tool |
 | Linux | Yes | Raw block devices | Use an external partitioning tool |
-| Windows | Yes | Drive designators and volume-GUID paths | `--grow-partition` for supported layouts |
+| Windows | Yes | Drive designators and volume-GUID paths | `--grow-partition` and `--shrink-partition` for supported layouts |
 
 ## C library
 

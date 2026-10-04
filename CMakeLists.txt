@@ -141,6 +141,7 @@ add_library(
         lib/grow.c
         lib/resize.c
         lib/sector_adapter.c
+        lib/shrink.c
         lib/stream.c
         lib/volume.c
 )
@@ -166,6 +167,8 @@ if(EXFAT_RESIZE_BUILD_CLI)
             src/windows/device_path.c
             src/windows/entry.c
             src/windows/partition.c
+            src/windows/partition_layout.c
+            src/windows/partition_shrink.c
         )
     else()
         set(

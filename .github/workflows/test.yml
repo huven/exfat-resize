@@ -149,6 +149,7 @@ jobs:
 
   windows-volume:
     name: Windows logical volumes
+    timeout-minutes: 30
     needs:
       - windows-binary
       - windows-volume-fixture
@@ -205,6 +206,27 @@ jobs:
               build/windows-fault/tests/cli/Release/exfat_resize_partition_fault_test.exe `
             -Fixture build/windows-volume-fixture/prepared.vhdx `
             -ExpectedHash build/windows-volume-fixture/payload.sha256
+
+      - name: Shrink GPT and MBR partitions and exercise publication failures
+        shell: pwsh
+        run: |
+          . ./tests/cli/windows-volume-common.ps1
+          $DetachJobs = [System.Collections.Generic.List[object]]::new()
+          try {
+            foreach ($Fixture in @('prepared.vhdx', 'prepared-mbr.vhdx')) {
+              ./tests/cli/windows-shrink-partition.ps1 `
+                -Program $env:EXFAT_RESIZE_WINDOWS_CLI `
+                -FaultProgram `
+                  build/windows-fault/tests/cli/Release/exfat_resize_partition_fault_test.exe `
+                -Fixture "build/windows-volume-fixture/$Fixture" `
+                -ExpectedHash build/windows-volume-fixture/payload.sha256 `
+                -DetachJobs $DetachJobs
+            }
+          }
+          finally {
+            Wait-TestDiskImageDetaches $DetachJobs
+          }
+          Write-Host 'windows-shrink-partition: all checks and detach cleanup passed'
 
   linux-big-endian:
     name: Linux (s390x, big endian)

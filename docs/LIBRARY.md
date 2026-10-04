@@ -1,6 +1,6 @@
 # C library reference
 
-The `exfat-resize` C11 library grows an existing exFAT filesystem in place. It
+The `exfat-resize` C11 library grows or shrinks an existing exFAT filesystem in place. It
 accepts caller-provided block-device and allocation interfaces, has no operating
 system dependency, and reports the recovery boundary reached by every call.
 
@@ -36,10 +36,14 @@ it. The library retains none of these pointers after return. A nonnull `stage`
 must remain writable until return.
 
 `target_size` is the requested filesystem size in bytes. It is rounded down to
-a whole filesystem sector. The rounded target must be larger than the current
-filesystem, fit in the device view, and satisfy the geometry and compatibility
-requirements. Shrinking is not supported. The library does not enlarge the
-backing storage or interpret a partition table.
+a whole filesystem sector. A larger rounded target requests growth; a smaller
+one requests shrink. An equal rounded size is invalid. Targets must fit the device
+view and satisfy geometry and compatibility requirements. Shrink retains the
+heap offset and cluster size and requires space below the target boundary for
+all current allocations, including the full existing bitmap. Otherwise it returns
+`EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE` before writing. The bitmap is trimmed at
+final commit. The library does not resize backing storage or interpret partition
+tables; callers must not reduce backing storage until shrink succeeds.
 
 Sector zero in the supplied device view must be the main exFAT boot sector.
 Callback sector numbers are zero-based within that view. The library does not
@@ -155,13 +159,22 @@ Cancellation is cooperative. It is observed only at safe transaction
 boundaries and cannot preempt a block-device or allocator callback already in
 progress. Cleanup and synchronization already required for an issued write are
 allowed to finish. When a request is observed, `exfat_resize` returns
-`EXFAT_RESIZE_CANCELLED`, and `stage` describes the applicable recovery path.
+`EXFAT_RESIZE_CANCELLED` unless required cleanup fails, and `stage` describes
+the applicable recovery path.
 
 Invalid public arguments are rejected before the cancellation callback is
 consulted. A concrete allocation, read, write, or synchronization failure is
 not replaced by a cancellation request arising during that operation.
 `COMPLETED` is terminal: after reporting it, `exfat_resize` returns success
 without consulting the cancellation callback again.
+
+During shrink compaction, cancellation completes any active publication,
+synchronizes the current allocations, and clears/synchronizes the dirty flag.
+`EXFAT_RESIZE_CANCELLED` with `EXFAT_RESIZE_STAGE_SOURCE_READY` means the filesystem is clean at its
+original size, with completed moves retained. A retry starts a new validated
+operation. Cleanup I/O failures take precedence and never report `SOURCE_READY`.
+The last cancellation checkpoint precedes bitmap truncation; after it, the final
+geometry commit and clean-state synchronization finish without further polling.
 
 Cooperative cancellation does not protect against process termination, a
 crash, power loss, `SIGKILL`, or `TerminateProcess`. If the caller does not
@@ -171,8 +184,8 @@ procedure in README.
 ### Cancellation checkpoints and responsiveness
 
 A cancellation checkpoint calls `cancellation_requested` once. A nonzero
-result stops the operation before the next work unit. An already-started work
-unit finishes, and a concrete failure from that unit takes precedence over a
+result stops the operation before the next work unit, after any required cleanup.
+An already-started work unit finishes, and a concrete failure from that unit takes precedence over a
 concurrent cancellation request. Checkpoint counts are not part of the API.
 
 Cancellation checkpoints are placed at transaction boundaries and between
@@ -215,7 +228,10 @@ successful call reports these stages once and in order:
 For this code, `values[0]` contains the newly entered stage. `values[1]` is
 zero for the first four stages; at `COMPLETED`, it contains the exact resulting
 filesystem size in bytes after filesystem-sector rounding. `values[2]` is
-zero. Calls rejected by the initial structural argument validation emit no
+zero. Shrink cancellation may instead terminate at `SOURCE_READY`, whose
+`values[1]` is the unchanged filesystem size in bytes. Existing stage numbers
+retain their meanings; stage values are not an ordinal progress scale.
+Calls rejected by the initial structural argument validation emit no
 events. Target and filesystem validation that requires device I/O occurs
 after `PREFLIGHT` is reported. Failures emit only the stages reached before
 return.
@@ -240,6 +256,7 @@ reached, including for invalid arguments and failures:
 | `RESIZING` | Authoritative source metadata may have been overwritten | Restore the verified backup |
 | `FINALIZING` | The complete target was synchronized; final dirty state is uncertain | Run a filesystem checker and do not retry the resize |
 | `COMPLETED` | The resized clean target was synchronized | Use the resulting filesystem |
+| `SOURCE_READY` | Shrink was cancelled and the clean original-size filesystem was synchronized | Use it or retry shrink; do not reduce backing storage |
 
 The stage is deliberately conservative when a write reports failure: the
 library selects the new stage before attempting the first write carrying that

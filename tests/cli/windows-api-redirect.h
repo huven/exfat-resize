@@ -16,6 +16,9 @@ BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
 BOOL WINAPI windows_partition_test_flush_file_buffers(HANDLE handle);
 BOOL WINAPI windows_partition_test_set_console_ctrl_handler(PHANDLER_ROUTINE handler, BOOL add);
 
+BOOL WINAPI windows_partition_test_close_handle(HANDLE handle);
+
+#define CloseHandle windows_partition_test_close_handle
 #define DeviceIoControl windows_partition_test_device_io_control
 #define FlushFileBuffers windows_partition_test_flush_file_buffers
 #define SetConsoleCtrlHandler windows_partition_test_set_console_ctrl_handler

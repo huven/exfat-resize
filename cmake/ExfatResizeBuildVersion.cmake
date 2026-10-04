@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 
+cmake_minimum_required(VERSION 3.20)
+
 include("${CMAKE_CURRENT_LIST_DIR}/ExfatResizeVersion.cmake")
 exfat_resize_read_package_version("${EXFAT_RESIZE_VERSION_SOURCE_DIR}" package_version)
 exfat_resize_resolve_checkout_build_version(
