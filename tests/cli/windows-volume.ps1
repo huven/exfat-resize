@@ -132,6 +132,7 @@ function Test-PartitionFailure {
     finally {
         Set-Location $env:GITHUB_WORKSPACE
         if ($Mounted) {
+            Start-Sleep -Seconds 3
             Dismount-DiskImage -ImagePath $ImagePath -StorageType VHDX -ErrorAction Continue |
                 Out-Null
         }
@@ -213,6 +214,7 @@ function Test-PartitionCancellation {
     finally {
         Set-Location $env:GITHUB_WORKSPACE
         if ($Mounted) {
+            Start-Sleep -Seconds 3
             Dismount-DiskImage -ImagePath $ImagePath -StorageType VHDX -ErrorAction Continue |
                 Out-Null
         }
@@ -390,6 +392,7 @@ function Test-VolumeTarget {
     finally {
         Set-Location $env:GITHUB_WORKSPACE
         if ($Mounted) {
+            Start-Sleep -Seconds 3
             Dismount-DiskImage -ImagePath $ImagePath -StorageType VHDX -ErrorAction Continue |
                 Out-Null
         }

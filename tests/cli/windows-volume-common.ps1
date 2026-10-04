@@ -197,6 +197,10 @@ function Invoke-CleanCheck {
 function Dismount-TestDiskImage {
     param([string] $Image)
 
+    # Diagnostic pause before detaching; exclude it from the measured duration.
+    Write-Host "Waiting 3 s before Dismount-DiskImage: $Image"
+    Start-Sleep -Seconds 3
+
     $Timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         Dismount-DiskImage -ImagePath $Image -StorageType VHDX -ErrorAction Stop | Out-Null
