@@ -294,8 +294,8 @@ static enum exfat_resize_error publish_stream(struct shrink_context *context,
 	return synchronize(context);
 }
 
-/* Sector-sized writes avoid a read/modify/write for every entry of a large
- * contiguous stream. Until the flag is published these FAT entries are ignored. */
+/* Generate bounded FAT batches, reading only partial-sector neighbors. Until
+ * the flag is published these FAT entries are ignored. */
 static enum exfat_resize_error materialize(
     struct shrink_context *context, struct shrink_stream *stream)
 {
@@ -314,23 +314,39 @@ static enum exfat_resize_error materialize(
 	while (cluster < end) {
 		uint64_t sector = volume->geometry.fat_offset + (uint64_t)cluster * 4 / volume->sector_size;
 		size_t offset = (size_t)((uint64_t)cluster * 4 % volume->sector_size);
+		uint64_t remaining = (end - cluster) * 4;
+		uint64_t sectors = (offset + remaining + volume->sector_size - 1) / volume->sector_size;
+		size_t byte_count;
+		size_t limit;
+		if (sectors > volume->io_sector_capacity)
+			sectors = volume->io_sector_capacity;
+		byte_count = (size_t)sectors * volume->sector_size;
+		limit = remaining < byte_count - offset ? offset + (size_t)remaining : byte_count;
 		error = exfat_resize_cancellation_checkpoint(volume->operation);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-		error =
-		    exfat_resize_read_volume(volume, sector, 1, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
-		if (error != EXFAT_RESIZE_SUCCESS)
-			return error;
-		while (offset < volume->sector_size && cluster < end) {
+		if (offset != 0) {
+			error = exfat_resize_read_volume(
+			    volume, sector, 1, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
+		}
+		if (limit % volume->sector_size != 0 && (sectors > 1 || offset == 0)) {
+			error = exfat_resize_read_volume(volume, sector + sectors - 1, 1,
+			    volume->io_buffer + byte_count - volume->sector_size, volume->sector_size);
+			if (error != EXFAT_RESIZE_SUCCESS)
+				return error;
+		}
+		while (offset < limit) {
 			uint32_t next = (uint64_t)cluster + 1 == end ? EXFAT_FAT_END_OF_CHAIN : cluster + 1;
-			error = exfat_resize_store_le32(volume->io_buffer, volume->sector_size, offset, next);
+			error = exfat_resize_store_le32(volume->io_buffer, byte_count, offset, next);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 			*model(context, cluster++) = next;
 			offset += 4;
 		}
-		error =
-		    exfat_resize_write_volume(volume, sector, 1, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
+		error = exfat_resize_write_volume(
+		    volume, sector, (uint32_t)sectors, volume->io_buffer, EXFAT_IO_BUFFER_SIZE);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 	}
