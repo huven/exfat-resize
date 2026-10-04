@@ -217,8 +217,6 @@ function Wait-TestDiskImageDetaches {
                 "Detach job ended in state $($Detach.Job.State)"
             Assert-Condition (-not (Get-DiskImage -ImagePath $Detach.Image).Attached) `
                 'Virtual disk is still attached after Dismount-DiskImage'
-            $Seconds = ($Detach.Job.PSEndTime - $Detach.Job.PSBeginTime).TotalSeconds
-            Write-Host "Detached $($Detach.Image) in $($Seconds.ToString('F2')) s"
         }
         catch {
             $Failures += "$($Detach.Image): $_"
