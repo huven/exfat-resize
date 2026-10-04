@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string] $FaultProgram,
     [Parameter(Mandatory = $true)][string] $Fixture,
     [Parameter(Mandatory = $true)][string] $ExpectedHash,
-    [string] $FirstCaseTrace = ''
+    [System.Collections.Generic.List[object]] $DetachJobs = $null
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -87,7 +87,8 @@ function Test-ShrinkPartition {
                 $Partition = Find-TestPartition $Image $Initial.Offset
                 Assert-Condition ($Partition.Size -eq 96MB) 'Rejected shrink changed partition'
                 $Volume = Wait-Volume ([char] $Partition.DriveLetter)
-                Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
+                Assert-ManifestEqual $Baseline `
+                    @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
                     'Rejected shrink changed data or metadata'
             }
         }
@@ -175,11 +176,11 @@ function Test-ShrinkPartition {
         Set-Location $env:GITHUB_WORKSPACE
         Remove-Item Env:EXFAT_RESIZE_TEST_PARTITION_FAULT -ErrorAction SilentlyContinue
         if ($Mounted) {
-            Write-Host "windows-shrink-partition ($Case): detaching during cleanup"
-            Dismount-TestDiskImage $Image
+            Write-Host "windows-shrink-partition ($Case): queuing background detach"
+            Start-TestDiskImageDetach $Image $DetachJobs
         }
     }
-    Write-Host "windows-shrink-partition ($Case): passed"
+    Write-Host "windows-shrink-partition ($Case): checks passed; detach cleanup queued"
 }
 
 $Program = (Resolve-Path -LiteralPath $Program).Path
@@ -188,45 +189,42 @@ $Fixture = (Resolve-Path -LiteralPath $Fixture).Path
 $PayloadHash = (Get-Content -LiteralPath $ExpectedHash -Raw).Trim().ToUpperInvariant()
 $Temporary = Join-Path $env:RUNNER_TEMP "exfat-resize-shrink-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $Temporary | Out-Null
-# Capture the first complete case, including device creation and final detach.
-# Later cases run without tracing so the recording stays small.
-if ($FirstCaseTrace) {
-    $FirstCaseTrace = [System.IO.Path]::GetFullPath($FirstCaseTrace)
-    New-Item -ItemType Directory -Path (Split-Path $FirstCaseTrace) -Force | Out-Null
-    $TraceSession = "exfat-resize-$([guid]::NewGuid())"
-    Write-Host "Recording first shrink case to $FirstCaseTrace"
-    & wpr.exe -start GeneralProfile -filemode -instancename $TraceSession
-    Assert-Condition ($LASTEXITCODE -eq 0) 'Could not start Windows Performance Recorder'
+$OwnDetachJobs = $null -eq $DetachJobs
+if ($OwnDetachJobs) {
+    $DetachJobs = [System.Collections.Generic.List[object]]::new()
 }
+# CI shares this queue between GPT and MBR. Standalone runs wait before returning.
 try {
     Test-ShrinkPartition 'combined-drive' $false $false
+    Test-ShrinkPartition 'combined-guid' $true $false
+    Test-ShrinkPartition 'partition-only' $false $true
+    Test-ShrinkPartition 'cancel-before-writes' $false $false 'cancel-discovery' 130 `
+        'interrupted by user'
+    Test-ShrinkPartition 'cancel-during-commit' $false $false 'cancel-shrink'
+    Test-ShrinkPartition 'changed-layout' $false $false 'shrink-layout-changed' 1 'layout changed'
+    Test-ShrinkPartition 'revalidation-io' $false $false 'shrink-revalidate' 1 `
+        'partition was not changed'
+    Test-ShrinkPartition 'dismount-failure' $false $false 'dismount' 1 'partition was not changed'
+    foreach ($Fault in @('shrink-before-set', 'shrink-result', 'shrink-flush',
+        'shrink-refresh', 'shrink-readback')) {
+        Test-ShrinkPartition $Fault $false $false $Fault 1 'its result is uncertain'
+    }
+    Test-ShrinkPartition 'volume-unavailable' $false $false 'shrink-volume' 1 `
+        'the smaller partition and filesystem are synchronized'
+}
+catch {
+    # Keep the test failure visible even if its detach cleanup also fails.
+    Write-Warning "Shrink test failed: $_"
+    throw
 }
 finally {
-    if ($FirstCaseTrace) {
-        & wpr.exe -stop $FirstCaseTrace -compress -instancename $TraceSession
-        $TraceSaved = $LASTEXITCODE -eq 0
-        if (-not $TraceSaved) {
-            # Only cancel our own recording, and preserve any test failure.
-            Write-Warning 'Could not save the Windows performance trace'
-            & wpr.exe -cancel -instancename $TraceSession
-        }
+    if ($OwnDetachJobs) {
+        Wait-TestDiskImageDetaches $DetachJobs
     }
 }
-if ($FirstCaseTrace) {
-    Assert-Condition ($TraceSaved -and (Test-Path -LiteralPath $FirstCaseTrace)) `
-        'Performance trace was not saved'
+if ($OwnDetachJobs) {
+    Write-Host 'windows-shrink-partition: passed'
 }
-Test-ShrinkPartition 'combined-guid' $true $false
-Test-ShrinkPartition 'partition-only' $false $true
-Test-ShrinkPartition 'cancel-before-writes' $false $false 'cancel-discovery' 130 'interrupted by user'
-Test-ShrinkPartition 'cancel-during-commit' $false $false 'cancel-shrink'
-Test-ShrinkPartition 'changed-layout' $false $false 'shrink-layout-changed' 1 'layout changed'
-Test-ShrinkPartition 'revalidation-io' $false $false 'shrink-revalidate' 1 'partition was not changed'
-Test-ShrinkPartition 'dismount-failure' $false $false 'dismount' 1 'partition was not changed'
-foreach ($Fault in @('shrink-before-set', 'shrink-result', 'shrink-flush',
-    'shrink-refresh', 'shrink-readback')) {
-    Test-ShrinkPartition $Fault $false $false $Fault 1 'its result is uncertain'
+else {
+    Write-Host 'windows-shrink-partition: checks passed; background detach cleanup pending'
 }
-Test-ShrinkPartition 'volume-unavailable' $false $false 'shrink-volume' 1 `
-    'the smaller partition and filesystem are synchronized'
-Write-Host 'windows-shrink-partition: passed'

@@ -194,17 +194,39 @@ function Invoke-CleanCheck {
         "chkdsk reported errors for volume $DriveLetter`: (exit $LASTEXITCODE)"
 }
 
-function Dismount-TestDiskImage {
-    param([string] $Image)
+function Start-TestDiskImageDetach {
+    param([string] $Image, [System.Collections.Generic.List[object]] $DetachJobs)
 
-    $Timer = [System.Diagnostics.Stopwatch]::StartNew()
-    try {
-        Dismount-DiskImage -ImagePath $Image -StorageType VHDX -ErrorAction Stop | Out-Null
+    $Job = Dismount-DiskImage -ImagePath $Image -StorageType VHDX -AsJob -ErrorAction Stop
+    $DetachJobs.Add([pscustomobject] @{ Image = $Image; Job = $Job })
+}
+
+function Wait-TestDiskImageDetaches {
+    param([System.Collections.Generic.List[object]] $DetachJobs)
+
+    if ($DetachJobs.Count -eq 0) {
+        return
     }
-    finally {
-        $Timer.Stop()
-        Write-Host "Dismount-DiskImage took $($Timer.Elapsed.TotalSeconds.ToString('F2')) s"
+    Write-Host "Waiting for $($DetachJobs.Count) background VHDX detach jobs"
+    $DetachJobs.Job | Wait-Job | Out-Null
+    $Failures = @()
+    foreach ($Detach in $DetachJobs) {
+        try {
+            Receive-Job -Job $Detach.Job -ErrorAction Stop | Out-Null
+            Assert-Condition ($Detach.Job.State -eq 'Completed') `
+                "Detach job ended in state $($Detach.Job.State)"
+            Assert-Condition (-not (Get-DiskImage -ImagePath $Detach.Image).Attached) `
+                'Virtual disk is still attached after Dismount-DiskImage'
+            $Seconds = ($Detach.Job.PSEndTime - $Detach.Job.PSBeginTime).TotalSeconds
+            Write-Host "Detached $($Detach.Image) in $($Seconds.ToString('F2')) s"
+        }
+        catch {
+            $Failures += "$($Detach.Image): $_"
+        }
+        finally {
+            Remove-Job -Job $Detach.Job
+        }
     }
-    Assert-Condition (-not (Get-DiskImage -ImagePath $Image).Attached) `
-        "Virtual disk is still attached after Dismount-DiskImage: $Image"
+    $DetachJobs.Clear()
+    Assert-Condition ($Failures.Count -eq 0) "VHDX detach cleanup failed:`n$($Failures -join "`n")"
 }
