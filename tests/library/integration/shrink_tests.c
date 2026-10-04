@@ -57,6 +57,145 @@ static void check_no_writes(const struct exfat_fixture *f)
 		CHECK(f->memory.operations[i].kind == MEMORY_OPERATION_READ);
 }
 
+static size_t read_bitmap(struct exfat_fixture *f, unsigned char *bitmap, size_t capacity)
+{
+	unsigned char sector[512];
+	uint32_t cluster = 0;
+	uint64_t length = 0;
+	size_t copied = 0;
+	CHECK(exfat_fixture_read_sector(f, 0, sector, sizeof(sector)) == 0);
+	CHECK(exfat_resize_load_le32(sector, sizeof(sector), 96, &cluster) == EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_fixture_read_sector(
+	          f, exfat_fixture_cluster_sector(&f->geometry, cluster), sector, sizeof(sector)) == 0);
+	CHECK(sector[0] == 0x81);
+	CHECK(exfat_resize_load_le32(sector, sizeof(sector), 20, &cluster) == EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_resize_load_le64(sector, sizeof(sector), 24, &length) == EXFAT_RESIZE_SUCCESS);
+	CHECK(length != 0 && length <= capacity);
+	if (length == 0 || length > capacity)
+		return 0;
+	while (copied < length) {
+		uint32_t index;
+		for (index = 0; index < f->geometry.sectors_per_cluster && copied < length; ++index) {
+			size_t amount =
+			    length - copied < sizeof(sector) ? (size_t)(length - copied) : sizeof(sector);
+			CHECK(exfat_fixture_read_sector(f,
+			          exfat_fixture_cluster_sector(&f->geometry, cluster) + index, sector,
+			          sizeof(sector)) == 0);
+			memcpy(bitmap + copied, sector, amount);
+			copied += amount;
+		}
+		cluster = shrink_fixture_fat(f, cluster);
+	}
+	CHECK(cluster == EXFAT_FAT_END_OF_CHAIN);
+	return copied;
+}
+
+static void test_newly_reserved_bitmap_bits(uint32_t spc)
+{
+	uint32_t remainder;
+	for (remainder = 0; remainder < 8; ++remainder) {
+		struct exfat_fixture f;
+		struct test_allocator allocator = { 0 };
+		struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+		enum exfat_resize_stage stage;
+		unsigned char source[1250];
+		unsigned char bitmap[1250];
+		unsigned char boot[512];
+		uint32_t target = 2000 + remainder;
+		uint32_t cluster;
+		uint32_t bit;
+		uint32_t used = 0;
+		size_t length;
+		CHECK(shrink_fixture_initialize(&f, spc) == 0);
+		/* Include retained bad markers, including the last valid bit for spc=4.
+		 * Twenty retained allocations make even one miscounted tail marker
+		 * change PercentInUse for every non-byte-aligned target here. */
+		for (cluster = 70; cluster < (spc == 1 ? 74u : 73u); ++cluster) {
+			CHECK(shrink_fixture_set_fat(&f, cluster, EXFAT_FAT_BAD_CLUSTER) == 0);
+			CHECK(shrink_fixture_set_bit(&f, cluster, 1) == 0);
+		}
+		if (spc == 4) {
+			CHECK(shrink_fixture_set_fat(&f, target + 1, EXFAT_FAT_BAD_CLUSTER) == 0);
+			CHECK(shrink_fixture_set_bit(&f, target + 1, 1) == 0);
+		}
+		for (cluster = remainder == 0 ? 2005 : target + 2; cluster < 2010; ++cluster) {
+			CHECK(shrink_fixture_set_fat(&f, cluster, EXFAT_FAT_BAD_CLUSTER) == 0);
+			CHECK(shrink_fixture_set_bit(&f, cluster, 1) == 0);
+		}
+		CHECK(read_bitmap(&f, source, sizeof(source)) == sizeof(source));
+		CHECK(exfat_fixture_resize(&f.memory.device,
+		          f.geometry.cluster_heap_offset + (uint64_t)target * spc, &callbacks,
+		          &stage) == EXFAT_RESIZE_SUCCESS);
+		CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
+		CHECK(memory_block_device_crash(&f.memory) == 0);
+		CHECK(shrink_fixture_verify(&f, target) == 0);
+		length = read_bitmap(&f, bitmap, sizeof(bitmap));
+		CHECK(length == (target + 7u) / 8);
+		CHECK(bitmap[length - 1] ==
+		    (spc == 1 ? (remainder == 0 ? 0xe0 : 1)
+		              : (1u << (remainder == 0 ? 7 : remainder - 1))));
+		for (bit = 0; bit < target; ++bit) {
+			unsigned int mask = 1u << (bit % 8);
+			used += (bitmap[bit / 8] & mask) != 0;
+			/* All new destinations are below cluster 50 in this fixture. */
+			if (bit >= 48)
+				CHECK((bitmap[bit / 8] & mask) == (source[bit / 8] & mask));
+		}
+		CHECK(used == 20);
+		CHECK(exfat_fixture_read_sector(&f, 0, boot, sizeof(boot)) == 0);
+		CHECK(boot[112] == (uint64_t)used * 100 / target);
+		CHECK(shrink_fixture_fat(&f, 60) == EXFAT_FAT_BAD_CLUSTER);
+		for (cluster = 70; cluster < (spc == 1 ? 74u : 73u); ++cluster)
+			CHECK(shrink_fixture_fat(&f, cluster) == EXFAT_FAT_BAD_CLUSTER);
+		if (spc == 4)
+			CHECK(shrink_fixture_fat(&f, target + 1) == EXFAT_FAT_BAD_CLUSTER);
+		validate_allocation(&f);
+		CHECK(test_allocator_is_clean(&allocator));
+		CHECK(exfat_fixture_destroy(&f) == 0);
+	}
+}
+
+static void test_existing_reserved_bitmap_bits(uint32_t spc, int slack_only)
+{
+	struct exfat_fixture f;
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	unsigned char source[1250];
+	unsigned char bitmap[1250];
+	enum exfat_resize_stage stage;
+	uint32_t cluster;
+	uint32_t target = slack_only ? 9997 : 9993;
+	CHECK(shrink_fixture_initialize(&f, spc) == 0);
+	f.geometry.cluster_count = 9997;
+	f.geometry.volume_sector_count = f.geometry.cluster_heap_offset + (uint64_t)9997 * spc;
+	if (slack_only)
+		f.geometry.volume_sector_count += 3;
+	CHECK(exfat_fixture_write_boot_regions(&f) == 0);
+	for (cluster = 9994; cluster < 9999; ++cluster) {
+		CHECK(shrink_fixture_set_fat(&f, cluster, EXFAT_FAT_BAD_CLUSTER) == 0);
+		CHECK(shrink_fixture_set_bit(&f, cluster, 1) == 0);
+	}
+	/* These three padding bits were reserved before the resize. */
+	for (cluster = 9999; cluster < 10002; ++cluster)
+		CHECK(shrink_fixture_set_bit(&f, cluster, 1) == 0);
+	CHECK(read_bitmap(&f, source, sizeof(source)) == sizeof(source));
+	CHECK(source[1249] == 0xff);
+	CHECK(exfat_fixture_resize(&f.memory.device,
+	          slack_only ? f.geometry.volume_sector_count - 1
+	                     : f.geometry.cluster_heap_offset + (uint64_t)target * spc,
+	          &callbacks, &stage) == EXFAT_RESIZE_SUCCESS);
+	CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
+	CHECK(memory_block_device_crash(&f.memory) == 0);
+	CHECK(shrink_fixture_verify(&f, target) == 0);
+	CHECK(read_bitmap(&f, bitmap, sizeof(bitmap)) == sizeof(bitmap));
+	CHECK(memcmp(source, bitmap, sizeof(bitmap) - 1) == 0);
+	CHECK(bitmap[1249] == (slack_only ? 0xff : 0xe1));
+	CHECK(shrink_fixture_fat(&f, 9994) == EXFAT_FAT_BAD_CLUSTER);
+	validate_allocation(&f);
+	CHECK(test_allocator_is_clean(&allocator));
+	CHECK(exfat_fixture_destroy(&f) == 0);
+}
+
 static size_t test_success(uint32_t spc)
 {
 	struct exfat_fixture f;
@@ -233,6 +372,11 @@ int main(void)
 	(void)test_success(4);
 	test_preflight_failures(allocations);
 	test_slack_and_rounding();
+	test_newly_reserved_bitmap_bits(1);
+	test_newly_reserved_bitmap_bits(4);
+	test_existing_reserved_bitmap_bits(1, 0);
+	test_existing_reserved_bitmap_bits(4, 0);
+	test_existing_reserved_bitmap_bits(4, 1);
 	test_geometry();
 	test_growing_workspace();
 	return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
