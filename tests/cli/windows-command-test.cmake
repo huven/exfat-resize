@@ -66,6 +66,7 @@ if(TEST_CASE STREQUAL "help")
             "drive letter such as E:"
             "--grow-partition"
             "Grow a basic partition to explicit SIZE when needed"
+            "Partition options require a drive specifier or volume-GUID path"
             [[Physical-disk paths such as \\.\PhysicalDrive0 are not supported]]
     )
         require_text("${command_output}" "${required_text}")
@@ -79,6 +80,18 @@ elseif(TEST_CASE STREQUAL "recovery-guidance")
     require_text("${command_output}" "--shrink-partition requires an explicit SIZE")
     expect_no_write_failure(--shrink-partition --grow-partition [[E:]] 1G)
     require_text("${command_output}" "mutually exclusive")
+    foreach(option --grow-partition --shrink-partition)
+        foreach(target
+                "${CMAKE_CURRENT_BINARY_DIR}/missing.exfat"
+                [[E:\images\missing.exfat]]
+                [[\\?\C:\images\missing.exfat]]
+        )
+            expect_no_write_failure("${option}" "${target}" 8M)
+            require_text("${command_output}"
+                "${option} requires a logical Windows volume target"
+            )
+        endforeach()
+    endforeach()
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 0)
     require_text("${command_output}" "invalid size: 0")
     expect_no_write_failure("${CMAKE_CURRENT_BINARY_DIR}/missing.exfat" 1G)
@@ -93,6 +106,40 @@ elseif(TEST_CASE STREQUAL "recovery-guidance")
     foreach(option -h --help -V --version)
         expect_success("${option}")
     endforeach()
+elseif(TEST_CASE STREQUAL "partition-options")
+    if(NOT DEFINED FIXTURE_PROGRAM)
+        message(FATAL_ERROR "FIXTURE_PROGRAM is required")
+    endif()
+    set(image "${CMAKE_CURRENT_BINARY_DIR}/partition-options-image.exfat")
+    execute_process(
+        COMMAND "${FIXTURE_PROGRAM}" "${image}"
+        RESULT_VARIABLE result
+    )
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "Cannot create the Windows image fixture")
+    endif()
+    file(SHA256 "${image}" original_hash)
+    foreach(option --grow-partition --shrink-partition)
+        # First request growth that fits, then shrink, then growth beyond capacity.
+        foreach(size 8192000 5120000 12288000)
+            expect_no_write_failure("${option}" "${image}" "${size}")
+            require_text("${command_output}"
+                "${option} requires a logical Windows volume target"
+            )
+            file(SHA256 "${image}" rejected_hash)
+            if(NOT rejected_hash STREQUAL original_hash)
+                message(FATAL_ERROR "Rejected partition option changed the image")
+            endif()
+        endforeach()
+    endforeach()
+    # The same fitting target remains valid without a partition option.
+    expect_success("${image}" 8192000)
+    require_text("${command_output}" "exfat-resize: resized")
+    file(SHA256 "${image}" resized_hash)
+    if(resized_hash STREQUAL original_hash)
+        message(FATAL_ERROR "Ordinary image growth did not change the fixture")
+    endif()
+    file(REMOVE "${image}")
 else()
     message(FATAL_ERROR "Unknown TEST_CASE: ${TEST_CASE}")
 endif()

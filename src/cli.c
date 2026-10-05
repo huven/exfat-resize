@@ -9,6 +9,10 @@
 #include "geometry.h"
 #include "sector_adapter.h"
 
+#if defined(_WIN32)
+#include "windows/device_path.h"
+#endif
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -37,7 +41,8 @@ static const char platform_options[] =
     "  --grow-partition   Grow a basic partition to explicit SIZE when needed\n"
     "  --shrink-partition Shrink the filesystem, then its basic partition, to SIZE\n";
 static const char platform_note[] =
-    "\nPhysical-disk paths such as \\\\.\\PhysicalDrive0 are not supported.\n";
+    "\nPartition options require a drive specifier or volume-GUID path.\n"
+    "Physical-disk paths such as \\\\.\\PhysicalDrive0 are not supported.\n";
 #else
 static const char target_name[] = "DEVICE";
 static const char usage[] = "Usage: exfat-resize DEVICE [SIZE]\n";
@@ -480,7 +485,15 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 		print_no_write_guidance();
 		return EXIT_FAILURE;
 	}
-#if !defined(_WIN32)
+#if defined(_WIN32)
+	if ((grow_partition || shrink_partition) &&
+	    windows_classify_device_path(positional[0]) != WINDOWS_DEVICE_PATH_VOLUME) {
+		fprintf(stderr, "exfat-resize: --%s-partition requires a logical Windows volume target\n",
+		    shrink_partition ? "shrink" : "grow");
+		print_no_write_guidance();
+		return EXIT_FAILURE;
+	}
+#else
 	if (grow_partition || shrink_partition) {
 		fprintf(stderr,
 		    "exfat-resize: --%s-partition is supported only for logical Windows volumes\n",
