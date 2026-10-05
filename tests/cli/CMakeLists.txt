@@ -92,6 +92,13 @@ target_compile_definitions(
         EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}-cancellation-test"
 )
 target_link_libraries(exfat_resize_cli_cancellation_test PRIVATE exfat_resize)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_sources(
+        exfat_resize_cli_cancellation_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+    )
+endif()
 exfat_resize_configure_target(exfat_resize_cli_cancellation_test)
 add_test(
     NAME cli.cancellation
@@ -182,6 +189,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         )
         set_tests_properties(cli.${test_case} PROPERTIES LABELS cli)
     endforeach()
+
+    add_executable(
+        exfat_resize_windows_image_fixture
+        windows-image-fixture.c
+        ${PROJECT_SOURCE_DIR}/tests/library/support/exfat_fixture.c
+        ${PROJECT_SOURCE_DIR}/tests/library/support/memory_block_device.c
+    )
+    target_include_directories(
+        exfat_resize_windows_image_fixture
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
+            ${PROJECT_SOURCE_DIR}/tests/library
+    )
+    target_link_libraries(exfat_resize_windows_image_fixture PRIVATE exfat_resize)
+    exfat_resize_configure_target(exfat_resize_windows_image_fixture)
+    add_test(
+        NAME cli.windows-image-partition-options
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DPROGRAM=$<TARGET_FILE:exfat-resize>"
+            "-DFIXTURE_PROGRAM=$<TARGET_FILE:exfat_resize_windows_image_fixture>"
+            -DTEST_CASE=partition-options
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/windows-command-test.cmake"
+    )
+    set_tests_properties(cli.windows-image-partition-options PROPERTIES LABELS cli)
     return()
 endif()
 
