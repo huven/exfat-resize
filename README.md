@@ -1,10 +1,8 @@
 # exfat-resize
 
-exfat-resize provides:
+Grow and shrink exFAT filesystems with CLI tools for Windows, Linux, and macOS.
 
-- A portable C11 library for growing and shrinking existing exFAT filesystems.
-- A command-line tool (thin wrapper around the library) for Linux, macOS,
-  and Windows.
+A portable C11 library powers the CLIs and can be embedded in other tools.
 
 ## Quick start
 
