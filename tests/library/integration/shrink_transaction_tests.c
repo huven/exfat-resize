@@ -99,6 +99,86 @@ static void initialize_transaction_fixture(struct exfat_fixture *f, uint32_t spc
 	}
 }
 
+static void read_durable_sector(
+    const struct memory_block_device *memory, uint64_t sector, unsigned char buffer[512])
+{
+	size_t i;
+	memset(buffer, 0, 512);
+	for (i = 0; i < memory->durable_sector_count; ++i) {
+		if (memory->durable_sectors[i].sector == sector) {
+			memcpy(buffer, memory->durable_sectors[i].data, 512);
+			return;
+		}
+	}
+}
+
+static int verify_move_durability(const struct exfat_fixture *f, uint32_t target)
+{
+	unsigned char sector[512];
+	uint32_t first = 0;
+	uint32_t next = 0;
+	uint32_t size = f->geometry.sectors_per_cluster * 512;
+	uint32_t byte = (8900 - 2) / 8;
+	uint32_t i;
+	size_t j;
+	/* The fixture's nested file moves from 8900 into the retained heap.
+	 * Its stream entry starts in the second cluster of directory 8800. */
+	read_durable_sector(&f->memory, exfat_fixture_cluster_sector(&f->geometry, 8801), sector);
+	CHECK(exfat_resize_load_le32(sector, sizeof(sector), 20, &first) == EXFAT_RESIZE_SUCCESS);
+	read_durable_sector(&f->memory,
+	    exfat_fixture_cluster_sector(&f->geometry, f->bitmap_clusters[byte / size]) +
+	        byte % size / 512,
+	    sector);
+	/* Freeing the source requires the replacement reference to be durable. */
+	CHECK((sector[byte % 512] & (1u << ((8900 - 2) % 8))) != 0 || first != 8900);
+	if (first == 8900)
+		return 0;
+	CHECK(first >= 2 && first < target + 2);
+	if (first < 2 || first >= target + 2)
+		return 0;
+	/* Publishing the replacement requires its reservation and complete payload. */
+	read_durable_sector(&f->memory, f->geometry.fat_offset + first / 128, sector);
+	CHECK(exfat_resize_load_le32(sector, sizeof(sector), first % 128 * 4, &next) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(next == EXFAT_FAT_END_OF_CHAIN);
+	byte = (first - 2) / 8;
+	read_durable_sector(&f->memory,
+	    exfat_fixture_cluster_sector(&f->geometry, f->bitmap_clusters[byte / size]) +
+	        byte % size / 512,
+	    sector);
+	CHECK((sector[byte % 512] & (1u << ((first - 2) % 8))) != 0);
+	for (i = 0; i < f->geometry.sectors_per_cluster; ++i) {
+		read_durable_sector(
+		    &f->memory, exfat_fixture_cluster_sector(&f->geometry, first) + i, sector);
+		for (j = 0; j < sizeof(sector); ++j)
+			CHECK(sector[j] == 0x88);
+	}
+	return 1;
+}
+
+static int durable_target_matches(
+    const struct exfat_fixture *f, const struct exfat_fixture *reference, uint32_t target)
+{
+	unsigned char actual[512];
+	unsigned char expected[512];
+	uint64_t length =
+	    f->geometry.cluster_heap_offset + (uint64_t)target * f->geometry.sectors_per_cluster;
+	uint64_t sector;
+	/* FINALIZING promises the complete target, including payload and allocation
+	 * metadata. Only clearing the main dirty flag may still be incomplete. */
+	for (sector = 0; sector < length; ++sector) {
+		read_durable_sector(&f->memory, sector, actual);
+		read_durable_sector(&reference->memory, sector, expected);
+		if (sector == 0) {
+			actual[106] &= (unsigned char)~2u;
+			expected[106] &= (unsigned char)~2u;
+		}
+		if (memcmp(actual, expected, sizeof(actual)) != 0)
+			return 0;
+	}
+	return 1;
+}
+
 static void test_transactions(uint32_t spc, uint32_t target)
 {
 	struct exfat_fixture reference;
@@ -112,11 +192,14 @@ static void test_transactions(uint32_t spc, uint32_t target)
 	size_t index;
 	int mode;
 	int saw_partial = 0;
+	int saw_published_move = 0;
 	int saw_source_ready = 0;
 	int saw_commit_completion = 0;
 	initialize_transaction_fixture(&reference, spc, target);
 	CHECK(resize(&reference, &baseline, &stage) == EXFAT_RESIZE_SUCCESS);
 	count = reference.memory.operation_count;
+	CHECK(shrink_fixture_verify(&reference, target) == 0);
+	verify_allocation(&reference, target);
 
 	/* Every callback may fail before or after side effects. Multi-sector callbacks
 	 * also fail after a strict prefix, including directory entry-set publication. */
@@ -156,22 +239,27 @@ static void test_transactions(uint32_t spc, uint32_t target)
 			if (mode == 2 && operation.kind == MEMORY_OPERATION_WRITE)
 				saw_partial = 1;
 			memory_block_device_clear_failure(&f.memory);
-			/* Persist just the last issued write, rather than assuming all unsynced
-			 * writes disappear. This includes partially completed failed writes. */
+			/* Persist the last issued write since the last successful sync, including
+			 * all publication sectors and partially completed failed writes. */
 			for (k = f.memory.operation_count; k > 0; --k) {
 				const struct memory_operation *op = &f.memory.operations[k - 1];
-				if (op->kind == MEMORY_OPERATION_SYNC)
+				if (op->kind == MEMORY_OPERATION_SYNC && (k - 1 != index || mode != 0))
 					break;
 				if (op->kind == MEMORY_OPERATION_WRITE) {
-					CHECK(memory_block_device_persist_range(&f.memory, op->first_sector, 1) == 0);
+					CHECK(memory_block_device_persist_range(
+					          &f.memory, op->first_sector, op->sector_count) == 0);
 					break;
 				}
 			}
 			CHECK(memory_block_device_crash(&f.memory) == 0);
 			CHECK(exfat_fixture_read_sector(&f, 0, boot, sizeof(boot)) == 0);
 			CHECK(exfat_resize_load_le16(boot, sizeof(boot), 106, &flags) == EXFAT_RESIZE_SUCCESS);
-			if (stage == EXFAT_RESIZE_STAGE_RESIZING)
+			if (stage == EXFAT_RESIZE_STAGE_RESIZING) {
 				CHECK((flags & 2) != 0);
+				saw_published_move |= verify_move_durability(&f, target);
+			}
+			if (stage == EXFAT_RESIZE_STAGE_FINALIZING)
+				CHECK(durable_target_matches(&f, &reference, target));
 			if (stage == EXFAT_RESIZE_STAGE_PREFLIGHT)
 				CHECK(shrink_fixture_verify(&f, 10000) == 0);
 			CHECK(exfat_fixture_destroy(&f) == 0);
@@ -179,6 +267,7 @@ static void test_transactions(uint32_t spc, uint32_t target)
 	}
 	if (spc > 1)
 		CHECK(saw_partial);
+	CHECK(saw_published_move);
 
 	/* Request cancellation after each possible callback. Every return must be
 	 * either an untouched/clean source or a fully committed clean target. */
