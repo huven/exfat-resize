@@ -237,12 +237,9 @@ function Test-ShrinkPartition {
                 $State.TailCount -eq $ExpectedTail) 'Compaction state changed after remount'
             Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
                 "Cancelled fixture after remount for $Case"
-            & chkdsk.exe "$($Partition.DriveLetter):"
-            Assert-Condition ($LASTEXITCODE -eq 0) `
-                'Read-only CHKDSK rejected the cancelled original-size filesystem'
-            $Volume = Wait-Volume ([char] $Partition.DriveLetter)
-            Assert-ManifestEqual $Baseline @(Get-FixtureManifest "$($Partition.DriveLetter):\") `
-                "Cancelled fixture after CHKDSK for $Case"
+            # CHKDSK requires matching filesystem and partition lengths; it reports
+            # RAW for this preserved 64 MiB filesystem inside the 96 MiB partition.
+            # Run it below after the fresh retry makes both lengths 48 MiB.
         }
         $Target = Get-TestTarget $Partition $UseGuid
         if ($NotPublished) {
