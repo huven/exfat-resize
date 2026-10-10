@@ -3,6 +3,7 @@
 #ifndef EXFAT_RESIZE_TEST_WINDOWS_API_REDIRECT_H
 #define EXFAT_RESIZE_TEST_WINDOWS_API_REDIRECT_H
 
+#include "shrink-compaction-monitor.h"
 #include <windows.h>
 
 BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
@@ -22,5 +23,6 @@ BOOL WINAPI windows_partition_test_close_handle(HANDLE handle);
 #define DeviceIoControl windows_partition_test_device_io_control
 #define FlushFileBuffers windows_partition_test_flush_file_buffers
 #define SetConsoleCtrlHandler windows_partition_test_set_console_ctrl_handler
+#define exfat_resize windows_partition_test_resize
 
 #endif

@@ -6,6 +6,7 @@ set -eu
 output=${1:?output directory is required}
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/exfat-resize-windows-volume.XXXXXX")
 raw=$temporary/prepared.raw
+tail_raw=$temporary/prepared-tail.raw
 vhdx=$temporary/prepared.vhdx
 mountpoint=$temporary/mount
 loop_device=
@@ -24,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-for tool in blockdev fsck.exfat losetup mkfs.exfat mount.exfat-fuse qemu-img sgdisk; do
+for tool in blockdev fsck.exfat losetup mkfs.exfat mount.exfat-fuse python3 qemu-img sgdisk; do
 	command -v "$tool" >/dev/null || {
 		echo "missing $tool" >&2
 		exit 1
@@ -48,7 +49,7 @@ sgdisk --clear \
 	--change-name=1:EXRTEST "$raw" >/dev/null
 
 attach_raw_disk() {
-	loop_device=$(sudo losetup --find --show --partscan "$raw")
+	loop_device=$(sudo losetup --find --show --partscan "${1:-$raw}")
 	partition=${loop_device}p1
 	index=0
 	while [ ! -b "$partition" ] && [ "$index" -lt 50 ]; do
@@ -122,23 +123,52 @@ qemu-img check -f vhdx "$vhdx"
 mkdir -p "$output"
 cp "$vhdx" "$output/prepared.vhdx"
 printf '%s\n' "$payload_hash" >"$output/payload.sha256"
+
+# Keep ordinary growth/publication cases small. Only the compaction cases use
+# the audited tail variant, with file, directory and system allocations moved.
+cp "$raw" "$tail_raw"
+python3 "$(dirname "$0")/prepare-windows-tail.py" "$tail_raw"
+attach_raw_disk "$tail_raw"
+sudo fsck.exfat -n "$partition"
+sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g),ro" "$partition" "$mountpoint"
+test_mount=$mountpoint
+actual_hash=$(sha256sum "$mountpoint/payload.bin" | awk '{ print $1 }')
+if [ "$actual_hash" != "$payload_hash" ]; then
+	echo "payload changed while moving fixture allocations to the tail" >&2
+	exit 1
+fi
+index=1
+while [ "$index" -le 200 ]; do
+	printf 'exfat-resize Windows volume fixture %d\n' "$index" >"$temporary/expected.txt"
+	cmp "$temporary/expected.txt" "$mountpoint/small-files/$index.txt"
+	index=$((index + 1))
+done
+sudo umount "$mountpoint"
+test_mount=
+detach_raw_disk
+qemu-img convert -f raw -O vhdx -o subformat=dynamic "$tail_raw" "$output/prepared-tail.vhdx"
+qemu-img check -f vhdx "$output/prepared-tail.vhdx"
+
 # Reuse the same filesystem in a primary MBR data partition. Clear both GPT
 # headers/tables outside the filesystem and write a conventional type-07 entry.
-python3 - "$raw" <<'PYMBR'
+python3 - "$raw" "$tail_raw" <<'PYMBR'
 import struct
 import sys
 
-with open(sys.argv[1], "r+b") as disk:
-    mbr = bytearray(512)
-    struct.pack_into("<I", mbr, 440, 0x45585253)
-    struct.pack_into("<B3sB3sII", mbr, 446, 0, b"\xfe\xff\xff", 7,
-                     b"\xfe\xff\xff", 2048, 196608)
-    mbr[510:] = b"\x55\xaa"
-    disk.write(mbr)
-    disk.write(bytes(33 * 512))
-    disk.seek(-33 * 512, 2)
-    disk.write(bytes(33 * 512))
+for path in sys.argv[1:]:
+    with open(path, "r+b") as disk:
+        mbr = bytearray(512)
+        struct.pack_into("<I", mbr, 440, 0x45585253)
+        struct.pack_into("<B3sB3sII", mbr, 446, 0, b"\xfe\xff\xff", 7,
+                         b"\xfe\xff\xff", 2048, 196608)
+        mbr[510:] = b"\x55\xaa"
+        disk.write(mbr)
+        disk.write(bytes(33 * 512))
+        disk.seek(-33 * 512, 2)
+        disk.write(bytes(33 * 512))
 PYMBR
 qemu-img convert -f raw -O vhdx -o subformat=dynamic "$raw" "$output/prepared-mbr.vhdx"
 qemu-img check -f vhdx "$output/prepared-mbr.vhdx"
+qemu-img convert -f raw -O vhdx -o subformat=dynamic "$tail_raw" "$output/prepared-tail-mbr.vhdx"
+qemu-img check -f vhdx "$output/prepared-tail-mbr.vhdx"
 printf 'prepare-windows-volume: passed\n'

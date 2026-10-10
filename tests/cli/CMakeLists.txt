@@ -49,6 +49,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND MSVC)
         ${PROJECT_SOURCE_DIR}/src/windows/partition_layout.c
         ${PROJECT_SOURCE_DIR}/src/windows/partition_shrink.c
         windows-partition-fault.c
+        shrink-compaction-monitor.c
     )
     target_include_directories(
         exfat_resize_partition_fault_test

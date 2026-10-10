@@ -51,6 +51,11 @@ static int request_cancellation(void)
 	return -1;
 }
 
+int windows_partition_test_request_compaction_cancellation(void)
+{
+	return request_cancellation();
+}
+
 BOOL WINAPI windows_partition_test_set_console_ctrl_handler(PHANDLER_ROUTINE handler, BOOL add)
 {
 	if (handler == NULL || (add && console_handler != NULL) ||
