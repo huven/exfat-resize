@@ -552,7 +552,7 @@ static enum exfat_resize_error run(struct shrink_context *context)
 	exfat_resize_enter_stage(operation, EXFAT_RESIZE_STAGE_RESIZING, 0);
 	for (index = context->moves.count; index > 0; --index) {
 		const struct shrink_move *move = &((struct shrink_move *)context->moves.items)[index - 1];
-		uint32_t destination;
+		uint32_t destination = 0;
 		error = exfat_resize_cancellation_checkpoint(operation);
 		if (error == EXFAT_RESIZE_SUCCESS)
 			error = materialize(context, stream_at(context, move->stream));

@@ -50,7 +50,7 @@ enum exfat_resize_error exfat_resize_load_source_fat(struct resize_allocation *c
 	uint32_t sector_count;
 
 	sector_count = exfat_resize_used_fat_sector_count(
-	    context->volume->geometry.cluster_count, context->volume->sector_size);
+	    context->volume->geometry.cluster_count, (uint32_t)context->volume->sector_size);
 	if (sector_count > context->volume->geometry.fat_length)
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
 	allocation_size = (uint64_t)sector_count * context->volume->sector_size;
@@ -345,7 +345,7 @@ enum exfat_resize_error exfat_resize_write_target_fat(struct resize_allocation *
 	uint32_t fat_sector_count;
 
 	fat_sector_count = exfat_resize_used_fat_sector_count(
-	    context->model_geometry->cluster_count, context->volume->sector_size);
+	    context->model_geometry->cluster_count, (uint32_t)context->volume->sector_size);
 	if (fat_sector_count > context->model_geometry->fat_length)
 		return EXFAT_RESIZE_INTERNAL_ERROR;
 

@@ -83,7 +83,7 @@ enum exfat_resize_error exfat_resize(const struct exfat_resize_block_device *dev
 	    volume.device, volume.io_buffer, EXFAT_IO_BUFFER_SIZE, &volume.geometry);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		goto out;
-	volume.io_sector_capacity = EXFAT_IO_BUFFER_SIZE / volume.sector_size;
+	volume.io_sector_capacity = (uint32_t)(EXFAT_IO_BUFFER_SIZE / volume.sector_size);
 	volume.cluster_size = (uint64_t)volume.geometry.sectors_per_cluster * volume.sector_size;
 
 	if (target_sector_count < volume.geometry.volume_sector_count)

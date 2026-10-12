@@ -287,7 +287,7 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_directory *cont
     int queue_children)
 {
 	int rewriting = scan->transform != NULL;
-	struct allocation_stream source_stream;
+	struct allocation_stream source_stream = { 0 };
 	struct allocation_stream target_stream;
 	struct buffered_directory_entry *secondary_entries;
 	unsigned char *secondary;
