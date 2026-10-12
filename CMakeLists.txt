@@ -89,6 +89,10 @@ function(exfat_resize_configure_target target)
     target_compile_features(${target} PRIVATE c_std_11)
     set_target_properties(${target} PROPERTIES C_EXTENSIONS OFF)
 
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX)
+    endif()
+
     if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(
             ${target}
@@ -97,6 +101,10 @@ function(exfat_resize_configure_target target)
                 -Wextra
                 -Wpedantic
         )
+
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
 
         if(EXFAT_RESIZE_ENABLE_SANITIZERS)
             target_compile_options(

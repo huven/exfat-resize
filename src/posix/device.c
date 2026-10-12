@@ -156,8 +156,9 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		bytes = blocks * (uint64_t)sector_size;
 #elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 		int logical_size;
+		/* Linux uses the low 32 request bits; musl declares the request parameter as int. */
 		if (ioctl(fd, BLKSSZGET, &logical_size) != 0 || logical_size <= 0 ||
-		    ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
+		    ioctl(fd, (int)BLKGETSIZE64, &bytes) != 0) {
 			set_error(error, error_size, path);
 			goto fail_after_open;
 		}
