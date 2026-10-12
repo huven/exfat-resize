@@ -93,7 +93,7 @@ int windows_partition_read_layout(HANDLE handle,
 	return 0;
 }
 
-DRIVE_LAYOUT_INFORMATION_EX *windows_partition_query_layout(
+static DRIVE_LAYOUT_INFORMATION_EX *windows_partition_query_layout(
     HANDLE handle, const char *path, char *error, size_t error_size)
 {
 	DRIVE_LAYOUT_INFORMATION_EX *layout = malloc(DRIVE_LAYOUT_BUFFER_SIZE);

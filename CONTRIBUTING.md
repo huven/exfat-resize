@@ -75,9 +75,13 @@ changes are excluded from the archive.
 
 ## C identifier namespaces
 
-The project owns the `exfat_resize_` and `EXFAT_RESIZE_` namespaces.
+The library owns the `exfat_resize_` and `EXFAT_RESIZE_` namespaces.
 
-Functions and objects used by only one translation unit must be `static`.
-Cross-file internal functions and objects must use the `exfat_resize_` prefix
-and be declared only in private headers. They are not public API unless
-documented by `include/exfat_resize.h`.
+Within the library, functions and objects used by only one translation unit
+must be `static`. Cross-file internal functions and objects must use the
+`exfat_resize_` prefix and be declared only in private headers. They are not
+public API unless documented by `include/exfat_resize.h`.
+
+These naming and linkage rules apply only to the library. The CLI is an
+example consumer of the library and has no project-specific symbol naming or
+linkage requirements.
