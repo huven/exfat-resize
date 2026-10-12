@@ -212,7 +212,7 @@ int windows_partition_open(struct device *device,
 		    error, error_size, path, "the physical disk returned an invalid size");
 		goto out;
 	}
-	if (layout->PartitionStyle != partition.PartitionStyle) {
+	if (layout->PartitionStyle != (DWORD)partition.PartitionStyle) {
 		windows_device_set_error(
 		    error, error_size, path, "the volume and physical disk partition styles differ");
 		goto out;

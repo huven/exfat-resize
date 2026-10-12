@@ -19,7 +19,7 @@ static int create_image(wchar_t *path, size_t path_size)
 	if (path_size < MAX_PATH || directory_length == 0 || directory_length >= MAX_PATH ||
 	    GetTempFileNameW(directory, L"exr", 0, path) == 0)
 		return -1;
-	(void)wcscpy(original_path, path);
+	memcpy(original_path, path, (wcslen(path) + 1) * sizeof(*path));
 	path[directory_length] = L'\u03a9';
 	if (!MoveFileW(original_path, path)) {
 		(void)DeleteFileW(original_path);

@@ -170,8 +170,8 @@ static int durable_target_matches(
 		read_durable_sector(&f->memory, sector, actual);
 		read_durable_sector(&reference->memory, sector, expected);
 		if (sector == 0) {
-			actual[106] &= (unsigned char)~2u;
-			expected[106] &= (unsigned char)~2u;
+			actual[106] &= UINT8_C(0xfd);
+			expected[106] &= UINT8_C(0xfd);
 		}
 		if (memcmp(actual, expected, sizeof(actual)) != 0)
 			return 0;
