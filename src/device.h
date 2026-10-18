@@ -36,14 +36,17 @@ enum device_partition_state {
 	DEVICE_PARTITION_SHRUNK
 };
 
+#if defined(_WIN32)
 enum device_partition_growth_result {
 	DEVICE_PARTITION_GROWTH_SUCCESS,
 	DEVICE_PARTITION_GROWTH_ERROR,
 	DEVICE_PARTITION_GROWTH_CANCELLED
 };
+#endif
 
 void device_init(struct device *device);
 int device_open(struct device *device, const char *path, char *error, size_t error_size);
+#if defined(_WIN32)
 enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
@@ -51,7 +54,6 @@ enum device_partition_growth_result device_grow_partition(struct device *device,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size);
-#if defined(_WIN32)
 struct device_partition_shrink;
 int device_prepare_partition_shrink(struct device *device,
     const char *path,

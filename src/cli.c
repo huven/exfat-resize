@@ -213,6 +213,7 @@ static int parse_size(const char *text, uint64_t *value)
 	return 0;
 }
 
+#if defined(_WIN32)
 static enum exfat_resize_error read_partition_source(const struct exfat_resize_block_device *device,
     struct exfat_resize_geometry *geometry,
     uint32_t *filesystem_sector_size)
@@ -254,6 +255,7 @@ static enum exfat_resize_error validate_partition_growth_preflight(
 	return exfat_resize_plan_growth(
 	    &target_device_geometry, &geometry, target_sector_count, &target_geometry);
 }
+#endif
 
 static const char *device_error_separator(const char *path)
 {
@@ -284,12 +286,14 @@ static void print_partition_grown_guidance(void)
 	    "verify the partition size before retrying and do not shrink it\n");
 }
 
+#if defined(_WIN32)
 static void print_partition_update_uncertain_guidance(void)
 {
 	fprintf(stderr,
 	    "exfat-resize: a partition update was attempted, but its result is uncertain; "
 	    "verify the partition layout and do not retry or shrink it\n");
 }
+#endif
 
 static int cancellation_requested(const struct cli_cancellation *cancellation)
 {
@@ -517,6 +521,7 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 	}
 	if (positional_count != 2)
 		target = device.block_device.sector_count * (uint64_t)device.block_device.sector_size;
+#if defined(_WIN32)
 	if (grow_partition) {
 		enum device_partition_growth_result partition_result;
 		uint64_t current_size;
@@ -576,7 +581,6 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 				goto cancelled;
 		}
 	}
-#if defined(_WIN32)
 	if (shrink_partition) {
 		struct exfat_resize_geometry geometry;
 		uint32_t sector_size;

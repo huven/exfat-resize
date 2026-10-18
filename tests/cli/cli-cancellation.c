@@ -84,6 +84,7 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	return 0;
 }
 
+#if defined(_WIN32)
 enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
@@ -103,7 +104,6 @@ enum device_partition_growth_result device_grow_partition(struct device *device,
 	return DEVICE_PARTITION_GROWTH_ERROR;
 }
 
-#if defined(_WIN32)
 int device_prepare_partition_shrink(struct device *device,
     const char *path,
     uint64_t target_size,
