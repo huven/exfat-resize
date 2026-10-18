@@ -111,6 +111,8 @@ function Test-PartitionFailure {
         }
         Assert-Condition ($Combined -notmatch 'no filesystem write was attempted') `
             "Fault '$Fault' incorrectly reported that no update was attempted"
+        Assert-Condition ($Combined -notmatch 'checking filesystem') `
+            "Fault '$Fault' entered the resize library after a partition error"
         if ($Fault -match 'cancel-grow') {
             Assert-Condition ($Combined -notmatch 'interrupted by user') `
                 "Fault '$Fault' masked the partition error with cancellation"
@@ -422,6 +424,24 @@ $FaultCases = @(
     ),
     @("refresh", "cannot refresh the enlarged physical disk", "the partition was enlarged", $false),
     @("readback", "cannot identify the volume partition", "the partition was enlarged", $false),
+    @(
+        "readback-partition-number",
+        "Windows did not expose the requested enlarged partition geometry",
+        "the partition was enlarged",
+        $false
+    ),
+    @(
+        "readback-partition-start",
+        "Windows did not expose the requested enlarged partition geometry",
+        "the partition was enlarged",
+        $false
+    ),
+    @(
+        "readback-disk-number",
+        "Windows did not expose the requested enlarged partition geometry",
+        "the partition was enlarged",
+        $false
+    ),
     @(
         "refresh,dismount",
         "cannot refresh the enlarged physical disk",

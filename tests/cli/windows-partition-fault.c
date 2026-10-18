@@ -143,6 +143,20 @@ BOOL WINAPI windows_partition_test_device_io_control(HANDLE handle,
 	} else if (control == FSCTL_DISMOUNT_VOLUME) {
 		fprintf(stderr, "exfat-resize-test: dismounted the volume\n");
 	}
+	if (properties_updated && control == IOCTL_DISK_GET_PARTITION_INFO_EX) {
+		PARTITION_INFORMATION_EX *partition = output;
+		if (configured_point("readback-partition-number"))
+			++partition->PartitionNumber;
+		if (configured_point("readback-partition-start"))
+			partition->StartingOffset.QuadPart += 512;
+	} else if (properties_updated && control == IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS) {
+		VOLUME_DISK_EXTENTS *extents = output;
+		if (configured_point("readback-disk-number"))
+			++extents->Extents[0].DiskNumber;
+		/* Keep both readbacks consistent so the retained start must catch this. */
+		if (configured_point("readback-partition-start"))
+			extents->Extents[0].StartingOffset.QuadPart += 512;
+	}
 	return TRUE;
 
 fail:
