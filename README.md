@@ -400,8 +400,8 @@ and compatibility contracts. Exact write ordering, durability guarantees, and
 allocator-backed [memory requirements](docs/TRANSACTION.md#memory-requirements)
 are documented separately.
 
-Downstream CMake projects can use `add_subdirectory()` and link
-`exfat_resize::exfat_resize`. The install target also provides the header,
+See [Building and linking](docs/LIBRARY.md#building-and-linking) for library-only
+builds and CMake integration. The install target also provides the header,
 static library, CLI executable, CMake package files, and a manual page on macOS
 and Linux. This README, the library and transaction references, and the exact
 MIT license are installed under CMake's `CMAKE_INSTALL_DOCDIR`.

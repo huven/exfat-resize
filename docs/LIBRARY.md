@@ -277,13 +277,22 @@ after its documented lifetime.
 
 ## Building and linking
 
-Downstream CMake projects can include the source tree with `add_subdirectory()`
-or consume an installed package:
+To build, test, and install only the library, run from the repository root on
+Linux, macOS, or Windows. Replace `<prefix>` with an absolute installation path:
+
+    cmake -S . -B build-library -DCMAKE_BUILD_TYPE=Release -DEXFAT_RESIZE_BUILD_CLI=OFF -DEXFAT_RESIZE_BUILD_TESTS=ON
+    cmake --build build-library --config Release --parallel
+    ctest --test-dir build-library --build-config Release -L library --output-on-failure --no-tests=error
+    cmake --install build-library --config Release --component Development --prefix "<prefix>"
+
+Configure your consumer with `-DCMAKE_PREFIX_PATH="<prefix>"`, then link:
 
 ```cmake
 find_package(exfat_resize 2.0 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE exfat_resize::exfat_resize)
 ```
+
+For in-tree use, `add_subdirectory()` provides the same target.
 
 The project distributes a static library. Build consumers with the header and
 library from the same release and with ABI-compatible compiler settings for the
