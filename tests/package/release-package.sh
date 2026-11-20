@@ -121,12 +121,12 @@ fi
 "$cmake_command" --build "$temporary/package-build" --parallel
 "$cmake_command" --install "$temporary/package-build"
 
-cmp "$source_tree/CONTRIBUTING.md" \
-	"$temporary/prefix/share/doc/exfat_resize/CONTRIBUTING.md"
+cmp "$source_tree/CONTRIBUTING.md" "$temporary/prefix/share/doc/exfat_resize/CONTRIBUTING.md"
 cmp "$source_tree/LICENSE" "$temporary/prefix/share/doc/exfat_resize/LICENSE"
 cmp "$source_tree/README.md" "$temporary/prefix/share/doc/exfat_resize/README.md"
-cmp "$source_tree/docs/LIBRARY.md" \
-	"$temporary/prefix/share/doc/exfat_resize/docs/LIBRARY.md"
+cmp "$source_tree/docs/CLI.md" "$temporary/prefix/share/doc/exfat_resize/docs/CLI.md"
+cmp "$source_tree/docs/INSTALLING.md" "$temporary/prefix/share/doc/exfat_resize/docs/INSTALLING.md"
+cmp "$source_tree/docs/LIBRARY.md" "$temporary/prefix/share/doc/exfat_resize/docs/LIBRARY.md"
 cmp "$source_tree/docs/PARTITIONING.md" \
 	"$temporary/prefix/share/doc/exfat_resize/docs/PARTITIONING.md"
 cmp "$source_tree/docs/TRANSACTION.md" \

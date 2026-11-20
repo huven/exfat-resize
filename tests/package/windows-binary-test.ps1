@@ -88,6 +88,8 @@ try {
     $Expected = @(
         "CONTRIBUTING.md",
         "docs",
+        "docs/CLI.md",
+        "docs/INSTALLING.md",
         "docs/LIBRARY.md",
         "docs/PARTITIONING.md",
         "docs/TRANSACTION.md",
@@ -111,6 +113,10 @@ try {
         (Join-Path $PackageDirectory "LICENSE")
     Assert-SameFile (Join-Path $SourceDirectory "README.md") `
         (Join-Path $PackageDirectory "README.md")
+    Assert-SameFile (Join-Path $SourceDirectory "docs/CLI.md") `
+        (Join-Path $PackageDirectory "docs/CLI.md")
+    Assert-SameFile (Join-Path $SourceDirectory "docs/INSTALLING.md") `
+        (Join-Path $PackageDirectory "docs/INSTALLING.md")
     Assert-SameFile (Join-Path $SourceDirectory "docs/LIBRARY.md") `
         (Join-Path $PackageDirectory "docs/LIBRARY.md")
     Assert-SameFile (Join-Path $SourceDirectory "docs/PARTITIONING.md") `

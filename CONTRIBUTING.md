@@ -3,7 +3,7 @@
 Run the relevant tests before submitting a change. The commands below cover the
 development build, test suites, sanitizer checks, and release verification. For
 the shorter user-oriented build and installation path, see the
-[README](README.md#build-from-source).
+[installation guide](docs/INSTALLING.md#build-from-source).
 
 ## Build and test
 
@@ -15,7 +15,7 @@ root, use the same commands on Linux, macOS, and Windows:
     ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
 
 The configure command explicitly enables the CLI and tests, including when
-reusing a build directory from the README's installation instructions. CTest
+reusing a build directory from the installation guide. CTest
 runs every registered test for the platform and reports an error if none are
 found. The library, package, and CLI suites have separate labels; use `-L library`
 or `-L cli` for a focused run after the full suite has passed.

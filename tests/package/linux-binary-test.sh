@@ -58,7 +58,9 @@ if [ "$actual" != "$expected" ]; then
 	printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
 	exit 1
 fi
-expected_documentation=$(printf '%s\n' LIBRARY.md PARTITIONING.md TRANSACTION.md | sort)
+expected_documentation=$(
+	printf '%s\n' CLI.md INSTALLING.md LIBRARY.md PARTITIONING.md TRANSACTION.md | sort
+)
 documentation=$(find "$package_directory/docs" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
 if [ "$documentation" != "$expected_documentation" ]; then
 	echo "Linux archive contains an unexpected documentation file set" >&2
@@ -75,6 +77,8 @@ if [ "$(stat -c '%a' "$package_directory/exfat-resize.8")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/LICENSE")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/LICENSE-musl")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/README.md")" != 644 ] ||
+	[ "$(stat -c '%a' "$package_directory/docs/CLI.md")" != 644 ] ||
+	[ "$(stat -c '%a' "$package_directory/docs/INSTALLING.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/docs/LIBRARY.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/docs/PARTITIONING.md")" != 644 ] ||
 	[ "$(stat -c '%a' "$package_directory/docs/TRANSACTION.md")" != 644 ]; then
@@ -94,6 +98,8 @@ cmp "$source_directory/CONTRIBUTING.md" "$package_directory/CONTRIBUTING.md"
 cmp "$source_directory/LICENSE" "$package_directory/LICENSE"
 cmp "$musl_license" "$package_directory/LICENSE-musl"
 cmp "$source_directory/README.md" "$package_directory/README.md"
+cmp "$source_directory/docs/CLI.md" "$package_directory/docs/CLI.md"
+cmp "$source_directory/docs/INSTALLING.md" "$package_directory/docs/INSTALLING.md"
 cmp "$source_directory/docs/LIBRARY.md" "$package_directory/docs/LIBRARY.md"
 cmp "$source_directory/docs/PARTITIONING.md" "$package_directory/docs/PARTITIONING.md"
 cmp "$source_directory/docs/TRANSACTION.md" "$package_directory/docs/TRANSACTION.md"
@@ -106,6 +112,8 @@ installed_contributing=$install_prefix/share/doc/exfat-resize/CONTRIBUTING.md
 installed_license=$install_prefix/share/doc/exfat-resize/LICENSE
 installed_musl_license=$install_prefix/share/doc/exfat-resize/LICENSE-musl
 installed_readme=$install_prefix/share/doc/exfat-resize/README.md
+installed_cli_reference=$install_prefix/share/doc/exfat-resize/docs/CLI.md
+installed_installation=$install_prefix/share/doc/exfat-resize/docs/INSTALLING.md
 installed_library=$install_prefix/share/doc/exfat-resize/docs/LIBRARY.md
 installed_partitioning=$install_prefix/share/doc/exfat-resize/docs/PARTITIONING.md
 installed_transaction=$install_prefix/share/doc/exfat-resize/docs/TRANSACTION.md
@@ -113,13 +121,14 @@ if [ "$("$installed_binary" --version)" != "exfat-resize $build_version" ] ||
 	[ ! -f "$installed_manual" ] || [ ! -f "$installed_license" ] ||
 	[ ! -f "$installed_musl_license" ] ||
 	[ ! -f "$installed_contributing" ] || [ ! -f "$installed_readme" ] ||
+	[ ! -f "$installed_cli_reference" ] || [ ! -f "$installed_installation" ] ||
 	[ ! -f "$installed_library" ] || [ ! -f "$installed_partitioning" ] ||
 	[ ! -f "$installed_transaction" ]; then
 	echo "installed Linux archive is incomplete" >&2
 	exit 1
 fi
 cmp "$package_directory/LICENSE-musl" "$installed_musl_license"
-if [ "$(find "$install_prefix" -type f | wc -l)" -ne 9 ]; then
+if [ "$(find "$install_prefix" -type f | wc -l)" -ne 11 ]; then
 	echo "installer created an unexpected file set" >&2
 	exit 1
 fi
@@ -131,6 +140,7 @@ DESTDIR=$temporary/install-root "$package_directory/uninstall.sh"
 if [ -e "$installed_binary" ] || [ -e "$installed_manual" ] || [ -e "$installed_license" ] ||
 	[ -e "$installed_musl_license" ] ||
 	[ -e "$installed_contributing" ] || [ -e "$installed_readme" ] ||
+	[ -e "$installed_cli_reference" ] || [ -e "$installed_installation" ] ||
 	[ -e "$installed_library" ] || [ -e "$installed_partitioning" ] ||
 	[ -e "$installed_transaction" ]; then
 	echo "uninstaller left an installed project file behind" >&2

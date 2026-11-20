@@ -24,7 +24,7 @@ The Windows build additionally offers explicit
 .B \-\-grow-partition
 and
 .B \-\-shrink-partition
-options for supported basic partitions; see README.md for their requirements.
+options for supported basic partitions; see docs/CLI.md for their requirements.
 .PP
 The selected device must present the exFAT main boot sector at sector zero.
 When
@@ -189,6 +189,10 @@ exfat-resize image.exfat
 .fi
 .RE
 .PP
+If truncate is unavailable on macOS, see the Python 3 alternative under
+"Resizing image files" in
+.IR docs/CLI.md .
+.PP
 Grow an unmounted filesystem on a raw block device to all available space:
 .PP
 .RS
@@ -211,7 +215,7 @@ The command uses platform synchronization barriers, but persistence ultimately
 depends on the operating system and storage device honoring its flush requests.
 .SH DOCUMENTATION
 The
-.I README.md
+.I docs/CLI.md
 distributed with exfat-resize is the authoritative source for operational
 safety requirements, supported-filesystem limitations, and recovery
 instructions.

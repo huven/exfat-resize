@@ -78,11 +78,14 @@ documentation=$temporary/stage/usr/local/share/doc/exfat_resize
 contributing=$documentation/CONTRIBUTING.md
 license=$documentation/LICENSE
 readme=$documentation/README.md
+cli_reference=$documentation/docs/CLI.md
+installation=$documentation/docs/INSTALLING.md
 library_reference=$documentation/docs/LIBRARY.md
 partitioning=$documentation/docs/PARTITIONING.md
 transaction=$documentation/docs/TRANSACTION.md
 if [ ! -x "$binary" ] || [ ! -f "$manual" ] || [ ! -f "$license" ] ||
-	[ ! -f "$contributing" ] || [ ! -f "$readme" ] || [ ! -f "$library_reference" ] ||
+	[ ! -f "$contributing" ] || [ ! -f "$readme" ] || [ ! -f "$cli_reference" ] ||
+	[ ! -f "$installation" ] || [ ! -f "$library_reference" ] ||
 	[ ! -f "$partitioning" ] || [ ! -f "$transaction" ]; then
 	echo "CMake runtime installation is incomplete" >&2
 	exit 1
@@ -129,12 +132,13 @@ install -m 0644 "$manual" "$package_directory/exfat-resize.8"
 install -m 0644 "$contributing" "$package_directory/CONTRIBUTING.md"
 install -m 0644 "$license" "$package_directory/LICENSE"
 install -m 0644 "$readme" "$package_directory/README.md"
+install -m 0644 "$cli_reference" "$package_directory/docs/CLI.md"
+install -m 0644 "$installation" "$package_directory/docs/INSTALLING.md"
 install -m 0644 "$library_reference" "$package_directory/docs/LIBRARY.md"
 install -m 0644 "$partitioning" "$package_directory/docs/PARTITIONING.md"
 install -m 0644 "$transaction" "$package_directory/docs/TRANSACTION.md"
 install -m 0755 "$source_directory/packaging/linux/install.sh" "$package_directory/install.sh"
-install -m 0755 "$source_directory/packaging/linux/uninstall.sh" \
-	"$package_directory/uninstall.sh"
+install -m 0755 "$source_directory/packaging/linux/uninstall.sh" "$package_directory/uninstall.sh"
 
 archive=$package.tar.gz
 COPYFILE_DISABLE=1 tar -czf "$output_directory/$archive" -C "$temporary" "$package"

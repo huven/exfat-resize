@@ -3,10 +3,12 @@
 The `exfat-resize` C11 library grows or shrinks an existing exFAT filesystem in place. It
 accepts caller-provided block-device and allocation interfaces, has no operating
 system dependency, and reports the recovery boundary reached by every call.
+It is continuously tested with GCC and Clang on Linux, Apple Clang on macOS,
+and MSVC on Windows.
 
 Before integrating the library, read the operational [safety
-requirements](../README.md#safety), [filesystem compatibility
-requirements](../README.md#filesystem-compatibility), and [transaction and
+requirements](CLI.md#safety), [filesystem compatibility
+requirements](CLI.md#filesystem-compatibility), and [transaction and
 recovery guarantees](TRANSACTION.md). The library is not a filesystem checker,
 partitioning library, journal, rollback mechanism, or repair facility. The
 caller must provide exclusive access to the filesystem and a verified backup.
@@ -179,7 +181,7 @@ geometry commit and clean-state synchronization finish without further polling.
 Cooperative cancellation does not protect against process termination, a
 crash, power loss, `SIGKILL`, or `TerminateProcess`. If the caller does not
 receive a recovery stage, follow the conservative abnormal-termination
-procedure in README.
+procedure in [Recovery after failure](CLI.md#recovery-after-failure).
 
 ### Cancellation checkpoints and responsiveness
 
@@ -293,6 +295,9 @@ target_link_libraries(your_target PRIVATE exfat_resize::exfat_resize)
 ```
 
 For in-tree use, `add_subdirectory()` provides the same target.
+
+Installed CMake packages use same-major version compatibility; the
+`find_package` example above requests a compatible 2.x release.
 
 The project distributes a static library. Build consumers with the header and
 library from the same release and with ABI-compatible compiler settings for the
