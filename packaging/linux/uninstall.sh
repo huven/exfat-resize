@@ -28,6 +28,8 @@ rm -f "$install_root/bin/exfat-resize" "$install_root/share/man/man8/exfat-resiz
 	"$install_root/share/doc/exfat-resize/LICENSE-musl" \
 	"$install_root/share/doc/exfat-resize/LICENSE.musl" \
 	"$install_root/share/doc/exfat-resize/README.md" \
+	"$install_root/share/doc/exfat-resize/docs/CLI.md" \
+	"$install_root/share/doc/exfat-resize/docs/INSTALLING.md" \
 	"$install_root/share/doc/exfat-resize/docs/LIBRARY.md" \
 	"$install_root/share/doc/exfat-resize/docs/PARTITIONING.md" \
 	"$install_root/share/doc/exfat-resize/docs/TRANSACTION.md"

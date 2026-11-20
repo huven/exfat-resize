@@ -1,510 +1,181 @@
 # exfat-resize
 
-Grow and shrink exFAT filesystems with CLI tools for Windows, Linux, and macOS.
+Grow and shrink exFAT filesystems on Windows, Linux, and macOS.
 
-A portable C11 library powers the CLIs and can be embedded in other tools.
-
-## Quick start
-
-### Prebuilt CLI binaries
-
-Prebuilt CLI binaries are provided for these platforms:
-
-- Linux x86-64 and ARM64 (statically linked)
-- macOS 11 or newer on Apple silicon (ARM64)
-- Windows x86-64
-
-Download the prebuilt CLI from
-[GitHub Releases](https://github.com/huven/exfat-resize/releases) and verify the
-SHA-256 digest shown by GitHub. On Linux x86-64 (replace `x86_64` with `arm64`
-for ARM64):
-
-    tar -xzf exfat-resize-X.Y.Z-linux-x86_64.tar.gz
-    cd exfat-resize-X.Y.Z-linux-x86_64
-    sudo ./install.sh
-
-On macOS:
-
-    tar -xzf exfat-resize-X.Y.Z-macos-arm64.tar.gz
-    cd exfat-resize-X.Y.Z-macos-arm64
-    sudo ./install.sh
-
-On Windows PowerShell, no installation is required:
-
-    Expand-Archive exfat-resize-X.Y.Z-windows-x86_64.zip -DestinationPath .
-    cd exfat-resize-X.Y.Z-windows-x86_64
-    .\exfat-resize.exe --help
-
-See [Installing prebuilt CLI binaries](#installing-prebuilt-cli-binaries) for
-platform compatibility, checksum verification, custom installation prefixes,
-and platform-specific setup.
-
-### Build from source
-
-The checkout path below requires Git, CMake 3.20 or newer, and a C11 compiler.
-
-    git clone https://github.com/huven/exfat-resize.git
-    cd exfat-resize
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEXFAT_RESIZE_BUILD_TESTS=OFF
-    cmake --build build --config Release
-    cmake --install build --config Release
-
-The commands build and install both the CLI and library on Linux, macOS, and
-Windows. On other platforms, only the portable library is built by default.
-
-The install command may require elevated privileges depending on the destination
-prefix.
-
-For a custom installation prefix:
-
-    cmake --install build --config Release --prefix /your/prefix
-
-On macOS, if CMake.app is installed without command-line links, add its tools to
-`PATH`:
-
-    export PATH=/Applications/CMake.app/Contents/bin:$PATH
-
-Before using the tool, read [Safety](#safety), then see [Usage](#usage)
-for supported targets and examples.
-
-## Safety
+[Install](#install) · [Prepare](#before-you-resize) · [Grow](#grow-a-filesystem) ·
+[Shrink](#shrink-a-filesystem) · [Image files](#resize-an-image-file) ·
+[Troubleshooting](#if-something-goes-wrong)
 
 > [!WARNING]
-> Resizing modifies filesystem metadata in place and may result in data loss if
-> the operation fails or is interrupted. Make and verify a backup before using
-> this tool.
-
-Verify that the supplied path resolves to the intended filesystem. Paths may
-resolve through symbolic links, and the selected device must present the exFAT
-main boot sector at sector zero. The CLI does not modify partition tables unless
-the Windows-only `--grow-partition` or `--shrink-partition` option is explicitly supplied.
-
-Before resizing, run an appropriate exFAT filesystem checker while the
-filesystem is unmounted and ensure the check completes successfully.
-`exfat-resize` is not a general filesystem checker; it validates only the
-invariants needed for the resize.
-
-Prevent all other access for the complete operation. On macOS and Linux, keep
-the filesystem unmounted. For a Windows logical volume, close all files and
-applications using it; the CLI obtains an exclusive volume lock, retains it
-while accessing the volume, and dismounts the filesystem before releasing the
-lock. When resizing a regular image file, also ensure it is not attached through
-a loop or disk-image device. Platform locking helps detect cooperating users,
-but regular-file locks are advisory and cannot exclude a process that ignores
-them.
-
-For growth, the backing object or partition must already be enlarged unless a supported
-Windows logical volume is used with `--grow-partition`. The tool never enlarges
-regular files. A failed or interrupted resize is not automatically repaired,
-rolled back, or resumable. Follow the recovery guidance printed with an error;
-depending on the stage reached, recovery may require a filesystem checker or
-restoring the verified backup.
-
-On macOS and Linux, Ctrl-C requests cooperative cancellation. Work already in
-progress is allowed to reach the next safe boundary. On Windows, Ctrl+C and
-Ctrl+Break request the same cooperative cancellation. When the request is
-observed before completion, the command prints the applicable recovery
-guidance, performs normal device cleanup, and exits with status 130. Further
-cancellation requests remain handled during cleanup.
-
-Every normal error exit prints stage-specific recovery guidance. If the command
-terminates abnormally without printing stage-specific recovery guidance, for
-example because of forced termination, a process crash, or power loss, assume
-that destructive metadata updates may have started; do not retry the resize,
-and restore the verified backup. Follow a less conservative checker-and-retry
-path only when the command explicitly reports that it is safe.
-On Windows, forced termination or a process crash may leave the volume accessible
-and falsely reported as healthy or clean; prevent further access until recovery.
-
-If `--grow-partition` reports that a partition update was attempted or that the
-partition was enlarged, follow its partition-specific guidance even though no
-filesystem write was attempted. The CLI attempts to dismount a logical volume
-after any partition-update error; prevent further access if that cleanup also
-fails. Verify the partition layout before retrying, and never shrink it as a
-recovery step.
-
-## Usage
-
-    exfat-resize device [ size ]
-    exfat-resize --grow-partition device size
-    exfat-resize --shrink-partition device size
-    exfat-resize -h | --help
-    exfat-resize -V | --version
-
-The partition options are available only for Windows logical volumes and are
-mutually exclusive. Both require an explicit size.
-Run `exfat-resize --help` for a command summary. On macOS and Linux,
-`man exfat-resize` provides the complete command-line reference.
-
-With no size, the filesystem grows to the available size of the backing object.
-A specified size is the desired filesystem size as an unsigned number of bytes.
-It may have an uppercase `K`, `M`, or `G` suffix, which multiplies the number by
-1024, 1024 squared, or 1024 cubed, respectively. The size is rounded down to a
-whole filesystem sector. A smaller size requests shrink; an equal rounded size
-is rejected, except that `--shrink-partition` can finish the partition step when
-the filesystem is already at the requested size. The backing storage must
-retain its original size until filesystem shrink completes successfully.
-
-The backing image, device, or partition must provide enough space for the
-requested size before the command runs. The CLI never enlarges an image file.
-On Windows, [`--grow-partition`](#growing-the-containing-partition) can
-optionally enlarge a supported partition as part of an explicit-size resize.
-
-Only filesystems meeting the
-[compatibility requirements](#filesystem-compatibility) below are supported.
-
-During the operation, the CLI reports each transaction stage. After successful
-completion, it reports the resulting filesystem size in bytes.
-
-### Shrinking
-
-Supply the desired smaller filesystem size explicitly:
-
-    exfat-resize image.exfat 32M
-
-After the command succeeds, the image may be truncated to the reported size:
-
-    truncate -s 32M image.exfat
-
-For partitions, shrink the filesystem first, then use a separate partitioning
-utility to reduce only the partition end. Keep its start fixed and its size at
-least the reported filesystem size. See [partition resizing](docs/PARTITIONING.md).
-The CLI never truncates images. On Windows,
-[`--shrink-partition`](#shrinking-the-containing-partition) performs both steps.
-`--grow-partition` cannot be combined with a shrink target.
-
-On Windows, CHKDSK requires the partition size to match the filesystem size.
-While the partition is still larger after shrink, CHKDSK can report `RAW` even
-when Windows mounts the filesystem and reads its files. Complete the partition
-resize, using `--shrink-partition` or a separate utility, before checking the
-smaller filesystem with CHKDSK.
-
-Shrink moves allocated tail clusters into free space below the new boundary.
-It retains the heap offset and completes each move before observing cancellation.
-If cancellation reports a clean original-size filesystem, it can be used or the
-shrink can be retried; completed moves remain. Do not truncate after cancellation.
-Cancellation during the final geometry commit is deferred through completion,
-which returns success if all writes succeed. I/O failures and abnormal termination
-still require the reported recovery procedure; individual metadata writes are
-not power-fail atomic.
-
-### macOS and Linux
-
-`device` may be a regular image file or an unmounted raw block device. Prevent
-all other access to it for the complete operation. In particular, do not leave
-an image attached through a loop or disk-image device while resizing it.
-
-Enlarge a regular file containing an exFAT filesystem, then grow the filesystem
-to use all available space:
-
-    truncate -s +2G image.exfat
-    exfat-resize image.exfat
-
-First enlarge the partition or other backing storage with the appropriate
-platform tool. See [Partition growth outside
-`exfat-resize`](docs/PARTITIONING.md) for starting points. Then grow the
-filesystem on an unmounted raw device:
-
-    exfat-resize /dev/your-exfat-device
-
-Regular-file locks are advisory and cannot exclude a process that ignores them.
-On macOS, the CLI rejects known mounted or otherwise busy backing objects. Keep
-the image or raw device unavailable to other processes until the command has
-finished.
-
-### Windows
-
-`device` may be:
-
-- A regular image-file path, including a Unicode path.
-- An exact drive designator such as `E:`.
-- An exact volume-GUID path such as `\\?\Volume{GUID}\`.
-
-Physical-disk paths such as `\\.\PhysicalDrive0` and other Windows device
-namespace forms are not supported as command targets.
-
-Run the following commands from the extracted directory.
-
-An image file must already have the desired length and is presented to the
-filesystem as a device with 512-byte sectors. Resizing an image normally does
-not require Administrator privileges, although the account running the command
-must have exclusive read/write access to the file:
-
-    .\exfat-resize.exe C:\path\to\image.exfat
-
-For a logical volume, open an elevated terminal in that directory and close
-all files and applications using the volume. The CLI locks the volume
-exclusively before reading or writing it, retains the lock for the complete
-operation, synchronizes all writes, and dismounts the filesystem before
-releasing the lock. If the volume cannot be locked, the resize does not start.
-
-Use either its drive designator or volume-GUID path:
-
-    .\exfat-resize.exe E:
-    .\exfat-resize.exe "\\?\Volume{GUID}"
-
-These commands grow the filesystem to the existing volume size; they do not
-change its partition table. An explicit size may also be supplied when it fits
-inside the existing volume:
-
-    .\exfat-resize.exe E: 512G
-
-#### Growing the containing partition
-
-If an explicit size does not fit inside a logical Windows volume,
-`--grow-partition` asks the CLI to enlarge the containing partition first:
-
-    .\exfat-resize.exe --grow-partition E: 512G
-
-This example requests a 512 GiB volume and grows the filesystem to use it. If
-the requested size already fits, the partition table is left unchanged and the
-filesystem resize proceeds normally.
-
-Partition growth is deliberately opt-in because changing a partition table has
-a wider effect than changing metadata within the selected filesystem. It
-requires:
-
-- An elevated terminal and an explicit size.
-- A logical volume that maps to one complete physical-disk extent.
-- A basic GPT or MBR data partition with no overlapping layout entry.
-- Enough unallocated space immediately after the partition.
-
-Other layouts require enlarging the containing partition separately before
-running `exfat-resize`. See [Partition growth outside
-`exfat-resize`](docs/PARTITIONING.md) for external tools and rescue
-environments.
-
-Before changing the partition table, the CLI validates both exFAT boot regions,
-checks that the filesystem can grow to the requested size, and verifies the
-volume-to-disk mapping and physical partition layout. Growth uses Windows'
-documented [`IOCTL_DISK_GROW_PARTITION`][windows-grow-partition]. It never moves
-a partition start or another partition. `--grow-partition` never shrinks a partition.
-
-The full filesystem preflight runs after the partition is enlarged. If that
-preflight fails, the original filesystem remains authoritative inside the
-larger partition; do not shrink the partition. Correct the reported problem
-and retry the filesystem resize. Partition changes require an explicit
-`--grow-partition` or `--shrink-partition` option.
-
-[windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
-
-#### Shrinking the containing partition
-
-From an elevated terminal, supply the desired smaller filesystem and partition size:
-
-    .\exfat-resize.exe --shrink-partition E: 384M
-
-This option validates the partition layout, shrinks and synchronizes the
-filesystem, then reduces only the partition's length using
-[`IOCTL_DISK_SET_DRIVE_LAYOUT_EX`][windows-set-layout]. It keeps the start,
-partition identity, type, attributes, and other partitions unchanged. The
-released tail becomes unallocated disk space. Disk Management and DiskPart
-cannot perform this operation for exFAT through their built-in shrink commands.
-
-The target must be a single whole basic GPT data partition or primary MBR
-(type 07) partition. Extended/logical, dynamic, spanned, and overlapping layouts
-are unsupported. The explicit size is rounded down to a filesystem sector and
-must also align to the device sector size. It must be smaller than the partition
-and no larger than the filesystem. Neither this option nor ordinary filesystem
-shrink reduces the containing VHD/VHDX file or virtual disk capacity.
-
-Before filesystem writes, the CLI validates the partition mapping and allocates
-its layout buffers (2 MiB in addition to filesystem workspace). Immediately
-before updating the table it checks that the layout still matches. Prevent other
-partition-management operations on the disk throughout the command.
-
-Cancellation during compaction leaves a clean filesystem at its original size
-and leaves the partition unchanged. Once the filesystem's final commit begins,
-cancellation is deferred through the partition update and verification. A
-request arriving during this completion returns success if all steps succeed.
-A partition failure takes precedence over cancellation.
-
-If the filesystem succeeds but the partition update has not been attempted,
-the error reports a clean smaller filesystem and an unchanged partition.
-Remount the volume before access or retrying `--shrink-partition` with the same
-size to finish just the partition step.
-That path validates both clean, matching boot regions and the partition layout;
-it does not repeat filesystem compaction. If a partition update was attempted
-but synchronization or readback failed, verify the layout before retrying.
-These updates are not power-fail atomic.
-
-Windows can replace the volume device and change its drive letter during the
-update. The CLI closes the old handle, verifies the physical layout, and discovers
-a fresh volume by its disk extent and partition identity. If the layout is
-verified but no matching volume becomes available within five seconds, it
-returns an error directing you to refresh or remount and check the current drive
-letter. Do not repeat an already completed shrink. After success, run CHKDSK
-using the current drive letter.
-
-[windows-set-layout]: https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-ioctl_disk_set_drive_layout_ex
-
-## Filesystem compatibility
-
-The filesystem must meet these prerequisites:
-
-- Conform to exFAT revision 1.00 with a single FAT; TexFAT/two-FAT volumes are
-  not supported.
-- Be clean and not have the exFAT media-failure flag set.
-- When accessed through a block device, have a filesystem sector size that is
-  a multiple of the block device's sector size.
-- Not contain Vendor Allocation directory entries, whose allocation semantics
-  cannot be interpreted without recognizing their vendor GUID.
-- For growth, gain enough clusters to hold the replacement allocation bitmap
-  in the newly added tail space.
-- For shrink, fit all current allocations, including the full current bitmap,
-  below the new heap boundary. The bitmap is shortened only at final commit;
-  exceptionally tight targets can therefore be rejected even when a smaller
-  final bitmap would fit.
-- For growth, not have a source cluster recorded as bad where the expanded FAT would
-  overlap it. Bad clusters that remain in the Cluster Heap at the same physical
-  location are preserved.
-
-## Supported platforms
-
-The core library is designed to be portable across mainstream C11 environments
-and has no operating-system dependencies. It is continuously tested with GCC
-and Clang on Linux, Apple Clang on macOS, and MSVC on Windows.
-
-The bundled CLI
-is a thin platform-specific wrapper around the library:
-
-| Platform | Image files | Direct filesystem access | Partition growth |
-| --- | --- | --- | --- |
-| macOS | Yes | Raw block devices | Use an external partitioning tool |
-| Linux | Yes | Raw block devices | Use an external partitioning tool |
-| Windows | Yes | Drive designators and volume-GUID paths | `--grow-partition` and `--shrink-partition` for supported layouts |
-
-## C library
-
-The repository also builds a portable C11 library declared by
-`<exfat_resize.h>`. It accepts caller-provided sector-addressed device and
-allocation interfaces and an optional operation monitor for cooperative
-cancellation and structured stage events. Sector zero must be the exFAT main
-boot sector, and the caller must provide exclusive access and the verified
-backup required by [Safety](#safety).
-
-The minimal call shape is:
-
-```c
-struct exfat_resize_allocator allocator = {
-    .allocate = allocate,
-    .deallocate = deallocate
-};
-enum exfat_resize_stage stage;
-error = exfat_resize(&device, target_size, &allocator, NULL, &stage);
+> Resizing changes data in place. Failure or interruption can cause data loss.
+> Make and verify a backup, then complete [Before you resize](#before-you-resize)
+> before running any resize command.
+
+## Quick examples
+
+After [installing](#install) and [preparing the filesystem](#before-you-resize):
+
+| Platform | Grow to the partition's available size | Shrink to 64 GiB |
+| --- | --- | --- |
+| Linux | `sudo exfat-resize /dev/sdb1` | `sudo exfat-resize /dev/sdb1 64G` |
+| macOS | `sudo exfat-resize /dev/rdisk4s1` | `sudo exfat-resize /dev/rdisk4s1 64G` |
+| Windows | `.\exfat-resize.exe E:` | `.\exfat-resize.exe E: 64G` |
+
+**Replace these example targets with your own exFAT partition or drive.** The
+shrink examples assume the filesystem is currently larger than 64 GiB.
+On Windows, use an Administrator terminal in the extracted release directory.
+
+The size is the **desired final filesystem size**, not an amount to add or remove.
+Uppercase `K`, `M`, and `G` mean KiB, MiB, and GiB; without a suffix, use bytes.
+Omitting the size grows the filesystem to fill its existing partition or image.
+
+Changing the filesystem and changing its containing partition are separate steps:
+
+- **Grow:** enlarge the partition first, then grow the filesystem.
+- **Shrink:** shrink the filesystem successfully first, then reduce the partition.
+- **Windows:** the optional partition commands below can perform both steps.
+
+Follow the [grow](#grow-a-filesystem) or [shrink](#shrink-a-filesystem) workflow
+to complete the operation.
+
+## Install
+
+Download the archive for your platform from
+[GitHub Releases](https://github.com/huven/exfat-resize/releases). Follow its
+installation guide to verify the checksum, extract it, and run or install the CLI:
+
+| Platform | Prebuilt binaries | Instructions |
+| --- | --- | --- |
+| Linux | x86-64 and ARM64 | [Linux installation](docs/INSTALLING.md#linux) |
+| macOS | Apple silicon, macOS 11 or newer | [macOS installation](docs/INSTALLING.md#macos) |
+| Windows | x86-64 | [Windows setup](docs/INSTALLING.md#windows) |
+
+For other architectures or a source checkout, see
+[Build from source](docs/INSTALLING.md#build-from-source).
+The installation guide also covers custom prefixes and uninstalling.
+
+## Before you resize
+
+1. **Make and verify a backup.** There is no automatic rollback or resume.
+2. **Identify the exFAT partition carefully.** Check its size and identity using
+   `lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT` on Linux, `diskutil list` on macOS, or
+   `Get-Volume` in Windows PowerShell. On Linux and macOS, select the partition
+   containing exFAT, not the whole disk. Substitute your own target in every
+   command below.
+3. **Close applications using it, unmount it, and check it for errors.** Use the
+   commands for your platform below. Resolve any checker errors before resizing;
+   `exfat-resize` does not replace a filesystem checker.
+4. **Keep other processes away until resizing finishes.** On Linux and macOS,
+   keep the filesystem unmounted. On Windows, keep files and applications closed;
+   the CLI requires exclusive access. Detach image files from any loop or
+   disk-image device before resizing them. Prevent concurrent partition changes.
+
+| Platform | Unmount and check before resizing |
+| --- | --- |
+| Linux | `sudo umount /dev/sdb1`, then `sudo fsck.exfat -n /dev/sdb1` |
+| macOS | `diskutil unmount /dev/disk4s1`, then `sudo fsck_exfat -n /dev/rdisk4s1` |
+| Windows | In an Administrator terminal: `chkdsk E: /f /x` |
+
+On Linux, `fsck.exfat` is supplied by exfatprogs. The examples use `-n` to check
+without making repairs. Windows `/x` dismounts the volume and `/f` repairs errors.
+See [filesystem requirements](docs/CLI.md#filesystem-compatibility) for supported
+exFAT formats and other restrictions.
+For image files, follow [image preparation and checking](docs/CLI.md#checking-an-image)
+instead of the partition commands above.
+
+## Grow a filesystem
+
+1. Complete [Before you resize](#before-you-resize).
+2. **Enlarge the containing partition first.** It needs free space immediately
+   after it; preserve its start. Follow the
+   [partition growth guide](docs/PARTITIONING.md). If the partition is already
+   larger than the filesystem, skip this step.
+3. Run your platform's **grow command** from [Quick examples](#quick-examples).
+   Without a size, it uses all space in the enlarged partition.
+4. After success, check the filesystem again with your platform's checker above,
+   then mount it and verify your files.
+
+On Windows, you can instead enlarge a supported partition and its filesystem
+together, specifying the final size:
+
+```powershell
+.\exfat-resize.exe --grow-partition E: 128G
 ```
 
-Read the [library reference documentation](docs/LIBRARY.md) for the complete
-device, allocator, monitor, event, cancellation, lifetime, result, recovery,
-and compatibility contracts. Exact write ordering, durability guarantees, and
-allocator-backed [memory requirements](docs/TRANSACTION.md#memory-requirements)
-are documented separately.
+This requires a basic GPT or MBR partition with enough immediately following
+unallocated space. Read the [Windows partition requirements and failure
+guidance](docs/CLI.md#growing-the-containing-partition) before using this option.
 
-See [Building and linking](docs/LIBRARY.md#building-and-linking) for library-only
-builds and CMake integration. The install target also provides the header,
-static library, CLI executable, CMake package files, and a manual page on macOS
-and Linux. This README, the library and transaction references, and the exact
-MIT license are installed under CMake's `CMAKE_INSTALL_DOCDIR`.
-Installed CMake packages use same-major version compatibility, so consumers
-can require a compatible 2.x release:
+## Shrink a filesystem
 
-    find_package(exfat_resize 2.0 CONFIG REQUIRED)
+1. Complete [Before you resize](#before-you-resize).
+2. **Keep the partition at its original size.** Run your platform's **shrink
+   command** from [Quick examples](#quick-examples), replacing `64G` with the
+   desired smaller size. If the target cannot hold the existing data and required
+   filesystem metadata, choose a larger target.
+3. **Only after success**, use a separate partitioning tool to reduce the
+   partition's end. Keep its start fixed and retain at least the filesystem size
+   reported by the CLI. Follow the [partition shrink
+   guide](docs/PARTITIONING.md#shrinking-a-containing-partition).
+4. Check the filesystem again, then mount it and verify your files. On Windows,
+   complete the partition resize to exactly the reported filesystem size before
+   running CHKDSK; a size mismatch can make it report `RAW`.
 
-## Installing prebuilt CLI binaries
+On Windows, you can instead shrink a supported partition and its filesystem
+together:
 
-### Linux and macOS
+```powershell
+.\exfat-resize.exe --shrink-partition E: 64G
+```
 
-GitHub Releases provide these Unix CLI archives:
+This supports single whole basic GPT data partitions and primary MBR partitions.
+Read the [Windows partition requirements and failure
+guidance](docs/CLI.md#shrinking-the-containing-partition). After success, check
+the current drive letter before running CHKDSK; Windows may have changed it.
 
-- `exfat-resize-X.Y.Z-macos-arm64.tar.gz` supports macOS 11 or newer on Apple
-  silicon. It is ARM64-only, Developer ID-signed, and notarized by Apple.
-- `exfat-resize-X.Y.Z-linux-x86_64.tar.gz` supports x86-64 Linux.
-- `exfat-resize-X.Y.Z-linux-arm64.tar.gz` supports ARM64 Linux.
+## Resize an image file
 
-Both Linux binaries are statically linked with musl and built as
-position-independent executables (PIE). They require no installed C library or
-dynamic loader, so the same executable can run on glibc-based and musl-based
-distributions. They are built on Alpine 3.22 and tested by performing exFAT
-resizes on Debian 12, Ubuntu 22.04 LTS, and Alpine 3.22 for each architecture.
+Use the path to a raw image containing a single exFAT filesystem. The CLI does
+not resize partitioned disk images or VHD/VHDX containers directly.
 
-For kernel compatibility, [musl documents Linux 2.6.39 or newer](https://wiki.musl-libc.org/supported-platforms)
-as its baseline for POSIX-conformant behavior. Updates to the bundled C
-library arrive with new binary releases.
+**Grow:** enlarge the file first, then grow its filesystem. **Shrink:** resize
+the filesystem first, then truncate the file only after success, using the exact
+reported size. Keep the image detached and unavailable to other processes.
 
-Run `uname -m` on the target Linux system to choose its archive: use `x86_64`
-for `x86_64`, or `arm64` for `aarch64` or `arm64`. Other CPU architectures
-require a source build.
+Follow the complete commands for your platform, including image checks:
 
-Download the archive for the target platform from the corresponding
-[GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
-an immutable SHA-256 digest beside each asset. When using Safari, Option-click
-the macOS asset link so Safari downloads it without automatically opening and
-decompressing it. Compare the retained `.tar.gz` with GitHub's digest:
+- [Linux images](docs/CLI.md#linux-images).
+- [macOS images](docs/CLI.md#macos-images), including a fallback for macOS 11/12
+  without `truncate`.
+- [Windows images](docs/CLI.md#windows-images), using PowerShell to change the
+  file length. Resizing normally does not require Administrator privileges.
 
-    shasum -a 256 exfat-resize-X.Y.Z-macos-arm64.tar.gz
+## If something goes wrong
 
-Then extract the macOS archive and enter its directory:
+- **Follow the recovery guidance printed by the command.** Do not reduce a
+  partition or truncate an image after a failed or cancelled resize.
+- To cancel, use Ctrl-C and allow cleanup to finish. Cancellation may take time;
+  do not force termination. See [cancellation](docs/CLI.md#cancellation).
+- After a crash, power loss, or forced termination without recovery guidance,
+  prevent further access, **do not retry**, and restore the verified backup.
+  A volume that still mounts may need recovery.
+- If a partition update was attempted, verify its layout before retrying. Never
+  shrink a partition as a recovery step.
 
-    tar -xzf exfat-resize-X.Y.Z-macos-arm64.tar.gz
-    cd exfat-resize-X.Y.Z-macos-arm64
+See [Recovery after failure](docs/CLI.md#recovery-after-failure) for the full
+instructions, including Windows partition failures.
 
-On Linux x86-64, compare and extract with (replace `x86_64` with `arm64` for
-ARM64):
+## Documentation
 
-    sha256sum exfat-resize-X.Y.Z-linux-x86_64.tar.gz
-    tar -xzf exfat-resize-X.Y.Z-linux-x86_64.tar.gz
-    cd exfat-resize-X.Y.Z-linux-x86_64
-
-Replace `X.Y.Z` with the release version. From the extracted directory on
-either platform, install the CLI, manual page, and documentation with:
-
-    sudo ./install.sh
-
-The installer defaults to `/usr/local`. To use another absolute prefix, set
-`PREFIX`; elevated privileges are unnecessary when the destination is writable:
-
-    PREFIX=/your/prefix ./install.sh
-
-Use the same prefix and the `uninstall.sh` from the same release to remove the
-installed files:
-
-    sudo ./uninstall.sh
-
-For a custom prefix, remove it with:
-
-    PREFIX=/your/prefix ./uninstall.sh
-
-Apple does not support attaching a notarization ticket directly to a standalone
-command-line executable. A Mac therefore needs network access when Gatekeeper
-first checks a newly downloaded copy of the macOS binary.
-
-### Windows
-
-GitHub Releases provide a self-contained x86-64 Windows CLI archive. The
-executable is built with MSVC's C runtime linked statically, so it does not
-require a separate Visual C++ Redistributable installation.
-
-Download `exfat-resize-X.Y.Z-windows-x86_64.zip` from the corresponding
-[GitHub Release](https://github.com/huven/exfat-resize/releases). GitHub displays
-an immutable SHA-256 digest beside the asset; compare it with the `Hash` shown
-by PowerShell:
-
-    Get-FileHash exfat-resize-X.Y.Z-windows-x86_64.zip -Algorithm SHA256
-
-Replace `X.Y.Z` with the release version, then extract the archive and run the
-CLI from the extracted directory:
-
-    Expand-Archive exfat-resize-X.Y.Z-windows-x86_64.zip -DestinationPath .
-    cd exfat-resize-X.Y.Z-windows-x86_64
-    .\exfat-resize.exe --version
-
-The archive also contains the license, this README, the contribution guide,
-and the resize-transaction and partition-growth documentation. Resizing an
-image file normally does not require elevation. To access a logical volume or
-grow its partition, open PowerShell or Command Prompt as Administrator, change
-to the extracted directory, and follow [Windows usage](#windows).
-
-## Contributing
-
-See [Contributing](CONTRIBUTING.md) for the development setup, test suites,
-sanitizer and release checks, and source conventions.
+- [Installation](docs/INSTALLING.md): downloads, source builds, custom prefixes,
+  and uninstalling.
+- [CLI reference](docs/CLI.md): options, supported targets, compatibility,
+  Windows partition operations, and recovery. For a command summary, run
+  `exfat-resize --help`; on Linux and macOS, use `man exfat-resize` for the manual.
+- [Partition resizing](docs/PARTITIONING.md): changing the containing partition
+  with external tools.
+- [C library](docs/LIBRARY.md): embedding the portable C11 library and CMake
+  integration.
+- [Resize transaction](docs/TRANSACTION.md): implementation, durability, and
+  memory requirements.
+- [Contributing](CONTRIBUTING.md): development setup and tests.

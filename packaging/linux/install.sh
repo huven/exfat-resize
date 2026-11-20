@@ -36,6 +36,9 @@ if [ -f "$archive_directory/LICENSE-musl" ]; then
 	rm -f "$install_root/share/doc/exfat-resize/LICENSE.musl"
 fi
 install -m 0644 "$archive_directory/README.md" "$install_root/share/doc/exfat-resize/README.md"
+install -m 0644 "$archive_directory/docs/CLI.md" "$install_root/share/doc/exfat-resize/docs/CLI.md"
+install -m 0644 "$archive_directory/docs/INSTALLING.md" \
+	"$install_root/share/doc/exfat-resize/docs/INSTALLING.md"
 install -m 0644 "$archive_directory/docs/LIBRARY.md" \
 	"$install_root/share/doc/exfat-resize/docs/LIBRARY.md"
 install -m 0644 "$archive_directory/docs/PARTITIONING.md" \

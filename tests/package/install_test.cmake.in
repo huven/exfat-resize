@@ -21,6 +21,8 @@ set(documentation_dir "${install_prefix}/@CMAKE_INSTALL_DOCDIR@")
 set(contributing "${documentation_dir}/CONTRIBUTING.md")
 set(readme "${documentation_dir}/README.md")
 set(license "${documentation_dir}/LICENSE")
+set(cli_document "${documentation_dir}/docs/CLI.md")
+set(installation_document "${documentation_dir}/docs/INSTALLING.md")
 set(library_document "${documentation_dir}/docs/LIBRARY.md")
 set(partitioning_document "${documentation_dir}/docs/PARTITIONING.md")
 set(transaction_document "${documentation_dir}/docs/TRANSACTION.md")
@@ -65,6 +67,8 @@ foreach(required_file
         "${contributing}"
         "${readme}"
         "${license}"
+        "${cli_document}"
+        "${installation_document}"
         "${library_document}"
         "${partitioning_document}"
         "${transaction_document}"
@@ -107,6 +111,8 @@ foreach(required_file
         "${development_documentation_dir}/CONTRIBUTING.md"
         "${development_documentation_dir}/README.md"
         "${development_documentation_dir}/LICENSE"
+        "${development_documentation_dir}/docs/CLI.md"
+        "${development_documentation_dir}/docs/INSTALLING.md"
         "${development_documentation_dir}/docs/LIBRARY.md"
         "${development_documentation_dir}/docs/PARTITIONING.md"
         "${development_documentation_dir}/docs/TRANSACTION.md"
@@ -153,7 +159,7 @@ if("@EXFAT_RESIZE_INSTALL_MANPAGE@")
             "reports each transaction stage"
             "terminates abnormally without printing stage-specific"
             "restore the verified backup"
-            "README.md"
+            "docs/CLI.md"
             "docs/TRANSACTION.md"
             "allocator-backed working-memory requirements"
             "Conform to exFAT revision 1.00"
@@ -172,33 +178,54 @@ endif()
 
 file(READ "${readme}" readme_contents)
 foreach(required_text
-        "## Safety"
-        "Make and verify a backup"
-        "run an appropriate exFAT filesystem checker"
-        "ensure the check completes successfully"
-        "is not a general filesystem checker"
-        "Every normal error exit prints stage-specific recovery guidance"
-        "Ctrl-C requests cooperative cancellation"
-        "Ctrl+Break request the same cooperative cancellation"
-        "exits with status 130"
-        "reports each transaction stage"
-        "terminates abnormally without printing stage-specific"
-        "do not retry the resize"
-        "restore the verified backup"
-        "## Filesystem compatibility"
-        "exfat-resize --grow-partition device size"
-        "exfat-resize --shrink-partition device size"
-        "Conform to exFAT revision 1.00"
-        "Vendor Allocation directory entries"
+        "## Before you resize"
+        "backup"
+        "unmounted"
+        "restore"
+        "--grow-partition"
+        "--shrink-partition"
+        "docs/CLI.md"
+        "docs/INSTALLING.md"
         "docs/PARTITIONING.md"
         "docs/LIBRARY.md"
-        "docs/TRANSACTION.md#memory-requirements"
-        "exfat_resize(&device, target_size, &allocator, NULL, &stage)"
-        "compatible 2.x release"
+        "docs/TRANSACTION.md"
 )
     string(FIND "${readme_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
         message(FATAL_ERROR "Installed README does not contain: ${required_text}")
+    endif()
+endforeach()
+
+file(READ "${cli_document}" cli_contents)
+foreach(required_text
+        "## Safety"
+        "## Filesystem compatibility"
+        "## Recovery after failure"
+        "--grow-partition"
+        "--shrink-partition"
+        "verified backup"
+        "130"
+        "Vendor Allocation"
+)
+    string(FIND "${cli_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR "Installed CLI reference does not contain: ${required_text}")
+    endif()
+endforeach()
+
+file(READ "${installation_document}" installation_contents)
+foreach(required_text
+        "## Linux"
+        "## macOS"
+        "## Windows"
+        "## Build from source"
+        "SHA-256"
+        "install.sh"
+        "uninstall.sh"
+)
+    string(FIND "${installation_contents}" "${required_text}" required_text_offset)
+    if(required_text_offset EQUAL -1)
+        message(FATAL_ERROR "Installed installation guide does not contain: ${required_text}")
     endif()
 endforeach()
 
@@ -229,32 +256,30 @@ foreach(required_text
     endif()
 endforeach()
 
-string(REGEX MATCHALL "\\[[^]]*\\]\\([^)]+\\)" library_links "${library_contents}")
-foreach(library_link IN LISTS library_links)
-    string(REGEX REPLACE "^.*\\(([^)]+)\\)$" "\\1" link_target "${library_link}")
-    if(link_target MATCHES "^(#|[A-Za-z][A-Za-z0-9+.-]*:|/)")
-        continue()
-    endif()
-    string(REGEX REPLACE "#.*$" "" link_path "${link_target}")
-    if(NOT EXISTS "${documentation_dir}/docs/${link_path}")
-        message(FATAL_ERROR
-            "Installed library-reference link does not resolve: ${link_target}"
-        )
-    endif()
-endforeach()
-
-string(REGEX MATCHALL "\\[[^]]*\\]\\([^)]+\\)" readme_links "${readme_contents}")
-foreach(readme_link IN LISTS readme_links)
-    string(REGEX REPLACE "^.*\\(([^)]+)\\)$" "\\1" link_target "${readme_link}")
-    if(link_target MATCHES "^(#|[A-Za-z][A-Za-z0-9+.-]*:|/)")
-        continue()
-    endif()
-    string(REGEX REPLACE "#.*$" "" link_path "${link_target}")
-    if(NOT EXISTS "${documentation_dir}/${link_path}")
-        message(FATAL_ERROR
-            "Installed README link does not resolve: ${link_target}"
-        )
-    endif()
+foreach(document IN ITEMS
+        "${contributing}"
+        "${readme}"
+        "${cli_document}"
+        "${installation_document}"
+        "${library_document}"
+        "${partitioning_document}"
+        "${transaction_document}"
+)
+    file(READ "${document}" document_contents)
+    get_filename_component(document_directory "${document}" DIRECTORY)
+    string(REGEX MATCHALL "\\[[^]]*\\]\\([^)]+\\)" document_links "${document_contents}")
+    foreach(document_link IN LISTS document_links)
+        string(REGEX REPLACE "^.*\\(([^)]+)\\)$" "\\1" link_target "${document_link}")
+        if(link_target MATCHES "^(#|[A-Za-z][A-Za-z0-9+.-]*:|/)")
+            continue()
+        endif()
+        string(REGEX REPLACE "#.*$" "" link_path "${link_target}")
+        if(NOT EXISTS "${document_directory}/${link_path}")
+            message(FATAL_ERROR
+                "Installed documentation link does not resolve in ${document}: ${link_target}"
+            )
+        endif()
+    endforeach()
 endforeach()
 
 file(READ "${partitioning_document}" partitioning_contents)
@@ -265,7 +290,7 @@ foreach(required_text
         "--shrink-partition"
         "## growpart"
         "growpart --dry-run /dev/sdX PARTITION_NUMBER"
-        "## GParted Live"
+        "## GNU Parted in a live environment"
         "resizepart PARTITION_NUMBER NEW_END_SECTOR"
         "## Other architectures"
         "Debian installer rescue mode"
