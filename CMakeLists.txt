@@ -147,6 +147,7 @@ add_library(
         lib/event.c
         lib/geometry.c
         lib/grow.c
+        lib/messages.c
         lib/resize.c
         lib/sector_adapter.c
         lib/shrink.c

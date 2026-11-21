@@ -110,6 +110,15 @@ add_test(
 )
 set_tests_properties(cli.cancellation PROPERTIES LABELS cli)
 
+add_test(
+    NAME cli.diagnostics
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:exfat_resize_cli_cancellation_test>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/diagnostics-test.cmake"
+)
+set_tests_properties(cli.diagnostics PROPERTIES LABELS cli)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_library(
         exfat_resize_windows_entry_test_object

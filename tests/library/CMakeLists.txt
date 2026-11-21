@@ -34,6 +34,21 @@ exfat_resize_add_library_test(
 )
 
 exfat_resize_add_library_test(
+    exfat_resize_message_tests
+    library.messages
+    unit/message_tests.c
+)
+
+exfat_resize_add_library_test(
+    exfat_resize_diagnostic_tests
+    library.diagnostics
+    support/exfat_fixture.c
+    support/memory_block_device.c
+    support/test_allocator.c
+    integration/diagnostic_tests.c
+)
+
+exfat_resize_add_library_test(
     exfat_resize_boot_region_tests
     library.boot_region
     support/memory_block_device.c

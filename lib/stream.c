@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include "checked_math.h"
+#include "event.h"
 #include "resize_internal.h"
 #include "stream.h"
 #include "volume.h"
@@ -29,7 +30,8 @@ enum exfat_resize_error exfat_resize_stream_cluster_count(
 	return EXFAT_RESIZE_SUCCESS;
 }
 
-static enum exfat_resize_error next_stream_cluster(struct stream_cursor *cursor)
+static enum exfat_resize_error next_stream_cluster(
+    struct resize_volume *volume, struct stream_cursor *cursor)
 {
 	enum exfat_resize_error error;
 	uint32_t next;
@@ -43,8 +45,12 @@ static enum exfat_resize_error next_stream_cluster(struct stream_cursor *cursor)
 	}
 	if (!cursor->no_fat_chain) {
 		if (next == EXFAT_FAT_END_OF_CHAIN) {
-			if (!cursor->root_directory && cursor->remaining_bytes != 0)
+			if (!cursor->root_directory && cursor->remaining_bytes != 0) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID,
+				    cursor->current_cluster, next, EXFAT_RESIZE_CHAIN_EARLY_END);
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
 			cursor->exhausted = 1;
 			return EXFAT_RESIZE_SUCCESS;
 		}
@@ -52,8 +58,16 @@ static enum exfat_resize_error next_stream_cluster(struct stream_cursor *cursor)
 
 	++cursor->traversed_clusters;
 	if (cursor->traversed_clusters >= cursor->geometry->cluster_count ||
-	    !exfat_resize_cluster_is_valid(cursor->geometry, next))
+	    !exfat_resize_cluster_is_valid(cursor->geometry, next)) {
+		/* Contiguous allocations are range-checked before any payload is read. */
+		if (!cursor->no_fat_chain)
+			exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+			    EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID, cursor->current_cluster, next,
+			    cursor->traversed_clusters >= cursor->geometry->cluster_count
+			        ? EXFAT_RESIZE_CHAIN_LENGTH_LIMIT
+			        : EXFAT_RESIZE_CHAIN_INVALID_LINK);
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
 	cursor->current_cluster = next;
 	cursor->cluster_offset = 0;
 	return EXFAT_RESIZE_SUCCESS;
@@ -97,7 +111,7 @@ static enum exfat_resize_error advance_stream_cursor(
 		return EXFAT_RESIZE_SUCCESS;
 	}
 	if (cursor->cluster_offset == volume->cluster_size) {
-		error = next_stream_cluster(cursor);
+		error = next_stream_cluster(volume, cursor);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 	}
