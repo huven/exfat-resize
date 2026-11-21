@@ -235,8 +235,120 @@ zero. Shrink cancellation may instead terminate at `SOURCE_READY`, whose
 retain their meanings; stage values are not an ordinal progress scale.
 Calls rejected by the initial structural argument validation emit no
 events. Target and filesystem validation that requires device I/O occurs
-after `PREFLIGHT` is reported. Failures emit only the stages reached before
-return.
+after `PREFLIGHT` is reported. A failure reports the stages reached before
+return and may report a detailed diagnostic as described below. Successful
+stage reporting and recovery boundaries are unchanged.
+
+### Failure diagnostics
+
+Allocation, FAT-chain, and directory validation report the first failing
+check at `EXFAT_RESIZE_EVENT_LEVEL_ERROR`. The library stops at that failure;
+it does not continue scanning to collect all problems. A covered check emits
+one diagnostic where the cause is known, without repeating it as the error
+propagates. Diagnostics add no allocation, device access, or cancellation
+polling. A cancellation request made from the event callback does not replace
+the concrete failure. The returned error and recovery stage remain authoritative.
+
+Not every failure has a detailed event. Boot-region validation, I/O failures,
+allocation failures, and other results may still be described only by the
+returned error and stage.
+
+The following names omit the common `EXFAT_RESIZE_EVENT_CODE_` prefix.
+Unused values are zero.
+
+| Code | `values[0]` | `values[1]` | `values[2]` |
+| --- | --- | --- | --- |
+| `UNREFERENCED_CLUSTER` | Allocated cluster with no recognized owner | Raw FAT value | Zero |
+| `REFERENCED_CLUSTER_MARKED_FREE` | Referenced cluster marked free in the bitmap | Zero | Zero |
+| `BAD_CLUSTER_MARKED_FREE` | FAT-marked bad cluster marked free in the bitmap | Zero | Zero |
+| `CLUSTER_ALREADY_REFERENCED` | Cluster claimed more than once | Stream's first cluster | Zero-based cluster index within that stream |
+| `FAT_CHAIN_INVALID` | Current cluster | Observed next-cluster/FAT value | Chain reason below |
+| `ALLOCATION_STREAM_INVALID` | Stream's first cluster | Declared data length in bytes | Stream reason below |
+| `DIRECTORY_ENTRY_INVALID` | Containing directory's first cluster | Logical primary-entry offset in bytes | Directory reason below |
+| `DIRECTORY_ENTRY_UNSUPPORTED` | Containing directory's first cluster | Logical primary-entry offset in bytes | Raw unsupported entry type |
+| `BITMAP_MISSING` | Root directory's first cluster | Zero | Zero |
+| `BITMAP_TOO_SHORT` | Bitmap's first cluster | Declared length in bytes | Required length in bytes |
+| `RESERVED_FAT_ENTRY_INVALID` | Reserved FAT entry index | Raw FAT value | Zero |
+
+Cluster numbers refer to the filesystem view being checked. During preflight,
+they use the original filesystem's numbering, even when growth uses a remapped
+in-memory ownership model. Directory rewriting uses the view being rewritten.
+A directory-entry offset is relative to the logical start of that directory,
+not a physical device offset; for an entry set it identifies the primary entry.
+Raw FAT values and entry types are unsigned values, conventionally displayed
+in hexadecimal. A repeated cluster claim can indicate a loop, shared directory,
+or cross-link; it does not identify both owners. A bad-cluster marker is a FAT
+observation, not a new physical-media diagnosis.
+
+Reason identifiers are permanent, extensible numeric values. Applications must
+tolerate unknown reasons as well as unknown event codes. The following names
+omit each family's common prefix:
+
+| Family and prefix | Reason | Meaning |
+| --- | --- | --- |
+| Chain: `EXFAT_RESIZE_CHAIN_` | `EARLY_END` | End-of-chain occurs before the declared allocation ends |
+| | `INVALID_LINK` | A FAT link is not a valid cluster or permitted end marker |
+| | `MISSING_END` | The declared allocation ends without an end-of-chain marker |
+| | `LENGTH_LIMIT` | Traversal exceeds the permitted chain length |
+| Stream: `EXFAT_RESIZE_STREAM_` | `EMPTY_WITH_CLUSTER` | An empty stream has a nonzero first cluster |
+| | `INVALID_FIRST_CLUSTER` | The first cluster is outside the cluster heap |
+| | `CONTIGUOUS_RANGE` | A contiguous allocation extends outside the cluster heap |
+| | `LENGTH_EXCEEDS_VOLUME` | The declared allocation requires more clusters than the volume contains |
+| Directory: `EXFAT_RESIZE_DIRECTORY_` | `CHECKSUM` | The entry-set checksum does not match |
+| | `SECONDARY_COUNT` | The file entry has an invalid secondary-entry count |
+| | `TRUNCATED_SET` | The directory ends before a complete entry or entry set can be read |
+| | `ENTRY_ORDER` | A secondary entry is missing, misplaced, or duplicated |
+| | `ENTRY_FLAGS` | Entry allocation flags are inconsistent with its type |
+| | `VALID_LENGTH` | ValidDataLength exceeds DataLength |
+| | `LENGTH_MISMATCH` | A directory's ValidDataLength and DataLength differ |
+| | `TOO_LARGE` | A directory exceeds the supported exFAT directory-size limit |
+| | `EMPTY_NO_FAT_CHAIN` | An empty stream is marked NoFatChain |
+| | `MISPLACED_SYSTEM_ENTRY` | A root-only entry occurs in another directory |
+| | `DUPLICATE_BITMAP` | More than one allocation-bitmap entry is present |
+| | `SYSTEM_ALLOCATION` | A bitmap or upcase entry has an invalid allocation |
+| | `VOLUME_GUID` | A Volume GUID entry has an invalid location or structure |
+| | `UNEXPECTED_ENTRY` | An unexpected directory-entry type is present |
+| | `ALLOCATION_CHANGED` | A directory entry no longer matches the allocation expected for rewriting |
+
+### Formatting messages
+
+The library supplies default English descriptions for results and events:
+
+```c
+const char *exfat_resize_error_string(enum exfat_resize_error error);
+
+void exfat_resize_format_event(
+    const struct exfat_resize_event *event, char *buffer, size_t capacity);
+```
+
+`exfat_resize_error_string` returns an immutable string with static lifetime,
+or `"unknown error"` for an unknown value. Do not free or modify it.
+
+`exfat_resize_format_event` writes a message without an application prefix,
+severity prefix, device path, or trailing newline. A 256-byte buffer holds every
+complete message, including the terminating NUL, even for maximum numeric
+values and unknown codes or reasons. A smaller buffer receives a truncated,
+NUL-terminated message. `event` and `buffer` must be nonnull, and `capacity`
+must be greater than zero. The function has no return
+value and does not report truncation. Unknown codes or reasons produce a numeric
+fallback that preserves diagnostic context.
+
+Both helpers perform no allocation or device access, retain no caller state,
+and can be called concurrently or from `report_event`. For example:
+
+```c
+static void report_event(void *context, const struct exfat_resize_event *event)
+{
+    char message[256];
+    (void)context;
+    exfat_resize_format_event(event, message, sizeof(message));
+    /* Pass message and event->level to the application's logger. */
+}
+```
+
+Consumers may instead translate or present structured codes and values directly.
+Codes, reason identifiers, and payload meanings are the machine-readable
+contract; English wording may improve between releases and must not be parsed.
 
 ## Results and recovery stages
 

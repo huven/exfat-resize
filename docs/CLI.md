@@ -35,6 +35,25 @@ Run `exfat-resize --help` for a command summary. On macOS and Linux,
 During the operation, the CLI reports each transaction stage. After successful
 completion, it reports the resulting filesystem size in bytes.
 
+Allocation, FAT-chain, and directory validation failures also print a detailed
+diagnostic to standard error before the error summary and recovery guidance.
+These messages are enabled automatically; no verbose or debug option is needed.
+They identify the failed check and relevant cluster numbers or directory-entry
+location. Cluster numbers are decimal, directory-entry offsets are in bytes
+from the directory's logical start, and raw FAT values and entry types are hexadecimal.
+For example:
+
+```text
+exfat-resize: cluster 100 is allocated in the bitmap but has no recognized owner (FAT=0xffffffff)
+exfat-resize: resize failed: invalid or corrupt exFAT filesystem
+exfat-resize: no filesystem write was attempted; correct the error and retry when appropriate
+```
+
+The command stops at the first failed check; the diagnostic is not a complete
+filesystem-check report. Some failures, including boot validation, I/O, and
+memory allocation, retain their existing error messages. Always follow the
+recovery guidance, which depends on the stage reached.
+
 The command exits with status zero after success or after showing help or
 version information. It exits with status 130 when cancellation is observed
 before completion, or another nonzero status on an error.

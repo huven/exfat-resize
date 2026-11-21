@@ -3,6 +3,7 @@
 #include <exfat_resize.h>
 
 #include <cstdlib>
+#include <cstring>
 
 struct monitor_state {
 	int callback_count;
@@ -30,6 +31,11 @@ static int cancellation_requested(void *context)
 static void report_event(void *context, const exfat_resize_event *event)
 {
 	monitor_state *state = static_cast<monitor_state *>(context);
+	char message[256];
+
+	exfat_resize_format_event(event, message, sizeof(message));
+	if (message[0] == '\0')
+		return;
 
 	switch (event->code) {
 	case EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED:
@@ -65,7 +71,8 @@ int main()
 	report_event(&state, &unknown_event);
 	error = exfat_resize(nullptr, 1, &allocator, &monitor, &stage);
 	return error == EXFAT_RESIZE_INVALID_DEVICE && stage == EXFAT_RESIZE_STAGE_PREFLIGHT &&
-	        state.callback_count == 0 && state.unknown_event_count == 1
+	        state.callback_count == 0 && state.unknown_event_count == 1 &&
+	        std::strcmp(exfat_resize_error_string(error), "invalid block device") == 0
 	    ? 0
 	    : 1;
 }

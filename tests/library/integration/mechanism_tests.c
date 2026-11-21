@@ -256,6 +256,20 @@ static uint16_t checksum(const unsigned char *bytes, size_t count)
 	return value;
 }
 
+struct edit_diagnostic {
+	struct exfat_resize_event event;
+	size_t count;
+};
+
+static void capture_edit_diagnostic(void *context, const struct exfat_resize_event *event)
+{
+	struct edit_diagnostic *diagnostic = context;
+
+	CHECK(event->level == EXFAT_RESIZE_EVENT_LEVEL_ERROR);
+	diagnostic->event = *event;
+	++diagnostic->count;
+}
+
 static void test_targeted_edit_after_directory_move(void)
 {
 	struct test_volume test;
@@ -265,6 +279,7 @@ static void test_targeted_edit_after_directory_move(void)
 		.current = { .first_cluster = 50, .data_length = 512, .no_fat_chain = 1 } };
 	struct directory_access access;
 	struct allocation_stream replacement;
+	struct edit_diagnostic diagnostic = { 0 };
 	unsigned char original[512], expected[512], actual[512];
 	size_t attempts;
 	if (!initialize(&test)) {
@@ -310,15 +325,29 @@ static void test_targeted_edit_after_directory_move(void)
 	CHECK(memcmp(expected, actual, 512) == 0);
 	CHECK(exfat_fixture_read_sector(&test.fixture, sector_for(&test, 6), actual, 512) == 0);
 	CHECK(memcmp(original, actual, 512) == 0);
+	test.operation.monitor.context = &diagnostic;
+	test.operation.monitor.report_event = capture_edit_diagnostic;
 	memory_block_device_clear_operations(&test.fixture.memory);
 	CHECK(exfat_resize_edit_directory_allocation(&test.directory, &access, &owner->reference,
 	          &owner->stream, &replacement) == EXFAT_RESIZE_INVALID_FILESYSTEM);
+	CHECK(diagnostic.count == 1);
+	CHECK(diagnostic.event.code == EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID);
+	CHECK(diagnostic.event.values[0] == resolution.current.first_cluster);
+	CHECK(diagnostic.event.values[1] == owner->reference.entry_offset);
+	CHECK(diagnostic.event.values[2] == EXFAT_RESIZE_DIRECTORY_ALLOCATION_CHANGED);
+	CHECK(owner->reference.directory_id == resolution.identity);
 	no_publication(&test.fixture.memory);
 	expected[2] ^= 1;
 	OK(exfat_resize_write_volume(&test.volume, sector_for(&test, 50), 1, expected, 512));
 	memory_block_device_clear_operations(&test.fixture.memory);
 	CHECK(exfat_resize_edit_directory_allocation(&test.directory, &access, &owner->reference,
 	          &replacement, &replacement) == EXFAT_RESIZE_INVALID_FILESYSTEM);
+	CHECK(diagnostic.count == 2);
+	CHECK(diagnostic.event.code == EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID);
+	CHECK(diagnostic.event.values[0] == resolution.current.first_cluster);
+	CHECK(diagnostic.event.values[1] == owner->reference.entry_offset);
+	CHECK(diagnostic.event.values[2] == EXFAT_RESIZE_DIRECTORY_CHECKSUM);
+	CHECK(owner->reference.directory_id == resolution.identity);
 	no_publication(&test.fixture.memory);
 	destroy(&test);
 }

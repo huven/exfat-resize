@@ -2,6 +2,7 @@
 
 #include "cli.h"
 #include "device.h"
+#include "endian.h"
 #include "support/shrink_fixture.h"
 #include <errno.h>
 
@@ -15,11 +16,15 @@ enum cancellation_mode {
 	CANCEL_AFTER_OPEN,
 	CANCEL_AFTER_OPEN_DISMOUNT_FAILURE,
 	CANCEL_SHRINK,
-	CANCEL_SHRINK_CLEANUP_FAILURE
+	CANCEL_SHRINK_CLEANUP_FAILURE,
+	DIAGNOSTIC_ORPHAN,
+	DIAGNOSTIC_FAT_CHAIN,
+	DIAGNOSTIC_DIRECTORY_CHECKSUM
 };
 
 static enum cancellation_mode mode;
 static struct exfat_fixture shrink_fixture;
+static struct exfat_fixture diagnostic_fixture;
 static int shrink_cancelled;
 static int cancellation_calls;
 static int claim_active;
@@ -28,6 +33,49 @@ static int dismount_calls;
 static int close_calls;
 static int device_callback_calls;
 static int cleanup_order_valid = 1;
+
+static int initialize_diagnostic_fixture(void)
+{
+	unsigned char sector[512];
+	uint64_t sector_number;
+	uint32_t cluster;
+
+	if (exfat_fixture_initialize(&diagnostic_fixture, 65536) != 0)
+		return -1;
+	if (mode == DIAGNOSTIC_DIRECTORY_CHECKSUM) {
+		sector_number = exfat_fixture_cluster_sector(
+		    &diagnostic_fixture.geometry, diagnostic_fixture.geometry.root_directory_cluster);
+		if (exfat_fixture_read_sector(&diagnostic_fixture, sector_number, sector, sizeof(sector)) !=
+		    0)
+			return -1;
+		sector[64 + 5] ^= 1;
+	} else {
+		cluster = mode == DIAGNOSTIC_ORPHAN ? 9 : diagnostic_fixture.bitmap_clusters[0];
+		sector_number = diagnostic_fixture.geometry.fat_offset + cluster * 4 / sizeof(sector);
+		if (exfat_fixture_read_sector(&diagnostic_fixture, sector_number, sector, sizeof(sector)) !=
+		        0 ||
+		    exfat_resize_store_le32(sector, sizeof(sector), cluster * 4 % sizeof(sector),
+		        UINT32_C(0xffffffff)) != EXFAT_RESIZE_SUCCESS)
+			return -1;
+	}
+	if (diagnostic_fixture.memory.device.write(
+	        diagnostic_fixture.memory.device.context, sector_number, 1, sector) != 0)
+		return -1;
+	if (mode == DIAGNOSTIC_ORPHAN) {
+		const unsigned int bit = 9 - 2;
+		sector_number = exfat_fixture_cluster_sector(
+		    &diagnostic_fixture.geometry, diagnostic_fixture.bitmap_clusters[0]);
+		if (exfat_fixture_read_sector(&diagnostic_fixture, sector_number, sector, sizeof(sector)) !=
+		    0)
+			return -1;
+		sector[bit / 8] |= (unsigned char)(1u << (bit % 8));
+		if (diagnostic_fixture.memory.device.write(
+		        diagnostic_fixture.memory.device.context, sector_number, 1, sector) != 0)
+			return -1;
+	}
+	memory_block_device_clear_operations(&diagnostic_fixture.memory);
+	return 0;
+}
 
 static int block_read(void *context, uint64_t first_sector, uint32_t sector_count, void *buffer)
 {
@@ -69,6 +117,12 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 	(void)error_size;
 	++open_calls;
 	claim_active = 1;
+	if (mode >= DIAGNOSTIC_ORPHAN) {
+		if (initialize_diagnostic_fixture() != 0)
+			return -1;
+		device->block_device = diagnostic_fixture.memory.device;
+		return 0;
+	}
 	if (mode == CANCEL_SHRINK || mode == CANCEL_SHRINK_CLEANUP_FAILURE) {
 		if (shrink_fixture_initialize(&shrink_fixture, 1) != 0)
 			return -1;
@@ -203,8 +257,7 @@ int main(int argc, char **argv)
 	int status;
 
 	if (argc != 2) {
-		fprintf(
-		    stderr, "usage: cli-cancellation before-open|after-open|after-open-dismount-failure\n");
+		fprintf(stderr, "usage: cli-cancellation MODE (cancellation or diagnostic case)\n");
 		return EXIT_FAILURE;
 	}
 	if (strcmp(argv[1], "before-open") == 0)
@@ -217,17 +270,27 @@ int main(int argc, char **argv)
 		mode = CANCEL_SHRINK;
 	else if (strcmp(argv[1], "shrink-cleanup-failure") == 0)
 		mode = CANCEL_SHRINK_CLEANUP_FAILURE;
+	else if (strcmp(argv[1], "diagnostic-orphan") == 0)
+		mode = DIAGNOSTIC_ORPHAN;
+	else if (strcmp(argv[1], "diagnostic-fat-chain") == 0)
+		mode = DIAGNOSTIC_FAT_CHAIN;
+	else if (strcmp(argv[1], "diagnostic-directory-checksum") == 0)
+		mode = DIAGNOSTIC_DIRECTORY_CHECKSUM;
 	else
 		return EXIT_FAILURE;
 	if (mode == CANCEL_SHRINK || mode == CANCEL_SHRINK_CLEANUP_FAILURE)
 		cli_argv[2] = "1077248";
+	if (mode >= DIAGNOSTIC_ORPHAN)
+		cli_argv[2] = "33554432";
 	status = cli_main(3, cli_argv, &cancellation);
 	if (status !=
-	        (mode == CANCEL_SHRINK_CLEANUP_FAILURE ? EXIT_FAILURE : CLI_CANCELLED_EXIT_STATUS) ||
+	        (mode == CANCEL_SHRINK_CLEANUP_FAILURE || mode >= DIAGNOSTIC_ORPHAN
+	                ? EXIT_FAILURE
+	                : CLI_CANCELLED_EXIT_STATUS) ||
 	    cancellation_calls == 0 || claim_active || device_callback_calls != 0 ||
 	    !cleanup_order_valid) {
 		fprintf(stderr, "cancellation did not follow the expected error path\n");
-		return EXIT_FAILURE;
+		return mode >= DIAGNOSTIC_ORPHAN ? 2 : EXIT_FAILURE;
 	}
 	if (mode == CANCEL_BEFORE_OPEN &&
 	    (open_calls != 0 || dismount_calls != 0 || close_calls != 0)) {
@@ -237,7 +300,7 @@ int main(int argc, char **argv)
 	if (mode != CANCEL_BEFORE_OPEN &&
 	    (open_calls != 1 || dismount_calls != 1 || close_calls != 1)) {
 		fprintf(stderr, "post-open cancellation did not perform normal cleanup\n");
-		return EXIT_FAILURE;
+		return mode >= DIAGNOSTIC_ORPHAN ? 2 : EXIT_FAILURE;
 	}
 	if (mode == CANCEL_SHRINK || mode == CANCEL_SHRINK_CLEANUP_FAILURE) {
 		if (mode == CANCEL_SHRINK &&
@@ -246,6 +309,19 @@ int main(int argc, char **argv)
 			return EXIT_FAILURE;
 		if (exfat_fixture_destroy(&shrink_fixture) != 0)
 			return EXIT_FAILURE;
+	}
+	if (mode >= DIAGNOSTIC_ORPHAN) {
+		size_t i;
+		if (diagnostic_fixture.memory.operation_count == 0)
+			return 2;
+		for (i = 0; i < diagnostic_fixture.memory.operation_count; ++i) {
+			if (diagnostic_fixture.memory.operations[i].kind != MEMORY_OPERATION_READ) {
+				fprintf(stderr, "diagnostic preflight modified the filesystem\n");
+				return 2;
+			}
+		}
+		if (exfat_fixture_destroy(&diagnostic_fixture) != 0)
+			return 2;
 	}
 	return status;
 }
