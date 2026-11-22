@@ -107,59 +107,6 @@ static void print_help(void)
 	    documentation_lead, platform_note);
 }
 
-static const char *resize_error(enum exfat_resize_error error)
-{
-	switch (error) {
-	case EXFAT_RESIZE_SUCCESS:
-		return "success";
-	case EXFAT_RESIZE_INVALID_ARGUMENT:
-		return "invalid argument";
-	case EXFAT_RESIZE_INVALID_DEVICE:
-		return "invalid block device";
-	case EXFAT_RESIZE_INVALID_FILESYSTEM:
-		return "invalid or corrupt exFAT filesystem";
-	case EXFAT_RESIZE_OUT_OF_BOUNDS:
-		return "request is outside the backing device";
-	case EXFAT_RESIZE_ARITHMETIC_OVERFLOW:
-		return "filesystem geometry is too large";
-	case EXFAT_RESIZE_IO_ERROR:
-		return "device I/O error";
-	case EXFAT_RESIZE_INSUFFICIENT_WORKSPACE:
-		return "working memory is too small";
-	case EXFAT_RESIZE_INTERNAL_ERROR:
-		return "internal error";
-	case EXFAT_RESIZE_OUT_OF_MEMORY:
-		return "cannot allocate working memory";
-	case EXFAT_RESIZE_UNSUPPORTED_REVISION:
-		return "unsupported exFAT revision";
-	case EXFAT_RESIZE_UNSUPPORTED_MULTIPLE_FATS:
-		return "multiple FATs are not supported";
-	case EXFAT_RESIZE_VOLUME_DIRTY:
-		return "filesystem is marked dirty";
-	case EXFAT_RESIZE_MEDIA_FAILURE:
-		return "filesystem has the media-failure flag set";
-	case EXFAT_RESIZE_INSUFFICIENT_GROWTH:
-		return "target does not add enough usable clusters";
-	case EXFAT_RESIZE_CLUSTER_LIMIT_REACHED:
-		return "filesystem has reached the exFAT cluster limit";
-	case EXFAT_RESIZE_UNSUPPORTED_VENDOR_ALLOCATION:
-		return "filesystem contains a Vendor Allocation entry";
-	case EXFAT_RESIZE_UNSUPPORTED_CRITICAL_ENTRY:
-		return "filesystem contains an unsupported critical directory entry";
-	case EXFAT_RESIZE_UNSUPPORTED_ALLOCATED_ENTRY:
-		return "filesystem contains unsupported allocated directory metadata";
-	case EXFAT_RESIZE_BAD_CLUSTER_CONFLICT:
-		return "expanded FAT conflicts with a source bad cluster";
-	case EXFAT_RESIZE_UNSUPPORTED_SECTOR_MAPPING:
-		return "filesystem sector size is incompatible with device sector size";
-	case EXFAT_RESIZE_INSUFFICIENT_SHRINK_SPACE:
-		return "target cannot hold current allocations, including the full allocation bitmap";
-	case EXFAT_RESIZE_CANCELLED:
-		return "operation cancelled";
-	}
-	return "unknown error";
-}
-
 static void *allocate_memory(void *context, size_t size)
 {
 	(void)context;
@@ -316,37 +263,19 @@ static int monitor_cancellation_requested(void *opaque)
 static void report_resize_event(void *opaque, const struct exfat_resize_event *event)
 {
 	const struct cli_monitor_context *context = opaque;
+	char message[256];
+	FILE *output;
 
-	if (event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED) {
-		switch (event->values[0]) {
-		case EXFAT_RESIZE_STAGE_PREFLIGHT:
-			printf("exfat-resize: checking filesystem\n");
-			goto flush;
-		case EXFAT_RESIZE_STAGE_PREPARING:
-			printf("exfat-resize: preparing resize\n");
-			goto flush;
-		case EXFAT_RESIZE_STAGE_RESIZING:
-			printf("exfat-resize: resizing filesystem\n");
-			goto flush;
-		case EXFAT_RESIZE_STAGE_FINALIZING:
-			printf("exfat-resize: finalizing resize\n");
-			goto flush;
-		case EXFAT_RESIZE_STAGE_SOURCE_READY:
-			printf("exfat-resize: cancelled; clean filesystem remains at %" PRIu64 " bytes\n",
-			    event->values[1]);
-			goto flush;
-		case EXFAT_RESIZE_STAGE_COMPLETED:
-			printf(
-			    "exfat-resize: resized %s to %" PRIu64 " bytes\n", context->path, event->values[1]);
-			goto flush;
-		}
+	output = event->level >= EXFAT_RESIZE_EVENT_LEVEL_WARNING ? stderr : stdout;
+	if (event->code == EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED &&
+	    event->values[0] == EXFAT_RESIZE_STAGE_COMPLETED) {
+		fprintf(output, "exfat-resize: resized %s to %" PRIu64 " bytes\n", context->path,
+		    event->values[1]);
+	} else {
+		exfat_resize_format_event(event, message, sizeof(message));
+		fprintf(output, "exfat-resize: %s\n", message);
 	}
-	printf("exfat-resize: event level=%d code=%" PRIu32 " values=[%" PRIu64 ", %" PRIu64
-	       ", %" PRIu64 "]\n",
-	    (int)event->level, event->code, event->values[0], event->values[1], event->values[2]);
-
-flush:
-	(void)fflush(stdout);
+	(void)fflush(output);
 }
 
 static void print_recovery_guidance(
@@ -391,7 +320,7 @@ static void print_resize_failure(const struct device *device,
 	if (result == EXFAT_RESIZE_CANCELLED)
 		fprintf(stderr, "exfat-resize: interrupted by user\n");
 	else
-		fprintf(stderr, "exfat-resize: resize failed: %s\n", resize_error(result));
+		fprintf(stderr, "exfat-resize: resize failed: %s\n", exfat_resize_error_string(result));
 	if (result == EXFAT_RESIZE_IO_ERROR && device->io_error_operation != NULL)
 		print_device_io_error(device, path);
 	print_recovery_guidance(stage, partition_state);
@@ -542,7 +471,7 @@ int cli_main(int argc, char **argv, const struct cli_cancellation *cancellation)
 		result = validate_partition_growth_preflight(&device.block_device, target, &target);
 		if (result != EXFAT_RESIZE_SUCCESS) {
 			fprintf(stderr, "exfat-resize: cannot grow partition: preflight failed: %s\n",
-			    resize_error(result));
+			    exfat_resize_error_string(result));
 			if (result == EXFAT_RESIZE_IO_ERROR && device.io_error_operation != NULL)
 				print_device_io_error(&device, positional[0]);
 			print_no_write_guidance();

@@ -7,6 +7,7 @@
 #include "boot_region.h"
 #include "checked_math.h"
 #include "directory.h"
+#include "event.h"
 #include "geometry.h"
 #include "grow.h"
 #include "resize_internal.h"
@@ -137,6 +138,13 @@ static enum exfat_resize_error claim_growth_stream(
 	context->keep_no_fat_chain = 0;
 	if (stream->no_fat_chain) {
 		error = exfat_resize_stream_cluster_count(context->volume->cluster_size, stream, &count);
+		if (error == EXFAT_RESIZE_OUT_OF_BOUNDS) {
+			exfat_resize_report_event(&context->volume->operation->monitor,
+			    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID,
+			    stream->first_cluster, stream->data_length,
+			    EXFAT_RESIZE_STREAM_LENGTH_EXCEEDS_VOLUME);
+			return error;
+		}
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		context->keep_no_fat_chain =
@@ -154,8 +162,12 @@ static enum exfat_resize_error observe_growth_allocation(void *opaque,
 	struct grow_context *context = opaque;
 	(void)is_directory;
 	if (owner->kind == DIRECTORY_OWNER_BITMAP) {
-		if (context->allocation.old_bitmap.first_cluster != 0)
+		if (context->allocation.old_bitmap.first_cluster != 0) {
+			exfat_resize_report_event(&context->volume->operation->monitor,
+			    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID,
+			    owner->directory_id, owner->entry_offset, EXFAT_RESIZE_DIRECTORY_DUPLICATE_BITMAP);
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
+		}
 		context->allocation.old_bitmap = *stream;
 	}
 	return claim_growth_stream(context, stream);
@@ -314,8 +326,12 @@ static enum exfat_resize_error prepare_growth(
 	error = exfat_resize_scan_directory_tree(&context->directory, &root, &scan);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	if (context->allocation.old_bitmap.first_cluster == 0)
+	if (context->allocation.old_bitmap.first_cluster == 0) {
+		exfat_resize_report_event(&context->volume->operation->monitor,
+		    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_BITMAP_MISSING,
+		    root.first_cluster, 0, 0);
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
 	error = exfat_resize_reconcile_allocation(context->volume, context->plan.source, &scan.chain,
 	    &context->allocation.old_bitmap, &context->observer);
 	if (error != EXFAT_RESIZE_SUCCESS)

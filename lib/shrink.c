@@ -7,6 +7,7 @@
 #include "boot_region.h"
 #include "directory.h"
 #include "endian.h"
+#include "event.h"
 #include "resize_internal.h"
 #include "shrink.h"
 #include "volume.h"
@@ -158,8 +159,12 @@ static enum exfat_resize_error observe(void *opaque,
 			return error;
 	}
 	if (owner->kind == DIRECTORY_OWNER_BITMAP) {
-		if (context->bitmap_index != SIZE_MAX)
+		if (context->bitmap_index != SIZE_MAX) {
+			exfat_resize_report_event(&context->volume->operation->monitor,
+			    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID,
+			    owner->directory_id, owner->entry_offset, EXFAT_RESIZE_DIRECTORY_DUPLICATE_BITMAP);
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
+		}
 		context->bitmap_index = context->observed_index;
 	}
 	return exfat_resize_visit_allocation(
@@ -222,8 +227,11 @@ static enum exfat_resize_error prepare(struct shrink_context *context, uint64_t 
 	error = exfat_resize_scan_directory_tree(&context->directory, &root, &scan);
 	if (error != EXFAT_RESIZE_SUCCESS)
 		return error;
-	if (context->bitmap_index == SIZE_MAX)
+	if (context->bitmap_index == SIZE_MAX) {
+		exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+		    EXFAT_RESIZE_EVENT_CODE_BITMAP_MISSING, root.first_cluster, 0, 0);
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
 	error = exfat_resize_reconcile_allocation(volume, &volume->geometry, &scan.chain,
 	    &stream_at(context, context->bitmap_index)->allocation, &context->observer);
 	if (error != EXFAT_RESIZE_SUCCESS)

@@ -103,6 +103,48 @@ enum exfat_resize_event_level {
 /* Reports entry into the stage stored in values[0]. */
 #define EXFAT_RESIZE_EVENT_CODE_STAGE_ENTERED UINT32_C(1)
 
+/* Fatal diagnostics; payloads and reason identifiers are documented in docs/LIBRARY.md. */
+#define EXFAT_RESIZE_EVENT_CODE_UNREFERENCED_CLUSTER UINT32_C(2)
+#define EXFAT_RESIZE_EVENT_CODE_REFERENCED_CLUSTER_MARKED_FREE UINT32_C(3)
+#define EXFAT_RESIZE_EVENT_CODE_BAD_CLUSTER_MARKED_FREE UINT32_C(4)
+#define EXFAT_RESIZE_EVENT_CODE_CLUSTER_ALREADY_REFERENCED UINT32_C(5)
+#define EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID UINT32_C(6)
+#define EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID UINT32_C(7)
+#define EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID UINT32_C(8)
+#define EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_UNSUPPORTED UINT32_C(9)
+#define EXFAT_RESIZE_EVENT_CODE_BITMAP_MISSING UINT32_C(10)
+#define EXFAT_RESIZE_EVENT_CODE_BITMAP_TOO_SHORT UINT32_C(11)
+#define EXFAT_RESIZE_EVENT_CODE_RESERVED_FAT_ENTRY_INVALID UINT32_C(12)
+
+/* FAT_CHAIN_INVALID reasons, carried in values[2]. */
+#define EXFAT_RESIZE_CHAIN_EARLY_END UINT32_C(1)
+#define EXFAT_RESIZE_CHAIN_INVALID_LINK UINT32_C(2)
+#define EXFAT_RESIZE_CHAIN_MISSING_END UINT32_C(3)
+#define EXFAT_RESIZE_CHAIN_LENGTH_LIMIT UINT32_C(4)
+
+/* ALLOCATION_STREAM_INVALID reasons, carried in values[2]. */
+#define EXFAT_RESIZE_STREAM_EMPTY_WITH_CLUSTER UINT32_C(1)
+#define EXFAT_RESIZE_STREAM_INVALID_FIRST_CLUSTER UINT32_C(2)
+#define EXFAT_RESIZE_STREAM_CONTIGUOUS_RANGE UINT32_C(3)
+#define EXFAT_RESIZE_STREAM_LENGTH_EXCEEDS_VOLUME UINT32_C(4)
+
+/* DIRECTORY_ENTRY_INVALID reasons, carried in values[2]. */
+#define EXFAT_RESIZE_DIRECTORY_CHECKSUM UINT32_C(1)
+#define EXFAT_RESIZE_DIRECTORY_SECONDARY_COUNT UINT32_C(2)
+#define EXFAT_RESIZE_DIRECTORY_TRUNCATED_SET UINT32_C(3)
+#define EXFAT_RESIZE_DIRECTORY_ENTRY_ORDER UINT32_C(4)
+#define EXFAT_RESIZE_DIRECTORY_ENTRY_FLAGS UINT32_C(5)
+#define EXFAT_RESIZE_DIRECTORY_VALID_LENGTH UINT32_C(6)
+#define EXFAT_RESIZE_DIRECTORY_LENGTH_MISMATCH UINT32_C(7)
+#define EXFAT_RESIZE_DIRECTORY_TOO_LARGE UINT32_C(8)
+#define EXFAT_RESIZE_DIRECTORY_EMPTY_NO_FAT_CHAIN UINT32_C(9)
+#define EXFAT_RESIZE_DIRECTORY_MISPLACED_SYSTEM_ENTRY UINT32_C(10)
+#define EXFAT_RESIZE_DIRECTORY_DUPLICATE_BITMAP UINT32_C(11)
+#define EXFAT_RESIZE_DIRECTORY_SYSTEM_ALLOCATION UINT32_C(12)
+#define EXFAT_RESIZE_DIRECTORY_VOLUME_GUID UINT32_C(13)
+#define EXFAT_RESIZE_DIRECTORY_UNEXPECTED_ENTRY UINT32_C(14)
+#define EXFAT_RESIZE_DIRECTORY_ALLOCATION_CHANGED UINT32_C(15)
+
 /* Number of code-specific unsigned values carried by each event. */
 #define EXFAT_RESIZE_EVENT_VALUE_COUNT 3
 
@@ -115,6 +157,20 @@ struct exfat_resize_event {
 	/* Code-specific unsigned values; unused elements are zero. */
 	uint64_t values[EXFAT_RESIZE_EVENT_VALUE_COUNT];
 };
+
+/* Returns an immutable English description, or "unknown error" for unknown values. */
+const char *exfat_resize_error_string(enum exfat_resize_error error);
+
+/*
+ * Formats an event as English text without a prefix or newline. A 256-byte buffer
+ * holds every complete message, including its terminating NUL. Smaller buffers
+ * receive a truncated, NUL-terminated message.
+ * event and buffer must be nonnull; capacity must be greater than zero.
+ * Unknown event codes/reasons are rendered numerically. No allocation or I/O;
+ * safe to call from report_event or concurrently. Wording may change between releases.
+ */
+void exfat_resize_format_event(
+    const struct exfat_resize_event *event, char *buffer, size_t capacity);
 
 /*
  * Callback contract

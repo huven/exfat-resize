@@ -6,6 +6,7 @@
 #include "block_device.h"
 #include "directory.h"
 #include "endian.h"
+#include "event.h"
 #include "geometry.h"
 #include "resize_internal.h"
 #include "stream.h"
@@ -122,9 +123,18 @@ enum exfat_resize_error exfat_resize_validate_reserved_fat_entries(
 	 * byte, but require the reserved upper bytes and entry one to have the
 	 * values mandated by the exFAT specification.
 	 */
-	if ((context->fat_entry_zero & UINT32_C(0xffffff00)) != UINT32_C(0xffffff00) ||
-	    entry_one != EXFAT_FAT_END_OF_CHAIN)
+	if ((context->fat_entry_zero & UINT32_C(0xffffff00)) != UINT32_C(0xffffff00)) {
+		exfat_resize_report_event(&context->volume->operation->monitor,
+		    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_RESERVED_FAT_ENTRY_INVALID, 0,
+		    context->fat_entry_zero, 0);
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
+	if (entry_one != EXFAT_FAT_END_OF_CHAIN) {
+		exfat_resize_report_event(&context->volume->operation->monitor,
+		    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_RESERVED_FAT_ENTRY_INVALID, 1,
+		    entry_one, 0);
+		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
 	return EXFAT_RESIZE_SUCCESS;
 }
 
@@ -171,19 +181,44 @@ enum exfat_resize_error exfat_resize_visit_allocation(struct resize_volume *volu
 		    maximum < geometry->cluster_count ? (uint32_t)maximum : geometry->cluster_count;
 	} else {
 		error = exfat_resize_stream_cluster_count(volume->cluster_size, stream, &cluster_count);
+		if (error == EXFAT_RESIZE_OUT_OF_BOUNDS) {
+			exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+			    EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID, stream->first_cluster,
+			    stream->data_length, EXFAT_RESIZE_STREAM_LENGTH_EXCEEDS_VOLUME);
+			return error;
+		}
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
-		if (cluster_count > geometry->cluster_count)
+		if (cluster_count > geometry->cluster_count) {
+			exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+			    EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID, stream->first_cluster,
+			    stream->data_length, EXFAT_RESIZE_STREAM_LENGTH_EXCEEDS_VOLUME);
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
-		if (cluster_count == 0)
-			return stream->first_cluster == 0 ? EXFAT_RESIZE_SUCCESS
-			                                  : EXFAT_RESIZE_INVALID_FILESYSTEM;
+		}
+		if (cluster_count == 0) {
+			if (stream->first_cluster != 0) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+				    EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID, stream->first_cluster,
+				    stream->data_length, EXFAT_RESIZE_STREAM_EMPTY_WITH_CLUSTER);
+				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
+			return EXFAT_RESIZE_SUCCESS;
+		}
 	}
-	if (!exfat_resize_cluster_is_valid(geometry, stream->first_cluster) ||
-	    (stream->no_fat_chain &&
-	        (uint64_t)stream->first_cluster + cluster_count >
-	            (uint64_t)geometry->cluster_count + 2))
+	if (!exfat_resize_cluster_is_valid(geometry, stream->first_cluster)) {
+		exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+		    EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID, stream->first_cluster,
+		    stream->data_length, EXFAT_RESIZE_STREAM_INVALID_FIRST_CLUSTER);
 		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
+	if (stream->no_fat_chain &&
+	    (uint64_t)stream->first_cluster + cluster_count > (uint64_t)geometry->cluster_count + 2) {
+		exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+		    EXFAT_RESIZE_EVENT_CODE_ALLOCATION_STREAM_INVALID, stream->first_cluster,
+		    stream->data_length, EXFAT_RESIZE_STREAM_CONTIGUOUS_RANGE);
+		return EXFAT_RESIZE_INVALID_FILESYSTEM;
+	}
 	for (link.index = 0; link.index < cluster_count; ++link.index) {
 		if (!stream->root_directory) {
 			error = exfat_resize_cluster_step_checkpoint(volume->operation);
@@ -191,6 +226,12 @@ enum exfat_resize_error exfat_resize_visit_allocation(struct resize_volume *volu
 				return error;
 		}
 		error = observer->claim(observer->context, link.cluster);
+		if (error == EXFAT_RESIZE_INVALID_FILESYSTEM) {
+			exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+			    EXFAT_RESIZE_EVENT_CODE_CLUSTER_ALREADY_REFERENCED, link.cluster,
+			    stream->first_cluster, link.index);
+			return error;
+		}
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		if (stream->no_fat_chain) {
@@ -201,11 +242,21 @@ enum exfat_resize_error exfat_resize_visit_allocation(struct resize_volume *volu
 				return error;
 		}
 		if (!stream->root_directory && link.index + 1 == cluster_count) {
-			if (link.next != EXFAT_FAT_END_OF_CHAIN)
+			if (link.next != EXFAT_FAT_END_OF_CHAIN) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID,
+				    link.cluster, link.next, EXFAT_RESIZE_CHAIN_MISSING_END);
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
 		} else if (link.next != EXFAT_FAT_END_OF_CHAIN || !stream->root_directory) {
-			if (!exfat_resize_cluster_is_valid(geometry, link.next))
+			if (!exfat_resize_cluster_is_valid(geometry, link.next)) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID,
+				    link.cluster, link.next,
+				    link.next == EXFAT_FAT_END_OF_CHAIN ? EXFAT_RESIZE_CHAIN_EARLY_END
+				                                        : EXFAT_RESIZE_CHAIN_INVALID_LINK);
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
 		}
 		if (observer->record != NULL) {
 			error = observer->record(observer->context, stream, &link);
@@ -217,6 +268,9 @@ enum exfat_resize_error exfat_resize_visit_allocation(struct resize_volume *volu
 		link.previous = link.cluster;
 		link.cluster = link.next;
 	}
+	exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+	    EXFAT_RESIZE_EVENT_CODE_FAT_CHAIN_INVALID, link.previous, link.cluster,
+	    EXFAT_RESIZE_CHAIN_LENGTH_LIMIT);
 	return EXFAT_RESIZE_INVALID_FILESYSTEM;
 }
 
@@ -255,20 +309,30 @@ enum exfat_resize_error exfat_resize_reconcile_allocation(struct resize_volume *
 		allocated = (reader.current_byte & (1u << reader.bit_in_byte)) != 0;
 		reader.bit_in_byte = (reader.bit_in_byte + 1) % 8;
 		if (claimed) {
-			if (!allocated)
+			if (!allocated) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+				    EXFAT_RESIZE_EVENT_CODE_REFERENCED_CLUSTER_MARKED_FREE, cluster, 0, 0);
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
 			continue;
 		}
 		error = chain->next(chain->context, cluster, &fat_value);
 		if (error != EXFAT_RESIZE_SUCCESS)
 			return error;
 		if (fat_value == EXFAT_FAT_BAD_CLUSTER) {
-			if (!allocated)
+			if (!allocated) {
+				exfat_resize_report_event(&volume->operation->monitor,
+				    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_BAD_CLUSTER_MARKED_FREE,
+				    cluster, 0, 0);
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+			}
 			error = observer->bad_cluster(observer->context, cluster);
 			if (error != EXFAT_RESIZE_SUCCESS)
 				return error;
 		} else if (allocated) {
+			exfat_resize_report_event(&volume->operation->monitor, EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+			    EXFAT_RESIZE_EVENT_CODE_UNREFERENCED_CLUSTER, cluster, fat_value, 0);
 			return EXFAT_RESIZE_INVALID_FILESYSTEM;
 		}
 	}
