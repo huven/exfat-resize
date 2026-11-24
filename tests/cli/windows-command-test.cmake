@@ -62,7 +62,7 @@ if(TEST_CASE STREQUAL "help")
             "Ctrl+C and Ctrl+Break request cooperative cancellation at the next safe boundary"
             "Read the safety requirements"
             "README.md distributed with exfat-resize"
-            "https://github.com/huven/exfat-resize#safety"
+            "https://github.com/huven/exfat-resize#before-you-resize"
             "drive letter such as E:"
             "--grow-partition"
             "Grow a basic partition to explicit SIZE when needed"

@@ -101,7 +101,7 @@ static void print_help(void)
 	       "%s"
 	       "  Read the safety requirements, supported-filesystem limitations, and\n"
 	       "  recovery instructions in README.md distributed with exfat-resize or at:\n"
-	       "    https://github.com/huven/exfat-resize#safety\n"
+	       "    https://github.com/huven/exfat-resize#before-you-resize\n"
 	       "%s",
 	    usage, introduction, target_name, target_description, platform_options, platform_safety,
 	    documentation_lead, platform_note);
