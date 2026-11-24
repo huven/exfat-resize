@@ -312,6 +312,82 @@ static void test_slack_and_rounding(void)
 	CHECK(exfat_fixture_destroy(&f) == 0);
 }
 
+static uint16_t entry_set_checksum(const unsigned char entries[96])
+{
+	uint16_t checksum = 0;
+	size_t index;
+
+	for (index = 0; index < 96; ++index) {
+		if (index != 2 && index != 3)
+			checksum = (uint16_t)(((checksum << 15) | (checksum >> 1)) + entries[index]);
+	}
+	return checksum;
+}
+
+static void test_empty_no_fat_chain_file(uint32_t spc)
+{
+	struct exfat_fixture f;
+	struct test_allocator allocator = { 0 };
+	struct exfat_resize_allocator callbacks = test_allocator_callbacks(&allocator);
+	struct exfat_resize_geometry geometry;
+	unsigned char boot[512];
+	unsigned char directory[512];
+	unsigned char expected[96];
+	enum exfat_resize_stage stage;
+	enum exfat_resize_error error;
+	uint32_t child = 0;
+	uint16_t stored_checksum = 0;
+
+	CHECK(shrink_fixture_initialize(&f, spc) == 0);
+	CHECK(exfat_fixture_read_sector(&f, exfat_fixture_cluster_sector(&f.geometry, 8800), directory,
+	          sizeof(directory)) == 0);
+	CHECK(directory[0] == 1 && directory[32] == 1 && directory[64] == 1);
+	memset(directory, 0, sizeof(expected));
+	directory[0] = 0x85;
+	directory[1] = 2;
+	directory[4] = 0x20;
+	directory[8] = 0x51;
+	directory[32] = 0xc0;
+	directory[33] = 3;
+	directory[35] = 1;
+	directory[64] = 0xc1;
+	directory[66] = 'E';
+	CHECK(exfat_resize_store_le16(directory, sizeof(expected), 2, entry_set_checksum(directory)) ==
+	    EXFAT_RESIZE_SUCCESS);
+	memcpy(expected, directory, sizeof(expected));
+	CHECK(f.memory.device.write(f.memory.device.context,
+	          exfat_fixture_cluster_sector(&f.geometry, 8800), 1, directory) == 0);
+	memory_block_device_clear_operations(&f.memory);
+
+	error = exfat_fixture_resize(&f.memory.device, shrink_fixture_target(&f), &callbacks, &stage);
+	CHECK(error == EXFAT_RESIZE_SUCCESS);
+	CHECK(stage == EXFAT_RESIZE_STAGE_COMPLETED);
+	CHECK(test_allocator_is_clean(&allocator));
+	if (error != EXFAT_RESIZE_SUCCESS) {
+		CHECK(exfat_fixture_destroy(&f) == 0);
+		return;
+	}
+	CHECK(memory_block_device_crash(&f.memory) == 0);
+	CHECK(shrink_fixture_verify(&f, 2000) == 0);
+	CHECK(exfat_resize_read_boot_regions(&f.memory.device, boot, sizeof(boot), &geometry) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(exfat_fixture_read_sector(&f,
+	          exfat_fixture_cluster_sector(&geometry, geometry.root_directory_cluster), directory,
+	          sizeof(directory)) == 0);
+	CHECK(exfat_resize_load_le32(directory, sizeof(directory), 160 + 52, &child) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(child >= 2 && child < 2002);
+	CHECK(exfat_fixture_read_sector(&f, exfat_fixture_cluster_sector(&geometry, child), directory,
+	          sizeof(directory)) == 0);
+	/* Moving the containing directory does not rewrite this unallocated file entry. */
+	CHECK(memcmp(directory, expected, sizeof(expected)) == 0);
+	CHECK(exfat_resize_load_le16(directory, sizeof(expected), 2, &stored_checksum) ==
+	    EXFAT_RESIZE_SUCCESS);
+	CHECK(stored_checksum == entry_set_checksum(directory));
+	validate_allocation(&f);
+	CHECK(exfat_fixture_destroy(&f) == 0);
+}
+
 static void test_growing_workspace(void)
 {
 	size_t attempt;
@@ -372,6 +448,8 @@ int main(void)
 	(void)test_success(4);
 	test_preflight_failures(allocations);
 	test_slack_and_rounding();
+	test_empty_no_fat_chain_file(1);
+	test_empty_no_fat_chain_file(4);
 	test_newly_reserved_bitmap_bits(1);
 	test_newly_reserved_bitmap_bits(4);
 	test_existing_reserved_bitmap_bits(1, 0);

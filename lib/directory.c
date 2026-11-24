@@ -372,11 +372,16 @@ static enum exfat_resize_error scan_file_entry_set(struct resize_directory *cont
 				return EXFAT_RESIZE_INVALID_FILESYSTEM;
 			}
 			if (source_stream.no_fat_chain && source_stream.data_length == 0) {
-				exfat_resize_report_event(&context->volume->operation->monitor,
-				    EXFAT_RESIZE_EVENT_LEVEL_ERROR, EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID,
-				    owner->directory_id, owner->entry_offset,
-				    EXFAT_RESIZE_DIRECTORY_EMPTY_NO_FAT_CHAIN);
-				return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				if (is_directory || source_stream.first_cluster != 0 || valid_data_length != 0) {
+					exfat_resize_report_event(&context->volume->operation->monitor,
+					    EXFAT_RESIZE_EVENT_LEVEL_ERROR,
+					    EXFAT_RESIZE_EVENT_CODE_DIRECTORY_ENTRY_INVALID, owner->directory_id,
+					    owner->entry_offset, EXFAT_RESIZE_DIRECTORY_EMPTY_NO_FAT_CHAIN);
+					return EXFAT_RESIZE_INVALID_FILESYSTEM;
+				}
+				/* macOS can retain NoFatChain after truncating a regular file to zero.
+				 * Normalize its allocation view so entry rewrites clear the flag. */
+				source_stream.no_fat_chain = 0;
 			}
 			if (valid_data_length > source_stream.data_length) {
 				exfat_resize_report_event(&context->volume->operation->monitor,

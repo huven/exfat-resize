@@ -78,7 +78,7 @@ The installation guide also covers custom prefixes and uninstalling.
 
 On Linux, `fsck.exfat` is supplied by exfatprogs. The examples use `-n` to check
 without making repairs. Windows `/x` dismounts the volume and `/f` repairs errors.
-See [filesystem requirements](docs/CLI.md#filesystem-compatibility) for supported
+See [filesystem requirements](docs/LIBRARY.md#filesystem-compatibility) for supported
 exFAT formats and other restrictions.
 For image files, follow [image preparation and checking](docs/CLI.md#checking-an-image)
 instead of the partition commands above.

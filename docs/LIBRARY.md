@@ -8,13 +8,40 @@ and MSVC on Windows.
 
 Before integrating the library, read the operational [safety
 requirements](CLI.md#safety), [filesystem compatibility
-requirements](CLI.md#filesystem-compatibility), and [transaction and
+requirements](#filesystem-compatibility), and [transaction and
 recovery guarantees](TRANSACTION.md). The library is not a filesystem checker,
 partitioning library, journal, rollback mechanism, or repair facility. The
 caller must provide exclusive access to the filesystem and a verified backup.
 
 The public interface is declared in `<exfat_resize.h>`. Headers under `lib/`
 are private implementation details.
+
+## Filesystem compatibility
+
+The filesystem must meet these prerequisites:
+
+- Conform to exFAT revision 1.00 with a single FAT; TexFAT/two-FAT volumes are
+  not supported.
+- Be clean and not have the exFAT media-failure flag set.
+- When accessed through a block device, have a filesystem sector size that is
+  a multiple of the block device's sector size.
+- Not contain Vendor Allocation directory entries, whose allocation semantics
+  cannot be interpreted without recognizing their vendor GUID.
+- For growth, gain enough clusters to hold the replacement allocation bitmap
+  in the newly added tail space.
+- For shrink, fit all current allocations, including the full current bitmap,
+  below the new heap boundary. The bitmap is shortened only at final commit;
+  exceptionally tight targets can therefore be rejected even when a smaller
+  final bitmap would fit.
+- For growth, not have a source cluster recorded as bad where the expanded FAT
+  would overlap it. Bad clusters that remain in the Cluster Heap at the same
+  physical location are preserved.
+
+As a compatibility exception, an empty regular file may have `NoFatChain` set
+when `FirstCluster`, `ValidDataLength`, and `DataLength` are all zero. macOS can
+leave this flag set after truncating a file to zero bytes. If resizing rewrites
+the file's entry set, it clears the flag and updates the checksum. Entry sets
+that do not need rewriting are preserved.
 
 ## Calling `exfat_resize`
 
