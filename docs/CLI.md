@@ -117,11 +117,15 @@ appropriate platform tool. See [partition resizing](PARTITIONING.md).
 Physical-disk paths such as `\\.\PhysicalDrive0` and other Windows device
 namespace forms are not supported as command targets.
 
-Run the CLI from the extracted release directory. An image file must already
-have the desired length and is presented to the filesystem as a device with
-512-byte sectors. Resizing an image normally does not require Administrator
-privileges, but the account running the command must have exclusive read/write
-access to it:
+Run the CLI from the extracted release directory. For growth, the image file
+must already be large enough for the desired filesystem size. For shrink, keep
+its original length until the filesystem shrink succeeds, then truncate it to
+the exact byte count reported by the CLI. Follow [Windows images](#windows-images)
+for the complete steps.
+
+An image is presented to the filesystem as a device with 512-byte sectors.
+Resizing an image normally does not require Administrator privileges, but the
+account running the command must have exclusive read/write access to it:
 
 ```powershell
 .\exfat-resize.exe C:\path\to\image.exfat
