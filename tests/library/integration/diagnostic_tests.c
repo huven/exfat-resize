@@ -137,7 +137,11 @@ enum mutation {
 	VALID_LENGTH,
 	DIRECTORY_LENGTH,
 	DIRECTORY_TOO_LARGE,
-	EMPTY_NO_FAT_CHAIN,
+	EMPTY_NO_FAT_CHAIN_WITH_CLUSTER,
+	EMPTY_NO_FAT_CHAIN_VALID_LENGTH,
+	EMPTY_DIRECTORY_NO_FAT_CHAIN,
+	EMPTY_NO_FAT_CHAIN_FLAGS,
+	EMPTY_NO_FAT_CHAIN_CHECKSUM,
 	MISPLACED_SYSTEM_ENTRY,
 	TRUNCATED_SET,
 	UNSUPPORTED_ENTRY,
@@ -286,11 +290,33 @@ static struct expected_failure mutate(struct exfat_fixture *fixture, enum mutati
 		update_checksum(directory);
 		expected.values[2] = EXFAT_RESIZE_DIRECTORY_TOO_LARGE;
 		break;
-	case EMPTY_NO_FAT_CHAIN:
+	case EMPTY_NO_FAT_CHAIN_WITH_CLUSTER:
 		CHECK(exfat_resize_store_le64(file, 96, 40, 0) == EXFAT_RESIZE_SUCCESS);
 		CHECK(exfat_resize_store_le64(file, 96, 56, 0) == EXFAT_RESIZE_SUCCESS);
 		update_checksum(file);
 		expected.values[2] = EXFAT_RESIZE_DIRECTORY_EMPTY_NO_FAT_CHAIN;
+		break;
+	case EMPTY_NO_FAT_CHAIN_VALID_LENGTH:
+	case EMPTY_DIRECTORY_NO_FAT_CHAIN:
+	case EMPTY_NO_FAT_CHAIN_FLAGS:
+	case EMPTY_NO_FAT_CHAIN_CHECKSUM:
+		CHECK(set_bit(fixture, 5, 0) == 0);
+		CHECK(exfat_resize_store_le32(file, 96, 52, 0) == EXFAT_RESIZE_SUCCESS);
+		CHECK(exfat_resize_store_le64(file, 96, 40,
+		          mutation == EMPTY_NO_FAT_CHAIN_VALID_LENGTH ? 1 : 0) == EXFAT_RESIZE_SUCCESS);
+		CHECK(exfat_resize_store_le64(file, 96, 56, 0) == EXFAT_RESIZE_SUCCESS);
+		if (mutation == EMPTY_DIRECTORY_NO_FAT_CHAIN)
+			file[4] |= 0x10;
+		if (mutation == EMPTY_NO_FAT_CHAIN_FLAGS)
+			file[33] = 2;
+		update_checksum(file);
+		expected.values[2] = EXFAT_RESIZE_DIRECTORY_EMPTY_NO_FAT_CHAIN;
+		if (mutation == EMPTY_NO_FAT_CHAIN_FLAGS)
+			expected.values[2] = EXFAT_RESIZE_DIRECTORY_ENTRY_FLAGS;
+		if (mutation == EMPTY_NO_FAT_CHAIN_CHECKSUM) {
+			file[2] ^= 1;
+			expected.values[2] = EXFAT_RESIZE_DIRECTORY_CHECKSUM;
+		}
 		break;
 	case MISPLACED_SYSTEM_ENTRY: {
 		unsigned char child[SECTOR_SIZE] = { 0 };

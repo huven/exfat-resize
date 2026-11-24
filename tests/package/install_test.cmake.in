@@ -199,13 +199,12 @@ endforeach()
 file(READ "${cli_document}" cli_contents)
 foreach(required_text
         "## Safety"
-        "## Filesystem compatibility"
+        "LIBRARY.md#filesystem-compatibility"
         "## Recovery after failure"
         "--grow-partition"
         "--shrink-partition"
         "verified backup"
         "130"
-        "Vendor Allocation"
 )
     string(FIND "${cli_contents}" "${required_text}" required_text_offset)
     if(required_text_offset EQUAL -1)
@@ -232,6 +231,8 @@ endforeach()
 file(READ "${library_document}" library_contents)
 foreach(required_text
         "# C library reference"
+        "## Filesystem compatibility"
+        "Vendor Allocation"
         "## Block-device contract"
         "## Allocator contract"
         "## Operation monitor"

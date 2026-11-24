@@ -13,7 +13,7 @@ grow and shrink workflows, start with the [README](../README.md), including
 - [Shrinking the containing partition on Windows](#shrinking-the-containing-partition)
 - [Cancellation](#cancellation)
 - [Recovery after failure](#recovery-after-failure)
-- [Filesystem compatibility](#filesystem-compatibility)
+- [Filesystem compatibility](LIBRARY.md#filesystem-compatibility)
 
 ## Command syntax
 
@@ -372,7 +372,7 @@ Before resizing, run an appropriate exFAT filesystem checker while the
 filesystem is unmounted and ensure the check completes successfully.
 `exfat-resize` is not a general filesystem checker; it validates only the
 invariants needed for the resize. The filesystem must also meet the
-[compatibility requirements](#filesystem-compatibility).
+[compatibility requirements](LIBRARY.md#filesystem-compatibility).
 
 Prevent all other access for the complete operation. On macOS and Linux, keep
 the filesystem unmounted. For a Windows logical volume, close all files and
@@ -548,27 +548,6 @@ partition-specific guidance under
 [`--grow-partition`](#growing-the-containing-partition) or
 [`--shrink-partition`](#shrinking-the-containing-partition). Never reduce
 backing storage as a recovery step after an unsuccessful resize.
-
-## Filesystem compatibility
-
-The filesystem must meet these prerequisites:
-
-- Conform to exFAT revision 1.00 with a single FAT; TexFAT/two-FAT volumes are
-  not supported.
-- Be clean and not have the exFAT media-failure flag set.
-- When accessed through a block device, have a filesystem sector size that is
-  a multiple of the block device's sector size.
-- Not contain Vendor Allocation directory entries, whose allocation semantics
-  cannot be interpreted without recognizing their vendor GUID.
-- For growth, gain enough clusters to hold the replacement allocation bitmap
-  in the newly added tail space.
-- For shrink, fit all current allocations, including the full current bitmap,
-  below the new heap boundary. The bitmap is shortened only at final commit;
-  exceptionally tight targets can therefore be rejected even when a smaller
-  final bitmap would fit.
-- For growth, not have a source cluster recorded as bad where the expanded FAT
-  would overlap it. Bad clusters that remain in the Cluster Heap at the same
-  physical location are preserved.
 
 [windows-grow-partition]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdddisk/ni-ntdddisk-ioctl_disk_grow_partition
 [windows-set-layout]: https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-ioctl_disk_set_drive_layout_ex
